@@ -365,13 +365,19 @@ python run_recording.py --recording recordings/test_site.example.json --values d
 # 1) サイトを配信（別ターミナル。test_site をルートに配信）
 cd test_site
 python -m http.server 8000      #  → 練習サイト: http://localhost:8000/edi/index.html （demo / password123）
+```
 
+```powershell
 # 2) デモ資格情報を環境変数に（録画は {{SECRET:...}} を使うため実値はここで補完）
 $env:MY_USERNAME="demo"; $env:MY_PASSWORD="password123"
+```
 
+```powershell
 # 3-A) 直接入力版（年月を直接入力 → 検索）: iframe 横断の確認
 python run_recording.py --recording recordings/edi_practice_direct.json --values data/edi_practice_values.json --engine playwright --browser edge --no-headless
+```
 
+```powershell
 # 3-B) ポップアップ版（参照 → 別ウィンドウのカレンダーで 05月 → 検索）: iframe＋別ウィンドウの確認
 python run_recording.py --recording recordings/edi_practice_popup.json --values data/edi_practice_values.json --engine playwright --browser edge --no-headless
 ```
