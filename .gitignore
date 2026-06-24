@@ -1,6 +1,32 @@
-.env
-output/
+# Python
 __pycache__/
 *.pyc
 .venv/
 venv/
+
+# 秘密情報・実行時生成物
+.env
+output/
+
+# === 公開しないもの（社内URL・実ID・実データを含みうる） ===
+
+# 実画面のスクリーンショット類（このプロジェクトの正規の出力は output/ に入る）
+*.png
+*.jpg
+*.jpeg
+*.gif
+# もしリポジトリで配布したい画像があれば、次の形で個別に戻す:
+#   !docs/sample.png
+
+# Chrome Recorder の生エクスポート（既定名 "Recording*.json"）はどこに置いても無視
+Recording*.json
+
+# 実環境の録画 JSON（社内 URL 等を含むため既定で無視）。
+# 公開してよい「練習用・サンプル」だけを明示的に追跡対象へ戻す。
+recordings/*.json
+!recordings/test_site.example.json
+!recordings/edi_practice_direct.json
+!recordings/edi_practice_popup.json
+
+# 実環境用の値ファイル（社内固有の値が入りうる）。example はサンプルなので追跡する。
+data/edi_values.json
