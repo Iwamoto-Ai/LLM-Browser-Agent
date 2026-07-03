@@ -6,23 +6,23 @@
 [![MCP](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://modelcontextprotocol.io/)
 [![LLM](https://img.shields.io/badge/LLM-Claude_%7C_Ollama-orange.svg)](https://ollama.com/)
 
-ブラウザを操作する DOM（Document Object Model）ベースの自動化エージェント。Google Chrome Recorder対応。**ログイン・検索・スクリーンショット保存**を
+ブラウザを操作する DOM（Document Object Model）ベースの自動化エージェント。ブラウザ操作を録画し再生可能（Google Chrome Recorder使用)　**ログイン・検索・スクショ保存**を
 自然言語の指示もできる。**Microsoft Edge（既定）/ Google Chrome 切替**、**WSL 不要のネイティブ Windows 11** 対応。
 LLM（頭脳）は **クラウド（Anthropic API）** でも **ローカル（Ollama・API キー不要）** でも動く。
 
 > このツールは「画面を画像で見て操作する」方式ではなく、ページ内の**操作可能な要素に番号を振り、その番号で操作する**
-> DOM ベースの方式です。これにより、画像認識を持たないローカルの軽量 LLM でも安定して動かせます。
+> DOM ベースの方式で実現したことにより、画像認識を持たないローカルの軽量 LLM でも安定して動作可能。
 
 ---
 
 ## ✨ 特徴（できること）
-
+- **無料ソフトウェアでブラウザ操作自動化**: PowerAutomate不要。API キー不要のローカル LLM でも使える。
 - **業務フローの自動化**: ログイン → メニュー操作 → 複数項目の入力 → 登録 → 完了画面のスクショ、を自然言語で。
-- **サイトごとのテンプレート運用**: 手順（テンプレート）と数値（データ）を分離し、同じ手順を別データで繰り返し実行。
+- **サイトごとのテンプレート運用**: 手順（テンプレート）と数値（データ）を分離し、同じ手順を別データで繰り返し実行可能。
 - **3 つの実行形態**: 単発 CLI / テンプレート実行 / MCP サーバー（Claude Desktop・OpenClaw・Hermes Agent から会話操作）。
 - **2 つの LLM バックエンド**: クラウド（Anthropic API）/ ローカル（Ollama・API キー不要・完全ローカル）。
 - **2 つのブラウザエンジン**: Selenium（既定）/ Playwright（auto-waiting で安定、フルページスクショ）。
-- **Chrome Recorder の録画を決定論リプレイ**: 拡張機能不要で記録した操作（JSON）を LLM なしで確実に再生（複雑サイト向け）。
+- **Google Chrome Recorder の録画を決定論リプレイ**: ブラウザ拡張機能不要でブラウザの操作を記録したファイル（JSON）を LLM なしで確実に再生（複雑サイト向け）。
 - **秘密情報をモデルに渡さない**: パスワードは `{{SECRET:NAME}}` で参照し、実値は実行時にローカルで補完。
 - **証跡に強いスクショ**: 保存名に自動で日時 `_YYYYMMDD_HHMMSS` を付与（上書きされない）。
 
@@ -91,7 +91,7 @@ copy .env.example .env   # ANTHROPIC_API_KEY を記入
 
 - **テンプレート** `templates/<site>.yaml` … ログイン手順・メニュー操作・入力項目。サイトごとに 1 つ。
 - **データ** `data/<run>.json` … 実際に入れる数値。実行ごとに差し替え。値は `{{key}}` で参照。
-- パスワード等は `{{SECRET:NAME}}` のまま残り、実行時に環境変数から補完される（プロンプトに実値は載らない）。
+- パスワード等は `{{SECRET:NAME}}` のまま残り、実行時に環境変数から補完される（プロンプトに実値は載らない）ので安心セキュリティ。
 
 ```powershell
 # まず生成プロンプトの確認（ブラウザを起動しない）
@@ -191,8 +191,8 @@ mcp_servers:
     command: "python"
     args: ["/path/to/LLM-Browser-Agent/mcp_server.py"]
     env:
-      BROWSER_AGENT_ENGINE: "selenium"   # playwright も可
-      BROWSER_AGENT_BROWSER: "edge"    # chrome も可
+      BROWSER_AGENT_ENGINE: "selenium"   # selenium / playwright
+      BROWSER_AGENT_BROWSER: "edge"    #  edge / chrome 
       BROWSER_AGENT_HEADLESS: "0"
       BROWSER_AGENT_OUTPUT: "/path/to/output"   # スクショ保存場所
       MY_USERNAME: "your-login-id"
@@ -247,7 +247,7 @@ python agent_ollama.py --task "..." --model qwen3:14b --browser edge --no-headle
   ブラウザ本体の DL は不要（`pip install playwright` だけでよい・社内向き）。
 - **速度より安定性**: LLM 駆動では全体時間の支配項は LLM 推論なので、エンジン間の速度差は体感しにくい。
   Playwright の利点は速さより「待機の確実さ」。
-- **MCP との両立**: Playwright の同期 API は asyncio 上で動かせないが、本実装は Playwright を**専用スレッド**で
+- **MCP との両立**: Playwright の同期 API は asyncio（非同期） 上で動かせないが、本実装は Playwright を**専用スレッド**で
   駆動し同期インターフェースで包むため、MCP サーバー（`BROWSER_AGENT_ENGINE=playwright`）でも動く。
 
 ```powershell
@@ -285,19 +285,19 @@ python run_template.py --template templates/test_site.yaml --values data/test_va
 ```
 
 `selftest.py` は LLM もネットワークも使わず browser 層だけでサイトを操作するので、**まずこれが通るか**で
-「ブラウザ操作の配管」と「LLM の判断」を切り分けられる。成功すると `output/test_selftest_YYYYMMDD_HHMMSS.png` が保存される。
+「ブラウザ操作の配管」と「LLM の判断」を切り分けられる。成功するとスクショ`output/test_selftest_YYYYMMDD_HHMMSS.png` が保存される。
 
 ---
 
-## 🎥 Chrome Recorder で録画 → 決定論リプレイ（拡張機能不要）
+## 🎥 Google Chrome の Recorder でブラウザ操作を録画 → 決定論リプレイ（拡張機能不要）
 
 複雑なメニュー・項目数が多いサイトでは、LLM に毎回判断させるより、**人が一度操作して録画した手順を
 そのまま再生する**ほうが確実。Chrome 内の DevTools には **Recorder** が標準で内蔵されており、
 記録した操作を **JSON でエクスポート**できる。このツールはその JSON を読み込み、**LLM なしで決定論的に再生**する。
 
 **⚠️ 注意**
-> Chrome Recorder の「Playwright 形式エクスポート」は Chrome 拡張機能が必要となる（社内では使えないことが多い）。
-> **「JSON file」形式**でエクスポートは標準で可能（Chrome 101 以降）。本ツールはこの JSON を直接再生する。
+> Chrome Recorder の「Playwright 形式エクスポート」を使う場合は Chrome 拡張機能が必要となる（社内では使えないことが多い）
+> 本ツールは標準エクスポート形式の**「JSON file」形式**を直接再生するので Chrome 拡張機能不要。（Chrome 101 以降）
 > 録画を Chrome で行い再生を Edge で行う場合でも基本は同じDOMなので動きますが、もし対象サイトがブラウザ判定で表示内容を変えるようなら、再生も Chrome にすること。
 
 **🎥 手順**
@@ -307,7 +307,7 @@ python run_template.py --template templates/test_site.yaml --values data/test_va
    1番下の「**Recorder**」をクリック。
 3. **Recorder** パネルが開くので、中央の「**Create recording**」をクリック。
 4. 録画名などを指定する（デフォルトのままでも良い）。
-5. 下のほうに赤い〇ボタン「Start recording」をクリックすると録画が始まり、もう一度〇ボタンをクリックすると「End recording」となる。
+5. 下のほうに赤い〇ボタン「Start recording」をクリックすると録画が始まり、もう一度〇ボタンをクリックすると「End recording」となり録画が停止する。
 6. 録画ファイル名の右に「↑インポート」と「↓エクスポート」があるので「↓エクスポート」をクリック。表示されたメニューの「JSON」を選択し「**JSON file**形式」でエクスポートする。　
 7. エクスポートしたJSONファイルを`recordings/<name>.json` に保存。
 8. エクスポートした JSON の `change` ステップの `value` を、可変の数値は `{{key}}`、ログインID・パスワードは
@@ -316,7 +316,8 @@ python run_template.py --template templates/test_site.yaml --values data/test_va
    > **⚠️ 重要（セキュリティ）**: 録画直後の JSON には、録画中に入力した**実値（IDやパスワード）がそのまま残る**。
    > 保存・コミット・共有の前に、必ず `{{SECRET:NAME}}`（秘密）/ `{{key}}`（可変データ）へ置き換えること。
    > 実値は `.env` や環境変数（`MY_USERNAME` / `MY_PASSWORD` など）に置き、JSON には残さない。
-10. 再生する:
+
+9. 再生する:
 
 ```powershell
 # browser edge
