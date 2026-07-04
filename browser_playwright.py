@@ -166,16 +166,24 @@ def _pw_locator(ctx, sel: str):
 
 
 def _resolve_frame(page, frame_path):
-    """Recorder の frame:[i, j, ...]（子フレームの順番インデックス列）を Playwright の Frame に変換。
-    解決できない場合は None。"""
+    """録画の frame 指定を Playwright の Frame に変換する。解決不能なら None。
+      * None            → メインフレーム
+      * "content" 等の文字列 → フレーム名（name 属性）で特定（Codegen 由来の指定に対応）
+      * [i, j, ...]     → 子フレームの順番インデックス列（Chrome Recorder 由来）"""
+    if frame_path is None or frame_path == "":
+        return page.main_frame
+    if isinstance(frame_path, str):
+        for fr in page.frames:
+            if fr.name == frame_path:
+                return fr
+        return None
     fr = page.main_frame
-    if frame_path:
-        for idx in frame_path:
-            kids = fr.child_frames
-            if idx < len(kids):
-                fr = kids[idx]
-            else:
-                return None
+    for idx in frame_path:
+        kids = fr.child_frames
+        if idx < len(kids):
+            fr = kids[idx]
+        else:
+            return None
     return fr
 
 

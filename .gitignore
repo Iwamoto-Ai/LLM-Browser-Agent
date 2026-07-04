@@ -27,6 +27,7 @@ recordings/*.json
 !recordings/test_site.example.json
 !recordings/edi_practice_direct.json
 !recordings/edi_practice_popup.json
+!recordings/edi_practice_named.json
 
 # 実環境用の値ファイル（社内固有の値が入りうる）。example はサンプルなので追跡する。
 data/edi_values.json

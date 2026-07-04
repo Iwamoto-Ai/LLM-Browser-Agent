@@ -213,13 +213,16 @@ class Browser:
         return (By.CSS_SELECTOR, sel)
 
     def _try_in_frame(self, frame_path, selectors, action):
-        """frame_path（子フレーム順インデックス列）に降りて、候補セレクタで action を試す。
-        成功したセレクタ文字列を返す。見つからなければ None。"""
+        """frame 指定に降りて、候補セレクタで action を試す。成功したセレクタ文字列を返す。
+        frame_path は None（最上位）／"content" 等の名前（name か id）／[i, j, ...]（インデックス列）。"""
         try:
             self.driver.switch_to.default_content()
             if frame_path:
-                for idx in frame_path:
-                    self.driver.switch_to.frame(idx)
+                if isinstance(frame_path, str):
+                    self.driver.switch_to.frame(frame_path)  # name か id で切替
+                else:
+                    for idx in frame_path:
+                        self.driver.switch_to.frame(idx)
         except Exception:
             self.driver.switch_to.default_content()
             return None

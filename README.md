@@ -6,23 +6,23 @@
 [![MCP](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://modelcontextprotocol.io/)
 [![LLM](https://img.shields.io/badge/LLM-Claude_%7C_Ollama-orange.svg)](https://ollama.com/)
 
-ブラウザを操作する DOM（Document Object Model）ベースの自律エージェント。Chrome Recorder対応。**ログイン・検索・スクリーンショット保存**を
-自然言語の指示もできる。**Microsoft Edge（既定）/ Chrome 切替**、**WSL 不要のネイティブ Windows 11** 対応。
+ブラウザを操作する DOM（Document Object Model）ベースの自動化エージェント。ブラウザ操作を録画し再生可能（Google Chrome Recorder使用)　**ログイン・検索・スクショ保存**を
+自然言語の指示もできる。**Microsoft Edge（既定）/ Google Chrome 切替**、**WSL 不要のネイティブ Windows 11** 対応。
 LLM（頭脳）は **クラウド（Anthropic API）** でも **ローカル（Ollama・API キー不要）** でも動く。
 
 > このツールは「画面を画像で見て操作する」方式ではなく、ページ内の**操作可能な要素に番号を振り、その番号で操作する**
-> DOM ベースの方式です。これにより、画像認識を持たないローカルの軽量 LLM でも安定して動かせます。
+> DOM（Document Object Model）ベースの方式で実現したことにより、画像認識を持たないローカルの軽量 LLM でも安定して動作可能。
 
 ---
 
 ## ✨ 特徴（できること）
-
+- **無料ソフトウェアでブラウザ操作自動化**: PowerAutomate不要。API キー不要のローカル LLM でも使える。
 - **業務フローの自動化**: ログイン → メニュー操作 → 複数項目の入力 → 登録 → 完了画面のスクショ、を自然言語で。
-- **サイトごとのテンプレート運用**: 手順（テンプレート）と数値（データ）を分離し、同じ手順を別データで繰り返し実行。
+- **サイトごとのテンプレート運用**: 手順（テンプレート）と数値（データ）を分離し、同じ手順を別データで繰り返し実行可能。
 - **3 つの実行形態**: 単発 CLI / テンプレート実行 / MCP サーバー（Claude Desktop・OpenClaw・Hermes Agent から会話操作）。
 - **2 つの LLM バックエンド**: クラウド（Anthropic API）/ ローカル（Ollama・API キー不要・完全ローカル）。
 - **2 つのブラウザエンジン**: Selenium（既定）/ Playwright（auto-waiting で安定、フルページスクショ）。
-- **Chrome Recorder の録画を決定論リプレイ**: 拡張機能不要で記録した操作（JSON）を LLM なしで確実に再生（複雑サイト向け）。
+- **Google Chrome Recorder の録画を決定論リプレイ**: ブラウザ拡張機能不要でブラウザの操作を記録したファイル（JSON）を LLM なしで確実に再生（複雑サイト向け）。
 - **秘密情報をモデルに渡さない**: パスワードは `{{SECRET:NAME}}` で参照し、実値は実行時にローカルで補完。
 - **証跡に強いスクショ**: 保存名に自動で日時 `_YYYYMMDD_HHMMSS` を付与（上書きされない）。
 
@@ -67,7 +67,7 @@ LLM（頭脳）は **クラウド（Anthropic API）** でも **ローカル（O
 ## 🛠️ セットアップ（ネイティブ Windows 11 / WSL 不要）
 
 1. **Python 3.10+** … python.org のインストーラ（"Add python.exe to PATH" にチェック）
-2. **Microsoft Edge** … Windows 11 標準（既定ブラウザ）。Chrome を使う場合のみ別途インストール
+2. **Microsoft Edge** … Windows 11 標準（既定ブラウザ）。Google Chrome を使う場合は別途インストール
 3. WebDriver（msedgedriver / chromedriver）は **Selenium Manager が自動取得**（手動導入不要）
 4. **（ローカル LLM を使う場合）Ollama** … <https://ollama.com/> から導入し `ollama pull qwen3:14b`
 5. **（Playwright を使う場合）** … `pip install playwright`。`channel=msedge` で導入済み Edge を使うため `playwright install` は不要
@@ -91,7 +91,7 @@ copy .env.example .env   # ANTHROPIC_API_KEY を記入
 
 - **テンプレート** `templates/<site>.yaml` … ログイン手順・メニュー操作・入力項目。サイトごとに 1 つ。
 - **データ** `data/<run>.json` … 実際に入れる数値。実行ごとに差し替え。値は `{{key}}` で参照。
-- パスワード等は `{{SECRET:NAME}}` のまま残り、実行時に環境変数から補完される（プロンプトに実値は載らない）。
+- パスワード等は `{{SECRET:NAME}}` のまま残り、実行時に環境変数から補完される（プロンプトに実値は載らない）ので安心セキュリティ。
 
 ```powershell
 # まず生成プロンプトの確認（ブラウザを起動しない）
@@ -191,10 +191,10 @@ mcp_servers:
     command: "python"
     args: ["/path/to/LLM-Browser-Agent/mcp_server.py"]
     env:
-      BROWSER_AGENT_ENGINE: "selenium"   # playwright も可
-      BROWSER_AGENT_BROWSER: "edge"
+      BROWSER_AGENT_ENGINE: "selenium"   # selenium / playwright
+      BROWSER_AGENT_BROWSER: "edge"    #  edge / chrome 
       BROWSER_AGENT_HEADLESS: "0"
-      BROWSER_AGENT_OUTPUT: "/path/to/output"
+      BROWSER_AGENT_OUTPUT: "/path/to/output"   # スクショ保存場所
       MY_USERNAME: "your-login-id"
       MY_PASSWORD: "your-password"
     enabled: true
@@ -247,7 +247,7 @@ python agent_ollama.py --task "..." --model qwen3:14b --browser edge --no-headle
   ブラウザ本体の DL は不要（`pip install playwright` だけでよい・社内向き）。
 - **速度より安定性**: LLM 駆動では全体時間の支配項は LLM 推論なので、エンジン間の速度差は体感しにくい。
   Playwright の利点は速さより「待機の確実さ」。
-- **MCP との両立**: Playwright の同期 API は asyncio 上で動かせないが、本実装は Playwright を**専用スレッド**で
+- **MCP との両立**: Playwright の同期 API は asyncio（非同期） 上で動かせないが、本実装は Playwright を**専用スレッド**で
   駆動し同期インターフェースで包むため、MCP サーバー（`BROWSER_AGENT_ENGINE=playwright`）でも動く。
 
 ```powershell
@@ -285,19 +285,19 @@ python run_template.py --template templates/test_site.yaml --values data/test_va
 ```
 
 `selftest.py` は LLM もネットワークも使わず browser 層だけでサイトを操作するので、**まずこれが通るか**で
-「ブラウザ操作の配管」と「LLM の判断」を切り分けられる。成功すると `output/test_selftest_YYYYMMDD_HHMMSS.png` が保存される。
+「ブラウザ操作の配管」と「LLM の判断」を切り分けられる。成功するとスクショ`output/test_selftest_YYYYMMDD_HHMMSS.png` が保存される。
 
 ---
 
-## 🎥 Chrome Recorder で録画 → 決定論リプレイ（拡張機能不要）
+## 🎥 Google Chrome の Recorder でブラウザ操作を録画 → 決定論リプレイ（拡張機能不要）
 
 複雑なメニュー・項目数が多いサイトでは、LLM に毎回判断させるより、**人が一度操作して録画した手順を
 そのまま再生する**ほうが確実。Chrome 内の DevTools には **Recorder** が標準で内蔵されており、
 記録した操作を **JSON でエクスポート**できる。このツールはその JSON を読み込み、**LLM なしで決定論的に再生**する。
 
 **⚠️ 注意**
-> Recorder の「Playwright 形式エクスポート」は Chrome 拡張機能が必要となる（社内では使えないことが多い）。
-> **「JSON file」形式**でエクスポートは標準で可能（Chrome 101 以降）。本ツールはこの JSON を直接再生する。
+> Chrome Recorder の「Playwright 形式エクスポート」を使う場合は Chrome 拡張機能が必要となる（社内では使えないことが多い）
+> 本ツールは標準エクスポート形式の**「JSON file」形式**を直接再生するので Chrome 拡張機能不要。（Chrome 101 以降）
 > 録画を Chrome で行い再生を Edge で行う場合でも基本は同じDOMなので動きますが、もし対象サイトがブラウザ判定で表示内容を変えるようなら、再生も Chrome にすること。
 
 **🎥 手順**
@@ -307,14 +307,16 @@ python run_template.py --template templates/test_site.yaml --values data/test_va
    1番下の「**Recorder**」をクリック。
 3. **Recorder** パネルが開くので、中央の「**Create recording**」をクリック。
 4. 録画名などを指定する（デフォルトのままでも良い）。
-5. 下のほうに赤い〇ボタン「Start recording」をクリックすると録画が始まり、もう一度〇ボタンをクリックすると「End recording」となる。
+5. 下のほうに赤い〇ボタン「Start recording」をクリックすると録画が始まり、もう一度〇ボタンをクリックすると「End recording」となり録画が停止する。
 6. 録画ファイル名の右に「↑インポート」と「↓エクスポート」があるので「↓エクスポート」をクリック。表示されたメニューの「JSON」を選択し「**JSON file**形式」でエクスポートする。　
 7. エクスポートしたJSONファイルを`recordings/<name>.json` に保存。
 8. エクスポートした JSON の `change` ステップの `value` を、可変の数値は `{{key}}`、ログインID・パスワードは
    `{{SECRET:NAME}}` に書き換える（JSON は人間可読・再インポート可）。
+   
    > **⚠️ 重要（セキュリティ）**: 録画直後の JSON には、録画中に入力した**実値（IDやパスワード）がそのまま残る**。
    > 保存・コミット・共有の前に、必ず `{{SECRET:NAME}}`（秘密）/ `{{key}}`（可変データ）へ置き換えること。
    > 実値は `.env` や環境変数（`MY_USERNAME` / `MY_PASSWORD` など）に置き、JSON には残さない。
+
 9. 再生する:
 
 ```powershell
@@ -335,10 +337,12 @@ python run_recording.py --recording recordings/test_site.example.json --values d
 - **エンジン**: 既定は `playwright`（Recorder の css/xpath/text/aria/pierce セレクタと相性が良い）。`--engine selenium` も可。
 - **録画の手直し（任意）**: Recorder は入力前のクリックも記録するが、本ツールは `change` だけで入力できるため、
   エクスポート後に不要な重複ステップは消してよい（`setViewport` などは再生時に自動スキップ）。
-- **iframe（フレーム）対応**: Recorder の `frame` 指定（`"frame": [2]` など）に追従して、その iframe 内の要素を操作する。
+- **iframe（フレーム）対応**: 録画の `frame` 指定に追従して、その iframe 内の要素を操作する。
+  指定は **インデックス**（`"frame": [2]`＝Chrome Recorder 由来）でも、**フレーム名**（`"frame": "content"`＝
+  Playwright Codegen 由来）でも可。名前指定はフレームの並び順が変わっても壊れにくく、より堅牢。
   指定フレームで見つからない場合は**全フレームを横断**して探す（参照パネル等の取りこぼしに強い）。
   フレームを多用するサイト（フレームセット型の業務システム等）は **`--engine playwright` を推奨**
-  （Selenium は指定フレーム＋最上位フォールバックのみの簡易対応）。
+  （Selenium は指定フレーム＋最上位フォールバックのみの簡易対応。名前指定は name か id で切替）。
 - **ポップアップ（別ウィンドウ）対応**: カレンダー等が別ウィンドウで開くサイトにも対応（`target` が URL のステップ）。
   Playwright は全ウィンドウ×全フレームを横断、Selenium はウィンドウ切替で best-effort 対応する。
   ただし**ポップアップ選択より「直接入力」のほうが安定**するため、可能なら入力欄に直接値を入れる録画に手直しすると確実
@@ -365,15 +369,24 @@ python run_recording.py --recording recordings/test_site.example.json --values d
 # 1) サイトを配信（別ターミナル。test_site をルートに配信）
 cd test_site
 python -m http.server 8000      #  → 練習サイト: http://localhost:8000/edi/index.html （demo / password123）
+```
 
+```powershell
 # 2) デモ資格情報を環境変数に（録画は {{SECRET:...}} を使うため実値はここで補完）
 $env:MY_USERNAME="demo"; $env:MY_PASSWORD="password123"
+```
 
+```powershell
 # 3-A) 直接入力版（年月を直接入力 → 検索）: iframe 横断の確認
 python run_recording.py --recording recordings/edi_practice_direct.json --values data/edi_practice_values.json --engine playwright --browser edge --no-headless
+```
 
+```powershell
 # 3-B) ポップアップ版（参照 → 別ウィンドウのカレンダーで 05月 → 検索）: iframe＋別ウィンドウの確認
 python run_recording.py --recording recordings/edi_practice_popup.json --values data/edi_practice_values.json --engine playwright --browser edge --no-headless
+
+# 3-C) フレーム名指定版（frame を "menu"/"content" の名前で指定）: Codegen 由来の名前指定の確認
+python run_recording.py --recording recordings/edi_practice_named.json --values data/edi_practice_values.json --engine playwright --browser edge --no-headless
 ```
 
 - **直接入力版**で `frame[0]`（メニューの検収照会）と `frame[2]`（年月入力・検索）の **iframe 横断**を確認できる。
@@ -384,6 +397,46 @@ python run_recording.py --recording recordings/edi_practice_popup.json --values 
 
 > この練習サイトで「frame／popup を含む録画リプレイ」が通ることを確認しておけば、実環境が用意できたときに
 > 同じ手順（録画 → JSON → `run_recording.py`）でそのまま本番へ移行できる。
+
+### 🧭 Playwright Codegen をセレクタ・フレーム名の調査に使う
+
+Playwright には操作を記録して**Playwright コード**を生成する [Codegen](https://playwright.dev/python/docs/codegen) がある。
+Chrome Recorder（JSON）より**壊れにくいセレクタ**（`get_by_role`／`get_by_label` など意味ベース）と、
+**フレーム名**（`frame[name="content"]`）を教えてくれるので、**録画 JSON を書くときの「調査・下書き」ツール**として有用。
+
+```powershell
+# 練習サイトを配信した状態で（別ターミナル）:
+python -m playwright codegen http://localhost:8000/edi/index.html
+```
+
+ブラウザと Inspector が開き、操作するとコードが生成される。例（抜粋）:
+
+```python
+page.get_by_role("button", name="Login").click()
+page.locator("frame[name=\"menu\"]").content_frame.get_by_role("link", name="検収照会").click()
+with page.expect_popup() as p:                    # ← 参照ボタンでカレンダーが別ウィンドウで開く
+    page.locator("frame[name=\"content\"]").content_frame.get_by_role("button", name="参照").click()
+page.locator("frame[name=\"content\"]").content_frame.locator("#yyyymm").fill("2026-05")
+```
+
+この出力から、本ツールの録画 JSON を書くと安定する。対応づけの目安:
+
+| Codegen の出力 | 本ツールの録画 JSON |
+|---|---|
+| `page.goto("...")` | `{"type":"navigate","url":"..."}` |
+| `get_by_role("button", name="Login").click()` | `{"type":"click","selectors":[["aria/Login"],["text/Login"]]}` |
+| `get_by_label("年月").fill("2026-05")` | `{"type":"change","value":"{{yyyymm}}","selectors":[["aria/年月"]]}` |
+| `frame[name="content"].content_frame...` | 同ステップに `"frame": "content"` を付ける（**名前指定**） |
+| `with page.expect_popup(): ...` の中の別ウィンドウ操作 | `"target": "<ポップアップURL>"` を付ける |
+
+- **フレームは名前で指定できる**（`"frame": "content"`）。Codegen が示す name をそのまま使えるので、
+  インデックス（`[2]`）より堅牢。付属の `recordings/edi_practice_named.json` が名前指定の実例。
+- **秘密情報に注意**: Codegen 出力にも入力した実 ID・パスワードが平文で載る。JSON へ写す際は必ず
+  `{{SECRET:NAME}}` に置き換え、可変値は `{{key}}` にする（Recorder と同じ運用）。
+- Codegen は「調査・下書き」に使い、実行は本ツールの JSON リプレイ（秘密情報マスク・値の差し替え・
+  日時スクショ・エンジン切替つき）で行うのが、統一運用としておすすめ。
+
+
 
 
 
@@ -418,7 +471,7 @@ python run_recording.py --recording recordings/edi_practice_popup.json --values 
 - **Recorder リプレイ**: `recordings/test_site.example.json` で取り込み・値の埋め込み・候補セレクタ解決を確認（`run_recording.py`）。
 - **ページエラー検知（Playwright）**: JS エラー / `console.error` を `state()` の「注意」欄に表示。
 - **MCP サーバー**: Hermes Agent（NousResearch）から接続・ツール検出（9 個）・`navigate` 実行までを確認。
-- 環境: ネイティブ Windows 11 ＋ Microsoft Edge。
+- 環境: ネイティブ Windows 11 ＋ Microsoft Edge および Google Chrome。
 
 ---
 
@@ -450,6 +503,7 @@ python run_recording.py --recording recordings/edi_practice_popup.json --values 
 - [Claude Desktop MCP Documentation](https://docs.anthropic.com/en/docs/claude-code/overview)
 - [Selenium 公式](https://www.selenium.dev/)
 - [Playwright 公式](https://playwright.dev/python/)
+- [Playwright Codegen（操作を記録してコード生成）](https://playwright.dev/python/docs/codegen)
 - [Chrome DevTools Recorder（公式）](https://developer.chrome.com/docs/devtools/recorder/reference)
 - [@puppeteer/replay（Recorder JSON 仕様・再生ライブラリ）](https://github.com/puppeteer/replay)
 - [WebDriver BiDi（W3C 仕様）](https://w3c.github.io/webdriver-bidi/)
