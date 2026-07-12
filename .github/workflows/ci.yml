@@ -29,6 +29,8 @@ jobs:
   # 2) 配管テスト: 実ブラウザ(Edge)でローカルテストサイトを操作（LLM 不要）
   selftest-windows:
     runs-on: windows-latest   # Edge / msedgedriver 対応の Selenium Manager が使える
+    env:
+      PYTHONUTF8: "1"         # ← この2行を追加（日本語出力の UnicodeEncodeError 対策）
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
