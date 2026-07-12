@@ -17,8 +17,10 @@
           box-shadow:0 2px 12px rgba(0,0,0,.08); padding:28px; }
   h2 { margin-top:0; }
   label { display:block; margin:14px 0 4px; font-weight:600; font-size:14px; }
-  input, textarea { width:100%; box-sizing:border-box; padding:10px; border:1px solid #cbd5e1;
+  input, textarea, select { width:100%; box-sizing:border-box; padding:10px; border:1px solid #cbd5e1;
                     border-radius:6px; font-size:15px; }
+  input[type=checkbox] { width:auto; }
+  .checkrow { display:flex; align-items:center; gap:8px; margin-top:14px; font-size:14px; }
   button { margin-top:20px; background:#2563eb; color:#fff; border:0; border-radius:6px;
            padding:11px 20px; font-size:15px; font-weight:600; cursor:pointer; }
   button.secondary { background:#475569; }
@@ -63,6 +65,13 @@
 <!-- 3. 経費登録フォーム -->
 <section id="formView" class="wrap hidden">
   <h2>経費登録</h2>
+  <label for="category">経費区分</label>
+  <select id="category" name="category" aria-label="経費区分">
+    <option value="business_trip">出張</option>
+    <option value="meeting">会議</option>
+    <option value="entertainment">接待</option>
+    <option value="other">その他</option>
+  </select>
   <label for="transport">交通費</label>
   <input id="transport" name="transport" type="number" placeholder="円" aria-label="交通費">
   <label for="lodging">宿泊費</label>
@@ -71,6 +80,10 @@
   <input id="perDiem" name="perDiem" type="number" placeholder="円" aria-label="日当">
   <label for="note">備考</label>
   <textarea id="note" name="note" rows="2" placeholder="備考" aria-label="備考"></textarea>
+  <div class="checkrow">
+    <input id="advance" name="advance" type="checkbox" aria-label="立替払い">
+    <label for="advance" style="display:inline;margin:0;">立替払い</label>
+  </div>
   <button id="submitBtn">登録</button>
   <button id="backBtn" class="secondary">戻る</button>
   <div class="err" id="formErr" role="alert"></div>
@@ -83,10 +96,12 @@
   <p>以下の内容で登録しました。</p>
   <table>
     <tr><th>項目</th><th>金額 / 内容</th></tr>
+    <tr><td>経費区分</td><td id="r_category"></td></tr>
     <tr><td>交通費</td><td id="r_transport"></td></tr>
     <tr><td>宿泊費</td><td id="r_lodging"></td></tr>
     <tr><td>日当</td><td id="r_perDiem"></td></tr>
     <tr><td>備考</td><td id="r_note"></td></tr>
+    <tr><td>立替払い</td><td id="r_advance"></td></tr>
     <tr><th>合計</th><th id="r_total"></th></tr>
   </table>
   <button id="againBtn" class="secondary">続けて登録</button>
@@ -129,6 +144,8 @@
     $('r_lodging').textContent   = yen(l);
     $('r_perDiem').textContent   = yen(d);
     $('r_note').textContent      = $('note').value || '(なし)';
+    $('r_category').textContent  = $('category').selectedOptions[0].text;
+    $('r_advance').textContent   = $('advance').checked ? 'あり' : 'なし';
     $('r_total').textContent     = yen(Number(t)+Number(l)+Number(d));
     show('doneView');
   });
@@ -136,6 +153,8 @@
   // 続けて登録
   $('againBtn').addEventListener('click', () => {
     ['transport','lodging','perDiem','note'].forEach(id => $(id).value='');
+    $('category').selectedIndex = 0;
+    $('advance').checked = false;
     show('formView');
   });
 </script>

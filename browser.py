@@ -21,11 +21,14 @@ browser.py — Selenium WebDriver の薄いラッパー。
     （座標やセレクタを推測させない = 安定する）。
   * パスワード等のシークレットはモデルに渡さない。テキスト中の {{SECRET:NAME}} を
     このレイヤーで環境変数の値に置換してから入力する。
+    <NAME>_ALLOWED_DOMAINS で入力先ドメインを制限できる（engine_common 参照）。
+  * DOM 収集 JS・SECRET 処理・state() 形式は engine_common.py で
+    Playwright 版（browser_playwright.py）と共有する。
 """
 
 from __future__ import annotations
 
-import os
+import base64
 import re
 import sys
 import time
@@ -37,6 +40,7 @@ from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.edge.options import Options as EdgeOptions
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import Select
 from selenium.common.exceptions import (
     ElementClickInterceptedException,
     ElementNotInteractableException,
@@ -44,74 +48,19 @@ from selenium.common.exceptions import (
     WebDriverException,
 )
 
-# 可視で操作可能な要素を収集し data-claude-idx を付与して一覧を返す JS
-_COLLECT_JS = r"""
-(function () {
-  document.querySelectorAll('[data-claude-idx]')
-          .forEach(e => e.removeAttribute('data-claude-idx'));
-  const sel = 'a, button, input, textarea, select, [role=button], [role=link],' +
-              '[role=textbox], [role=checkbox], [role=search], [role=menuitem],' +
-              '[contenteditable=true], [onclick], [tabindex]';
-  const out = [];
-  let i = 0;
-  for (const el of document.querySelectorAll(sel)) {
-    if (el.type === 'hidden') continue;
-    const r = el.getBoundingClientRect();
-    const s = window.getComputedStyle(el);
-    const visible = r.width > 0 && r.height > 0 &&
-                    s.visibility !== 'hidden' && s.display !== 'none' &&
-                    s.opacity !== '0';
-    if (!visible) continue;
-    el.setAttribute('data-claude-idx', i);
-    const tag = el.tagName.toLowerCase();
-    const isField = tag === 'input' || tag === 'textarea' || tag === 'select' ||
-                    el.getAttribute('contenteditable') === 'true';
-    let label = (el.getAttribute('aria-label') || el.getAttribute('placeholder') ||
-                 el.getAttribute('title') || el.getAttribute('alt') ||
-                 el.getAttribute('name') || (isField ? '' : el.innerText) || '').trim();
-    label = label.replace(/\s+/g, ' ').slice(0, 100);
-    let value = '';
-    if (isField) {
-      value = (el.value || el.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 80);
-    }
-    out.push({
-      idx: i,
-      tag: tag,
-      type: el.getAttribute('type') || '',
-      label: label,
-      value: value
-    });
-    i++;
-  }
-  return out;
-})();
-"""
+from engine_common import (
+    COLLECT_JS, TEXT_JS, PAGE_TEXT_JS,
+    resolve_secrets, mask_secrets, format_state, format_page_text, xpath_literal,
+)
 
-# ページ内の「主なテキスト」を集める JS。見出しや成功/エラー通知など、操作はできないが
-# 状況判断に重要なテキストを LLM に渡すためのもの（例:「登録が完了しました」）。
-# 操作可能要素しか出ない _COLLECT_JS を補完する。
-_TEXT_JS = r"""
-(function () {
-  const out = [];
-  const seen = new Set();
-  const push = (t) => {
-    t = (t || '').trim().replace(/\s+/g, ' ');
-    if (t && t.length <= 120 && !seen.has(t)) { seen.add(t); out.push(t); }
-  };
-  const sel = 'h1, h2, h3, [role=alert], [role=status], [aria-live],' +
-              '.alert, .message, .toast, .notification, .success, .badge';
-  for (const el of document.querySelectorAll(sel)) {
-    const r = el.getBoundingClientRect();
-    const s = window.getComputedStyle(el);
-    const visible = r.width > 0 && r.height > 0 &&
-                    s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0';
-    if (visible) push(el.innerText);
-  }
-  return out.slice(0, 12);
-})();
-"""
-
-_SECRET_RE = re.compile(r"\{\{SECRET:([A-Z0-9_]+)\}\}")
+# Recorder の aria/ セレクタで role → 具体的な XPath に落とすための対応表
+_ARIA_ROLE_XPATH = {
+    "button": ("//button[normalize-space(.)={lit}]",
+               "//input[(@type='submit' or @type='button') and @value={lit}]"),
+    "link": ("//a[normalize-space(.)={lit}]",),
+    "textbox": ("//input[@aria-label={lit} or @placeholder={lit} or @name={lit}]",
+                "//textarea[@aria-label={lit} or @placeholder={lit} or @name={lit}]"),
+}
 
 
 class Browser:
@@ -159,12 +108,12 @@ class Browser:
             time.sleep(0.2)
 
     def _resolve_secrets(self, text: str) -> str:
-        def repl(m: re.Match) -> str:
-            val = os.environ.get(m.group(1))
-            if val is None:
-                raise ValueError(f"環境変数 {m.group(1)} が設定されていません")
-            return val
-        return _SECRET_RE.sub(repl, text)
+        """{{SECRET:NAME}} を解決する。<NAME>_ALLOWED_DOMAINS があれば現在 URL と照合。"""
+        try:
+            url = self.driver.current_url
+        except WebDriverException:
+            url = None
+        return resolve_secrets(text, url)
 
     def _find(self, idx: int):
         try:
@@ -195,22 +144,70 @@ class Browser:
             el.send_keys(Keys.RETURN)
             self._wait_ready()
         # ログに残すテキストはシークレットを伏せる（モデルに値は渡らない）
-        shown = _SECRET_RE.sub(r"[SECRET:\1]", text)
+        shown = mask_secrets(text)
         return f"要素 [{idx}] に「{shown}」を入力しました{'（Enter送信）' if submit else ''}。"
 
+    def select_option(self, idx: int, option: str) -> str:
+        """<select> 要素の選択肢を選ぶ。表示テキスト → value → 番号 の順で解決を試す。"""
+        el = self._find(idx)
+        if el.tag_name.lower() != "select":
+            raise ValueError(f"インデックス {idx} は <select> ではありません（{el.tag_name}）。")
+        sel = Select(el)
+        option = str(option)
+        try:
+            sel.select_by_visible_text(option)
+        except Exception:
+            try:
+                sel.select_by_value(option)
+            except Exception:
+                if option.isdigit():
+                    sel.select_by_index(int(option))
+                else:
+                    raise ValueError(f"選択肢「{option}」が見つかりません。"
+                                     "get_page_state の「選択肢:」から選んでください。")
+        self._wait_ready()
+        return f"要素 [{idx}] で「{option}」を選択しました。"
+
+    def set_checked(self, idx: int, checked: bool = True) -> str:
+        """checkbox / radio のオン・オフを設定する（既に目的の状態なら何もしない）。"""
+        el = self._find(idx)
+        if el.is_selected() != bool(checked):
+            try:
+                el.click()
+            except (ElementClickInterceptedException, ElementNotInteractableException):
+                self.driver.execute_script("arguments[0].click();", el)
+        self._wait_ready()
+        return f"要素 [{idx}] を{'ON' if checked else 'OFF'} にしました。"
+
     # ---- Recorder（録画）リプレイ用：セレクタ候補で操作する ----
-    def _by(self, sel: str):
-        """Chrome Recorder のセレクタ表記を Selenium の (By, value) に変換する。"""
+    def _selector_candidates(self, sel: str) -> list:
+        """Chrome Recorder のセレクタ表記を Selenium の (By, value) 候補リストに変換する。"""
         if sel.startswith("xpath/"):
-            return (By.XPATH, sel[len("xpath/"):])
+            return [(By.XPATH, sel[len("xpath/"):])]
         if sel.startswith("pierce/"):
-            return (By.CSS_SELECTOR, sel[len("pierce/"):])  # 注: shadow DOM 貫通は不可（best-effort）
+            return [(By.CSS_SELECTOR, sel[len("pierce/"):])]  # 注: shadow DOM 貫通は不可（best-effort）
         if sel.startswith("text/"):
-            t = sel[len("text/"):].replace('"', '\\"')
-            return (By.XPATH, f'//*[contains(normalize-space(.), "{t}")]')
+            # 最深ノードに限定する（従来の contains(.) は <html> 等の祖先が先にマッチしてしまう）
+            lit = xpath_literal(sel[len("text/"):])
+            return [(By.XPATH,
+                     f"//*[contains(normalize-space(.), {lit})"
+                     f" and not(.//*[contains(normalize-space(.), {lit})])]")]
         if sel.startswith("aria/"):
-            return (By.CSS_SELECTOR, f"[aria-label='{sel[len('aria/'):]}']")
-        return (By.CSS_SELECTOR, sel)
+            # aria/名前[role="button"] 形式。accessible name は aria-label とは限らないため、
+            # aria-label → role 固有 XPath → 最深テキスト一致 の順で候補を並べる。
+            body = sel[len("aria/"):]
+            name = body.split("[")[0].strip()
+            m = re.search(r'role="?(\w+)', body)
+            role = m.group(1) if m else None
+            lit = xpath_literal(name)
+            cands = [(By.XPATH, f"//*[@aria-label={lit}]")]
+            for xp in _ARIA_ROLE_XPATH.get(role or "", ()):
+                cands.append((By.XPATH, xp.format(lit=lit)))
+            cands.append((By.XPATH,
+                          f"//*[normalize-space(.)={lit}"
+                          f" and not(.//*[normalize-space(.)={lit}])]"))
+            return cands
+        return [(By.CSS_SELECTOR, sel)]
 
     def _try_in_frame(self, frame_path, selectors, action):
         """frame 指定に降りて、候補セレクタで action を試す。成功したセレクタ文字列を返す。
@@ -227,13 +224,13 @@ class Browser:
             self.driver.switch_to.default_content()
             return None
         for sel in selectors:
-            try:
-                by, val = self._by(sel)
-                el = self.driver.find_element(by, val)
-                action(el)
-                return sel
-            except Exception:
-                continue
+            for by, val in self._selector_candidates(sel):
+                try:
+                    el = self.driver.find_element(by, val)
+                    action(el)
+                    return sel
+                except Exception:
+                    continue
         return None
 
     def _windows_for(self, target):
@@ -300,9 +297,12 @@ class Browser:
     def fill_selector(self, selectors: list, text: str, frame: list | None = None,
                       target: str | None = None) -> str:
         resolved = self._resolve_secrets(text)
-        shown = _SECRET_RE.sub(r"[SECRET:\1]", text)
+        shown = mask_secrets(text)
 
         def act(el):
+            if el.tag_name.lower() == "select":
+                Select(el).select_by_visible_text(resolved)
+                return
             try:
                 el.clear()
             except WebDriverException:
@@ -343,42 +343,38 @@ class Browser:
     def screenshot(self, path: str, full_page: bool = True) -> str:
         """ファイル名の末尾（拡張子の前）に _YYYYMMDD_HHMMSS を付けて保存し、
         実際に保存した絶対パスを返す。例: result.png -> result_20260621_153012.png
-        Selenium の save_screenshot は表示領域（ビューポート）を撮る。full_page 引数は
-        Playwright と引数を揃えるためのもので、Selenium では常にビューポート撮影になる。"""
+        full_page=True では CDP (Page.captureScreenshot + captureBeyondViewport) で
+        ページ全体を撮影する（Chromium 系のみ）。失敗時はビューポート撮影にフォールバック。"""
         p = Path(path)
         if not p.suffix:
             p = p.with_suffix(".png")
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         p = p.with_name(f"{p.stem}_{ts}{p.suffix}")
         p.parent.mkdir(parents=True, exist_ok=True)
+        if full_page:
+            try:
+                data = self.driver.execute_cdp_cmd(
+                    "Page.captureScreenshot",
+                    {"format": "png", "captureBeyondViewport": True})["data"]
+                p.write_bytes(base64.b64decode(data))
+                return str(p.resolve())
+            except Exception:
+                pass  # CDP 不可の場合はビューポート撮影へ
         self.driver.save_screenshot(str(p))
         return str(p.resolve())
 
     # ---- 状態取得 -----------------------------------------------------------
     def state(self, max_elements: int = 120) -> str:
-        elems = self.driver.execute_script("return " + _COLLECT_JS.strip()) or []
-        lines = []
-        for e in elems[:max_elements]:
-            t = e["tag"] + (f":{e['type']}" if e["type"] else "")
-            label = e["label"] or "(ラベルなし)"
-            val = e.get("value") or ""
-            suffix = f'  = 現在値:"{val}"' if val else ""
-            lines.append(f"[{e['idx']}] <{t}> {label}{suffix}")
-        more = "" if len(elems) <= max_elements else f"\n…他 {len(elems) - max_elements} 要素"
-        elist = "\n".join(lines) if lines else "(操作可能な要素なし)"
+        elems = self.driver.execute_script("return " + COLLECT_JS.strip()) or []
+        texts = self.driver.execute_script("return " + TEXT_JS.strip()) or []
+        return format_state(self.driver.current_url, self.driver.title,
+                            elems, max_elements, texts)
 
-        # 見出し・通知などの「主なテキスト」（操作はできないが状況判断に重要）
-        texts = self.driver.execute_script("return " + _TEXT_JS.strip()) or []
-        text_block = ""
-        if texts:
-            text_block = "\n--- 主なテキスト ---\n" + "\n".join(texts)
-
-        return (
-            f"URL: {self.driver.current_url}\n"
-            f"タイトル: {self.driver.title}\n"
-            f"--- 操作可能な要素 ---\n{elist}{more}"
-            f"{text_block}"
-        )
+    def get_page_text(self, max_chars: int = 4000) -> str:
+        """ページ本文のテキストを返す（表・照会結果などを「読む」ためのツール）。"""
+        body = self.driver.execute_script("return " + PAGE_TEXT_JS.strip()) or ""
+        return format_page_text(self.driver.current_url, self.driver.title,
+                                body, max_chars)
 
     def quit(self) -> None:
         try:

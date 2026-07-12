@@ -47,7 +47,7 @@ def find_index(browser, predicate) -> int:
         if not m:
             continue
         idx = int(m.group(1))
-        label = re.split(r"\s+= 現在値:", m.group(2))[0].strip()
+        label = re.split(r"\s+= 現在値:|\s+選択肢:", m.group(2))[0].strip()
         if predicate({"idx": idx, "label": label}):
             return idx
     raise RuntimeError("要素が見つかりません: " + repr(predicate))
@@ -79,12 +79,14 @@ def main() -> None:
         # メニュー → 経費登録
         print("3) メニューから経費登録")
         b.click(find_index(b, lambda e: e["label"] == "経費登録"))
-        # 数値入力
+        # 数値入力（select / checkbox も含む）
         print("4) 各項目を入力")
+        b.select_option(find_index(b, lambda e: "経費区分" in e["label"]), "会議")
         b.input_text(find_index(b, lambda e: "交通費" in e["label"]), "12300")
         b.input_text(find_index(b, lambda e: "宿泊費" in e["label"]), "8000")
         b.input_text(find_index(b, lambda e: "日当" in e["label"]), "3000")
         b.input_text(find_index(b, lambda e: "備考" in e["label"]), "自己テスト")
+        b.set_checked(find_index(b, lambda e: "立替払い" in e["label"]), True)
         # 登録
         print("5) 登録")
         b.click(find_index(b, lambda e: e["label"] == "登録"))
@@ -93,6 +95,11 @@ def main() -> None:
         # state() の「主なテキスト」に完了見出しが出る。保険で操作可能要素もマーカーに使う。
         ok = "登録が完了しました" in state or "続けて登録" in state
         print("6) 完了メッセージ検出:", "OK" if ok else "NG")
+        # 検証: get_page_text で結果テーブルの内容（select/checkbox の反映）を読めるか
+        body = b.get_page_text()
+        ok_text = ("会議" in body) and ("立替払い" in body)
+        print("6b) get_page_text（select/checkbox 反映）:", "OK" if ok_text else "NG")
+        ok = ok and ok_text
         # スクショ（日時が自動付与される）
         saved = b.screenshot(os.path.join(args.out_dir, "test_selftest.png"))
         print("7) スクリーンショット保存:", saved)

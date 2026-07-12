@@ -19,7 +19,7 @@ tools.py — Claude に渡すツール定義と、ツール呼び出しを Brows
 
 from __future__ import annotations
 
-from browser import Browser
+from browser_factory import make_browser  # noqa: F401  （型的な依存を明示）
 
 TOOLS = [
     {
@@ -37,6 +37,16 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {}},
     },
     {
+        "name": "get_page_text",
+        "description": "現在のページの本文テキストを取得する。表・照会結果・明細など、操作ではなく「内容を読む」必要があるときに使う。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "max_chars": {"type": "integer", "description": "取得する最大文字数（既定 4000）"},
+            },
+        },
+    },
+    {
         "name": "click_element",
         "description": "指定したインデックスの要素をクリックする。リンク・ボタン・送信ボタンなど。",
         "input_schema": {
@@ -52,6 +62,7 @@ TOOLS = [
             "パスワード等の秘密情報は値を直接書かず {{SECRET:NAME}} の形式で指定すること"
             "（例: {{SECRET:MY_PASSWORD}}）。実際の値はローカルの環境変数から補完され、"
             "あなた（モデル）には渡らない。submit=true で入力後に Enter を送る。"
+            "セレクトボックスには select_option、チェックボックスには set_checked を使うこと。"
         ),
         "input_schema": {
             "type": "object",
@@ -61,6 +72,33 @@ TOOLS = [
                 "submit": {"type": "boolean", "description": "入力後に Enter を送るか（既定 false）"},
             },
             "required": ["index", "text"],
+        },
+    },
+    {
+        "name": "select_option",
+        "description": (
+            "セレクトボックス（<select>）の選択肢を選ぶ。option には要素一覧の「選択肢:」に"
+            "表示されている表示テキストをそのまま指定する（value・番号でも可）。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "index": {"type": "integer", "description": "select 要素のインデックス"},
+                "option": {"type": "string", "description": "選ぶ選択肢（表示テキスト推奨）"},
+            },
+            "required": ["index", "option"],
+        },
+    },
+    {
+        "name": "set_checked",
+        "description": "チェックボックスやラジオボタンのオン・オフを設定する。現在値は要素一覧に ON/OFF で表示される。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "index": {"type": "integer", "description": "checkbox/radio のインデックス"},
+                "checked": {"type": "boolean", "description": "true でオン、false でオフ（既定 true）"},
+            },
+            "required": ["index"],
         },
     },
     {
@@ -105,7 +143,7 @@ TOOLS = [
 ]
 
 
-def dispatch(name: str, args: dict, browser: Browser, out_dir: str) -> str:
+def dispatch(name: str, args: dict, browser, out_dir: str) -> str:
     """ツール呼び出しを実行し、結果テキスト（多くは末尾に最新ページ状態）を返す。"""
     try:
         if name == "navigate":
@@ -113,11 +151,19 @@ def dispatch(name: str, args: dict, browser: Browser, out_dir: str) -> str:
             return f"{msg}\n\n{browser.state()}"
         if name == "get_page_state":
             return browser.state()
+        if name == "get_page_text":
+            return browser.get_page_text(int(args.get("max_chars", 4000)))
         if name == "click_element":
             msg = browser.click(args["index"])
             return f"{msg}\n\n{browser.state()}"
         if name == "input_text":
             msg = browser.input_text(args["index"], args["text"], args.get("submit", False))
+            return f"{msg}\n\n{browser.state()}"
+        if name == "select_option":
+            msg = browser.select_option(args["index"], args["option"])
+            return f"{msg}\n\n{browser.state()}"
+        if name == "set_checked":
+            msg = browser.set_checked(args["index"], args.get("checked", True))
             return f"{msg}\n\n{browser.state()}"
         if name == "send_keys":
             msg = browser.send_keys(args["key"])

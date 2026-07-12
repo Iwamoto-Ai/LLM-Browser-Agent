@@ -14,9 +14,9 @@
 
 """
 browser_playwright.py — browser.py（Selenium 版）と同じインターフェースを持つ
-Playwright 実装。navigate / state / click / input_text / send_keys / scroll /
-screenshot / quit を同じ名前・同じ戻り値で提供するため、agent*.py / run_template.py /
-mcp_server.py / tools.py は無改修で差し替えられる。
+Playwright 実装。navigate / state / click / input_text / select_option / set_checked /
+get_page_text / send_keys / scroll / screenshot / quit を同じ名前・同じ戻り値で提供するため、
+agent*.py / run_template.py / mcp_server.py / tools.py は無改修で差し替えられる。
 
 設計の要点（MCP との両立）:
   * Playwright の「同期 API」は asyncio のイベントループ上では動かせない。
@@ -30,6 +30,8 @@ mcp_server.py / tools.py は無改修で差し替えられる。
   * channel="msedge"/"chrome" でインストール済みブラウザを使う（ダウンロード不要・社内向き）。
   * フルページのスクリーンショット。
 
+DOM 収集 JS・SECRET 処理・state() 形式は engine_common.py で Selenium 版と共有する。
+
 前提: pip install playwright  （ブラウザDLが要る場合のみ playwright install。channel 指定なら不要）
 """
 
@@ -42,68 +44,10 @@ from concurrent.futures import Future
 from datetime import datetime
 from pathlib import Path
 
-# --- browser.py と同じ要素収集 JS（状態表示を一致させるため同一仕様） ---
-COLLECT_JS = r"""
-(function () {
-  document.querySelectorAll('[data-claude-idx]')
-          .forEach(e => e.removeAttribute('data-claude-idx'));
-  const sel = 'a, button, input, textarea, select, [role=button], [role=link],' +
-              '[role=textbox], [role=checkbox], [role=search], [role=menuitem],' +
-              '[contenteditable=true], [onclick], [tabindex]';
-  const out = [];
-  let i = 0;
-  for (const el of document.querySelectorAll(sel)) {
-    if (el.type === 'hidden') continue;
-    const r = el.getBoundingClientRect();
-    const s = window.getComputedStyle(el);
-    const visible = r.width > 0 && r.height > 0 &&
-                    s.visibility !== 'hidden' && s.display !== 'none' &&
-                    s.opacity !== '0';
-    if (!visible) continue;
-    el.setAttribute('data-claude-idx', i);
-    const tag = el.tagName.toLowerCase();
-    const isField = tag === 'input' || tag === 'textarea' || tag === 'select' ||
-                    el.getAttribute('contenteditable') === 'true';
-    let label = (el.getAttribute('aria-label') || el.getAttribute('placeholder') ||
-                 el.getAttribute('title') || el.getAttribute('alt') ||
-                 el.getAttribute('name') || (isField ? '' : el.innerText) || '').trim();
-    label = label.replace(/\s+/g, ' ').slice(0, 100);
-    let value = '';
-    if (isField) {
-      value = (el.value || el.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 80);
-    }
-    out.push({ idx: i, tag: tag, type: el.getAttribute('type') || '',
-               label: label, value: value });
-    i++;
-  }
-  return out;
-})()
-"""
-
-# ページ内の「主なテキスト」（見出し・通知など。操作不可だが状況判断に重要）。
-# browser.py の _TEXT_JS と同一仕様。
-TEXT_JS = r"""
-(function () {
-  const out = [];
-  const seen = new Set();
-  const push = (t) => {
-    t = (t || '').trim().replace(/\s+/g, ' ');
-    if (t && t.length <= 120 && !seen.has(t)) { seen.add(t); out.push(t); }
-  };
-  const sel = 'h1, h2, h3, [role=alert], [role=status], [aria-live],' +
-              '.alert, .message, .toast, .notification, .success, .badge';
-  for (const el of document.querySelectorAll(sel)) {
-    const r = el.getBoundingClientRect();
-    const s = window.getComputedStyle(el);
-    const visible = r.width > 0 && r.height > 0 &&
-                    s.visibility !== 'hidden' && s.display !== 'none' && s.opacity !== '0';
-    if (visible) push(el.innerText);
-  }
-  return out.slice(0, 12);
-})()
-"""
-
-_SECRET_RE = re.compile(r"\{\{SECRET:([A-Z0-9_]+)\}\}")
+from engine_common import (
+    COLLECT_JS, TEXT_JS, PAGE_TEXT_JS,
+    resolve_secrets, mask_secrets, format_state, format_page_text,
+)
 
 _KEYMAP = {
     "enter": "Enter", "return": "Enter", "tab": "Tab", "escape": "Escape",
@@ -111,41 +55,7 @@ _KEYMAP = {
     "pageup": "PageUp", "arrowdown": "ArrowDown", "arrowup": "ArrowUp",
 }
 
-
-def _resolve_secrets(text: str) -> str:
-    import os
-
-    def repl(m: re.Match) -> str:
-        val = os.environ.get(m.group(1))
-        if val is None:
-            raise ValueError(f"環境変数 {m.group(1)} が設定されていません")
-        return val
-    return _SECRET_RE.sub(repl, text)
-
-
-def _mask_secrets(text: str) -> str:
-    return _SECRET_RE.sub(r"[SECRET:\1]", text)
-
-
-def _format_state(url: str, title: str, elems: list, max_elements: int,
-                  texts: list | None = None, errors: list | None = None) -> str:
-    lines = []
-    for e in elems[:max_elements]:
-        t = e["tag"] + (f":{e['type']}" if e.get("type") else "")
-        label = e.get("label") or "(ラベルなし)"
-        val = e.get("value") or ""
-        suffix = f'  = 現在値:"{val}"' if val else ""
-        lines.append(f"[{e['idx']}] <{t}> {label}{suffix}")
-    more = "" if len(elems) <= max_elements else f"\n…他 {len(elems) - max_elements} 要素"
-    elist = "\n".join(lines) if lines else "(操作可能な要素なし)"
-    text_block = ""
-    if texts:
-        text_block = "\n--- 主なテキスト ---\n" + "\n".join(texts)
-    err_block = ""
-    if errors:
-        err_block = "\n--- 注意（ページのエラー/警告）---\n" + "\n".join(errors)
-    return (f"URL: {url}\nタイトル: {title}\n--- 操作可能な要素 ---"
-            f"\n{elist}{more}{text_block}{err_block}")
+_ARIA_SEL_RE = re.compile(r'^aria/([^\[]+?)\s*(?:\[role="?(\w+)"?\])?$')
 
 
 def _pw_locator(ctx, sel: str):
@@ -157,9 +67,19 @@ def _pw_locator(ctx, sel: str):
     if sel.startswith("text/"):
         return ctx.get_by_text(sel[len("text/"):], exact=False)
     if sel.startswith("aria/"):
-        # "aria/名前[role=\"link\"]" のような付帯表記は落としてテキスト一致に寄せる
-        name = sel[len("aria/"):].split("[")[0].strip()
-        return ctx.get_by_text(name, exact=True)
+        # Recorder の aria/ は accessible name。role が付いていれば get_by_role が最も堅牢。
+        m = _ARIA_SEL_RE.match(sel)
+        name = (m.group(1) if m else sel[len("aria/"):]).strip()
+        role = m.group(2) if m else None
+        if role:
+            try:
+                return ctx.get_by_role(role, name=name)
+            except Exception:
+                pass
+        # role が無い場合は accessible name の主な由来（テキスト / ラベル / aria-label）を or で束ねる
+        return (ctx.get_by_text(name, exact=True)
+                .or_(ctx.get_by_label(name))
+                .or_(ctx.locator(f'[aria-label="{name}"]')))
     if sel.startswith("pierce/"):
         return ctx.locator(sel[len("pierce/"):])  # Playwright は css で shadow を貫通
     return ctx.locator(sel)
@@ -185,16 +105,6 @@ def _resolve_frame(page, frame_path):
         else:
             return None
     return fr
-
-
-def _frame_order(page, frame_path):
-    """まず指定フレーム、続いて全フレームを試す順序を作る（参照パネル等の取りこぼし対策）。"""
-    target = _resolve_frame(page, frame_path)
-    order = [target] if target is not None else []
-    for fr in page.frames:
-        if fr not in order:
-            order.append(fr)
-    return order
 
 
 def _all_frames(page, frame_path, target):
@@ -303,7 +213,15 @@ class PlaywrightBrowser:
             self._errors.clear()   # 一度報告したらクリア（重複防止）
             return (page.url, page.title(), elems, texts, errors)
         url, title, elems, texts, errors = self._call(op)
-        return _format_state(url, title, elems, max_elements, texts, errors)
+        return format_state(url, title, elems, max_elements, texts, errors)
+
+    def get_page_text(self, max_chars: int = 4000) -> str:
+        """ページ本文のテキストを返す（表・照会結果などを「読む」ためのツール）。"""
+        def op(page):
+            body = page.evaluate(PAGE_TEXT_JS.strip()) or ""
+            return (page.url, page.title(), body)
+        url, title, body = self._call(op)
+        return format_page_text(url, title, body, max_chars)
 
     # ---- Recorder（録画）リプレイ用：セレクタ候補で操作する（iframe / ポップアップ対応） ----
     def click_selector(self, selectors: list, frame: list | None = None,
@@ -331,19 +249,29 @@ class PlaywrightBrowser:
 
     def fill_selector(self, selectors: list, text: str, frame: list | None = None,
                       target: str | None = None) -> str:
-        resolved = _resolve_secrets(text)
-        shown = _mask_secrets(text)
+        shown = mask_secrets(text)
 
         def op(page):
             last = None
             for attempt in range(3):
                 for fr in _all_frames(page, frame, target):
+                    # SECRET はフレームごとの URL でドメイン制限を照合してから解決する
+                    try:
+                        resolved = resolve_secrets(text, fr.url)
+                    except ValueError as e:
+                        last = e
+                        continue
                     for sel in selectors:
                         try:
                             loc = _pw_locator(fr, sel)
                             if loc.count() == 0:
                                 continue
-                            loc.first.fill(resolved, timeout=5000)
+                            first = loc.first
+                            tag = (first.evaluate("el => el.tagName") or "").lower()
+                            if tag == "select":
+                                first.select_option(label=resolved, timeout=5000)
+                            else:
+                                first.fill(resolved, timeout=5000)
                             return f"入力: {sel} ← 「{shown}」（frame={frame}）"
                         except Exception as e:
                             last = e
@@ -369,10 +297,11 @@ class PlaywrightBrowser:
         return self._call(op)
 
     def input_text(self, idx: int, text: str, submit: bool = False) -> str:
-        resolved = _resolve_secrets(text)   # ワーカー外で解決（失敗時はここで例外）
-        shown = _mask_secrets(text)
+        shown = mask_secrets(text)
 
         def op(page):
+            # SECRET は現在ページの URL でドメイン制限を照合してから解決する
+            resolved = resolve_secrets(text, page.url)
             loc = page.locator(f"[data-claude-idx='{idx}']")
             if loc.count() == 0:
                 raise ValueError(f"インデックス {idx} の要素が見つかりません。"
@@ -385,6 +314,41 @@ class PlaywrightBrowser:
                 except Exception:
                     pass
             return f"要素 [{idx}] に「{shown}」を入力しました{'（Enter送信）' if submit else ''}。"
+        return self._call(op)
+
+    def select_option(self, idx: int, option: str) -> str:
+        """<select> 要素の選択肢を選ぶ。表示テキスト → value → 番号 の順で解決を試す。"""
+        option = str(option)
+
+        def op(page):
+            loc = page.locator(f"[data-claude-idx='{idx}']")
+            if loc.count() == 0:
+                raise ValueError(f"インデックス {idx} の要素が見つかりません。"
+                                 "get_page_state でページ状態を取り直してください。")
+            first = loc.first
+            try:
+                first.select_option(label=option, timeout=5000)
+            except Exception:
+                try:
+                    first.select_option(value=option, timeout=5000)
+                except Exception:
+                    if option.isdigit():
+                        first.select_option(index=int(option), timeout=5000)
+                    else:
+                        raise ValueError(f"選択肢「{option}」が見つかりません。"
+                                         "get_page_state の「選択肢:」から選んでください。")
+            return f"要素 [{idx}] で「{option}」を選択しました。"
+        return self._call(op)
+
+    def set_checked(self, idx: int, checked: bool = True) -> str:
+        """checkbox / radio のオン・オフを設定する（既に目的の状態なら何もしない）。"""
+        def op(page):
+            loc = page.locator(f"[data-claude-idx='{idx}']")
+            if loc.count() == 0:
+                raise ValueError(f"インデックス {idx} の要素が見つかりません。"
+                                 "get_page_state でページ状態を取り直してください。")
+            loc.first.set_checked(bool(checked), timeout=5000)
+            return f"要素 [{idx}] を{'ON' if checked else 'OFF'} にしました。"
         return self._call(op)
 
     def send_keys(self, key: str) -> str:

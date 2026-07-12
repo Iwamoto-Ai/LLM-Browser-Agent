@@ -1,0 +1,75 @@
+# Copyright 2026 Iwamoto-Ai — Apache License 2.0
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-browser-agent"
+version = "0.2.0"
+description = "DOM-index based browser automation agent for LLMs (Anthropic API / local Ollama), with MCP server and Chrome Recorder deterministic replay"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Iwamoto-Ai" }]
+keywords = ["browser-automation", "llm", "mcp", "selenium", "playwright", "ollama", "anthropic"]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = [
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+    "selenium>=4.20",
+]
+
+[project.optional-dependencies]
+playwright = ["playwright>=1.40"]
+anthropic = ["anthropic>=0.40"]
+ollama = ["ollama>=0.3"]
+mcp = ["mcp>=1.2"]
+all = [
+    "playwright>=1.40",
+    "anthropic>=0.40",
+    "ollama>=0.3",
+    "mcp>=1.2",
+]
+dev = ["pytest>=8", "ruff>=0.4"]
+
+[project.urls]
+Homepage = "https://github.com/Iwamoto-Ai/LLM-Browser-Agent"
+Issues = "https://github.com/Iwamoto-Ai/LLM-Browser-Agent/issues"
+
+# インストール後は以下のコマンドが使える:
+#   llm-browser-agent            … 単発 CLI（Anthropic）
+#   llm-browser-agent-ollama     … 単発 CLI（ローカル Ollama）
+#   llm-browser-agent-mcp        … MCP サーバー（Claude Desktop の command に指定可）
+#   llm-browser-agent-template   … テンプレート実行
+#   llm-browser-agent-recording  … Recorder JSON の決定論リプレイ
+[project.scripts]
+llm-browser-agent = "agent:main"
+llm-browser-agent-ollama = "agent_ollama:main"
+llm-browser-agent-mcp = "mcp_server:main"
+llm-browser-agent-template = "run_template:main"
+llm-browser-agent-recording = "run_recording:main"
+
+[tool.setuptools]
+py-modules = [
+    "agent", "agent_core", "agent_ollama",
+    "browser", "browser_factory", "browser_playwright",
+    "engine_common", "mcp_server", "recorder_import",
+    "run_recording", "run_template", "tools",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# CI ではエラー級（構文・未定義名）のみ強制。スタイルは段階導入。
+select = ["E9", "F63", "F7", "F82", "F401", "F811"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
