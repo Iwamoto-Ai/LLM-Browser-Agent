@@ -1,0 +1,87 @@
+{
+  "title": "練習EDI2 発注確認(注文受諾) バッチ — 検索→受理→発行→エビデンス→ホームへ戻る（実EBSと同じ要素ID）",
+  "setup": [
+    { "type": "setViewport", "width": 1366, "height": 900 },
+    { "type": "navigate", "url": "http://localhost:8000/edi2/index.html" },
+    {
+      "type": "change",
+      "value": "{{SECRET:MY_USERNAME}}",
+      "selectors": [["#usernameField"], ["aria/ユーザー名"]]
+    },
+    {
+      "type": "change",
+      "value": "{{SECRET:MY_PASSWORD}}",
+      "selectors": [["#passwordField"], ["aria/パスワード"]]
+    },
+    {
+      "type": "click",
+      "selectors": [["aria/ログイン"], ["#LoginBtn"]]
+    },
+    {
+      "type": "click",
+      "selectors": [["#LI取引情報入力・照会 div.textdiv"], ["text/取引情報入力・照会"]]
+    }
+  ],
+  "loop": [
+    {
+      "type": "click",
+      "selectors": [["#POS_ORDERS"]]
+    },
+    {
+      "type": "click",
+      "selectors": [["#POS_PURCHASE_ORDERS"]]
+    },
+    {
+      "type": "click",
+      "selectors": [["aria/拡張検索"], ["#SrchBtn"]]
+    },
+    {
+      "type": "change",
+      "value": "{{発注番号}}",
+      "selectors": [["#Value_0"], ["aria/発注番号"]]
+    },
+    {
+      "type": "click",
+      "selectors": [["aria/進む"], ["#AdvGoBtn"]]
+    },
+    {
+      "type": "click",
+      "selectors": [["aria/{{発注番号}}"], ["xpath///*[@id=\"N58:PosPoNumber:0\"]"]]
+    },
+    {
+      "type": "click",
+      "selectors": [["#ActionGoBtn"]]
+    },
+    {
+      "type": "click",
+      "selectors": [["#ActionGoBtn"]]
+    },
+    {
+      "type": "click",
+      "selectors": [["xpath///*[@id=\"PosSubmitBtn\"]"], ["text/発行"]]
+    },
+    {
+      "type": "screenshot",
+      "name": "{{プロジェクト番号}}__{{発注番号}}",
+      "full_page": false
+    },
+    {
+      "type": "click",
+      "selectors": [["aria/ホーム"], ["#homeIcon"]]
+    },
+    {
+      "type": "click",
+      "selectors": [["#LI取引情報入力・照会 div.textdiv"], ["text/取引情報入力・照会"]]
+    }
+  ],
+  "recover": [
+    {
+      "type": "click",
+      "selectors": [["aria/ホーム"], ["#homeIcon"]]
+    },
+    {
+      "type": "click",
+      "selectors": [["#LI取引情報入力・照会 div.textdiv"], ["text/取引情報入力・照会"]]
+    }
+  ]
+}

@@ -480,21 +480,21 @@ python run_batch.py --batch recordings/edi_practice_batch.json --details data/ed
 - **CSV 推奨**（Excel で「**CSV UTF-8**」として保存 → そのまま読める）。1 行目 = 列名、2 行目以降 = データ。
   **列名がそのまま `{{キー}}`** になる（日本語列名も可: `{{プロジェクト番号}}`）。
 - `.xlsx` の直読みも可（`pip install openpyxl` が必要。先頭シートを読む）。
-  数値は `102001501541.0` にならないよう整数化、日付は `YYYY-MM-DD` に整形される。
+  数値は `900000000001.0` にならないよう整数化、日付は `YYYY-MM-DD` に整形される。
 - **ID 列**: 既定は先頭列（`--id-column` で変更可）。進捗・結果・再実行はこの値で扱うので、
   発注番号など**行ごとに一意な列**を先頭にするのがおすすめ。
 - **skip 列**: `skip` 列に何か入っている行は実行せずスキップ（行を消さずに「今回は流さない」を表現できる）。
 
 ```csv
 発注番号,プロジェクト番号,skip
-102001501541,PM0000012345,
-102001501542,PM0000012346,
-102001501543,PM0000012347,1   ← skip に値がある行は飛ばす
+900000000001,PM9000000001,
+900000000002,PM9000000002,
+900000000003,PM9000000003,1   ← skip に値がある行は飛ばす
 ```
 
 ### 📈 進捗・結果・再実行
 
-- 実行中は `[3/37] 102001501543 開始` のように**件数と ID を逐次表示**（headless でも見える）。
+- 実行中は `[3/37] 900000000003 開始` のように**件数と ID を逐次表示**（headless でも見える）。
   全ログは `output/batch_YYYYMMDD_HHMMSS.log` にも保存される。
 - **1 件の失敗では止まらない**（既定）。失敗時はその場のスクショ（`fail_<ID>_日時.png`）と
   画面状態（同名 .txt）を自動保存し、`recover` で開始画面へ戻って次の件へ進む。
@@ -502,7 +502,7 @@ python run_batch.py --batch recordings/edi_practice_batch.json --details data/ed
 - 終了時に `output/batch_result_YYYYMMDD_HHMMSS.csv`（ID・結果・理由・エビデンス）を出力し、
   「37 件中 成功 35 / 失敗 2 / スキップ 0」のように要約する。
 - **失敗分だけ再実行**: `--retry-from output/batch_result_….csv`（結果 CSV の失敗行だけを流し直す）。
-  特定の件だけなら `--only 102001501543,102001501545`。お試しは `--max-items 3`。
+  特定の件だけなら `--only 900000000003,900000000005`。お試しは `--max-items 3`。
 
 > **⚠️ 登録系の再実行は二重登録に注意**: 「実は登録は成功していたが確認段階で失敗扱いになった」ケースが
 > 混ざり得る。再実行の前に、失敗時スクショ（fail_*.png）で実際の画面を確認してから流すこと。
@@ -520,6 +520,20 @@ python -m http.server 8000
 # 2) バッチ実行（4 件: 成功 3 / スキップ 1 になれば OK）
 $env:MY_USERNAME="demo"; $env:MY_PASSWORD="password123"
 python run_batch.py --batch recordings/edi_practice_batch.json --details data/edi_practice_batch.csv --engine playwright --browser edge --no-headless
+```
+
+**Oracle 型（タブ遷移・発注確認）の練習サイトも同梱** — `test_site/edi2/` は iSupplier Portal 風の
+画面遷移（ログイン → ナビゲータ → 発注 → 拡張検索 → 受理 → 発行 → 確認完了 → ホームへ戻る）を、
+**実 EBS と同じ要素 ID**（`#usernameField`・`#POS_ORDERS`・`#SrchBtn`・`#Value_0`・`#ActionGoBtn`・
+`#PosSubmitBtn`・検索結果リンク `#N58:PosPoNumber:0`）で再現している。本番バッチと URL 以外ほぼ同一の
+定義で検証できるため、実環境の許可が下りる前の**予行演習**に使える。エビデンスは
+「プロジェクト番号__発注番号__日時.png」で保存され、セレクタ内プレースホルダ（`aria/{{発注番号}}`）や
+日本語列名の CSV もこの練習で確認できる。
+
+```powershell
+# EDI2（Oracle 型）練習バッチ（4 件: 成功 3 / スキップ 1。エビデンス例 PM9000000001__900000000001_日時.png）
+$env:MY_USERNAME="demo"; $env:MY_PASSWORD="password123"
+python run_batch.py --batch recordings/edi2_practice_batch.json --details data/edi2_practice_batch.csv --engine playwright --browser edge --no-headless --viewport-shot
 ```
 
 ---

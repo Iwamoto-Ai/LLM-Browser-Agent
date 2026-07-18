@@ -62,7 +62,7 @@ from run_recording import exec_step
 
 # ---------------------------------------------------------------- 明細の読み込み
 def _cell_to_str(v) -> str:
-    """Excel 由来の値を安全に文字列化する（102001501541.0 のような事故を防ぐ）。"""
+    """Excel 由来の値を安全に文字列化する（900000000001.0 のような事故を防ぐ）。"""
     if v is None:
         return ""
     if isinstance(v, _dt.datetime):

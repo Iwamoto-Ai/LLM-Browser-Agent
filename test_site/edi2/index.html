@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>練習 iSupplier Portal（Practice）</title>
+<style>
+  body { font-family: "Segoe UI", sans-serif; margin: 0; background: #fff; }
+  /* ログイン画面（Oracle風の紺） */
+  .login-bg { background: #1f4e6b; min-height: 100vh; padding-top: 60px; color: #fff; }
+  .login-box { width: 360px; margin: 0 auto; background: rgba(255,255,255,.08);
+               padding: 28px; border-radius: 6px; }
+  .login-box label { display: block; margin: 10px 0 4px; }
+  .login-box input { width: 100%; padding: 6px; box-sizing: border-box; }
+  .login-note { width: 360px; margin: 16px auto; font-size: 12px; color: #cfe0ee; }
+  /* 共通ヘッダー */
+  .hdr { background: #1f4e6b; color: #fff; padding: 10px 16px; display: flex;
+         align-items: center; gap: 18px; }
+  .hdr .brand { font-weight: bold; }
+  .hdr a { color: #fff; text-decoration: none; }
+  .hdr .right { margin-left: auto; font-size: 12px; }
+  .tabs { border-bottom: 1px solid #ccc; padding: 8px 16px; display: flex; gap: 18px; }
+  .tabs a { color: #06c; text-decoration: none; cursor: pointer; }
+  .crumb { padding: 6px 16px; font-size: 12px; color: #06c; }
+  .main { padding: 12px 16px; }
+  h2 { margin: 8px 0; }
+  table.grid { border-collapse: collapse; margin-top: 8px; }
+  table.grid th, table.grid td { border: 1px solid #b7cfe3; padding: 5px 8px; font-size: 13px; }
+  table.grid th { background: #dfeaf4; }
+  button { padding: 3px 14px; }
+  .note { font-size: 12px; color: #777; margin-top: 14px; }
+  a.polink { color: #06c; cursor: pointer; text-decoration: underline; }
+  .textdiv { display: inline; }
+  select { padding: 2px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+/* 練習用ダミーサイト（Oracle iSupplier Portal 風）。実在のシステム・データとは無関係。
+   実 EBS の録画と同じ要素 ID（usernameField / POS_ORDERS / SrchBtn / Value_0 /
+   ActionGoBtn / PosSubmitBtn / N58:PosPoNumber:0 …）を持たせ、
+   発注確認（注文受諾）バッチの検証を実環境なしで行えるようにしている。
+   画面ごとに #app を描画し直すことで、実サイトの「別ページ遷移」を模倣する。 */
+var app = document.getElementById('app');
+var currentPo = '';
+
+function header(sub) {
+  return '<div class="hdr">' +
+    '<span class="brand">ORACLE (練習) ' + (sub || 'E-Business Suite') + '</span>' +
+    '<a id="homeIcon">ホーム</a>' +
+    '<span class="right">ログイン名 demo（練習）</span></div>';
+}
+
+/* ---------- 各画面 ---------- */
+function viewLogin(msg) {
+  app.innerHTML =
+    '<div class="login-bg"><div class="login-box">' +
+    '<label>ユーザー名</label><input id="usernameField" autocomplete="off">' +
+    '<label>パスワード</label><input id="passwordField" type="password">' +
+    '<p><button id="LoginBtn">ログイン</button> <button type="button">取消</button></p>' +
+    '<p style="color:#ffd0d0">' + (msg || '') + '</p></div>' +
+    '<div class="login-note">これは練習用ダミーサイトです（demo / password123）。' +
+    '実在の企業・システム・データとは一切関係ありません。</div></div>';
+  document.getElementById('LoginBtn').addEventListener('click', function () {
+    var u = document.getElementById('usernameField').value;
+    var p = document.getElementById('passwordField').value;
+    if (u === 'demo' && p === 'password123') { viewEbsHome(); }
+    else { viewLogin('ユーザー名またはパスワードが違います。'); }
+  });
+}
+
+function viewEbsHome() {
+  app.innerHTML = header('E-Business Suite') +
+    '<div class="main"><h2>ホーム</h2>' +
+    '<div style="border:1px solid #ddd;width:320px;padding:10px">' +
+    '<b>ナビゲータ</b><br><br>📁 仕入先（練習）<br>' +
+    '<div style="margin-left:16px">📄 納入一括登録（練習では未実装）<br>' +
+    '📁 取引情報入力・照会<br>' +
+    '<div style="margin-left:16px"><a id="LI取引情報入力・照会" class="polink">' +
+    '<div class="textdiv">取引情報入力・照会</div></a></div></div></div></div>';
+  bindHome();
+  document.getElementById('LI取引情報入力・照会')
+    .addEventListener('click', viewIspHome);
+}
+
+function viewIspHome() {
+  app.innerHTML = header('iSupplier Portal') +
+    '<div class="tabs"><a>仕入先ホーム</a><a id="POS_ORDERS">発注</a>' +
+    '<a>納入</a><a>財務</a><a>管理</a></div>' +
+    '<div class="main"><h2>仕入先ホーム（練習）</h2>' +
+    '<p>通知・発注一覧・納入一覧のダミー表示。上のタブ「発注」から進みます。</p></div>';
+  bindHome();
+  document.getElementById('POS_ORDERS').addEventListener('click', viewHattyuTab);
+}
+
+function viewHattyuTab() {
+  app.innerHTML = header('iSupplier Portal') +
+    '<div class="tabs"><a>仕入先ホーム</a><a><b>発注</b></a><a>納入</a><a>財務</a><a>管理</a></div>' +
+    '<div class="tabs"><a id="POS_PURCHASE_ORDERS">発注</a><a>購買履歴</a></div>' +
+    '<div class="main"><p>サブタブ「発注」をクリックして発注一覧へ。</p></div>';
+  bindHome();
+  document.getElementById('POS_PURCHASE_ORDERS').addEventListener('click', viewPoList);
+}
+
+function viewPoList() {
+  app.innerHTML = header('iSupplier Portal') +
+    '<div class="tabs"><a>仕入先ホーム</a><a><b>発注</b></a><a>納入</a><a>財務</a><a>管理</a></div>' +
+    '<div class="main"><h2>発注</h2>' +
+    '<p>表示 <select><option>全発注</option></select> <button>進む</button> ' +
+    '<button id="SrchBtn">拡張検索</button></p>' +
+    '<p class="note">練習では「拡張検索」から発注番号で検索します。</p></div>';
+  bindHome();
+  document.getElementById('SrchBtn').addEventListener('click', viewAdvSearch);
+}
+
+function viewAdvSearch() {
+  app.innerHTML = header('iSupplier Portal') +
+    '<div class="tabs"><a>仕入先ホーム</a><a><b>発注</b></a><a>納入</a><a>財務</a><a>管理</a></div>' +
+    '<div class="main"><h2>発注 — 拡張検索</h2>' +
+    '<p>発注番号 <select><option>等しい</option></select> ' +
+    '<input id="Value_0" size="16" autocomplete="off"> ' +
+    '<button id="AdvGoBtn">進む</button></p>' +
+    '<div id="results"><p class="note">検索するには発注番号を入力して「進む」。</p></div></div>';
+  bindHome();
+  document.getElementById('AdvGoBtn').addEventListener('click', function () {
+    var po = document.getElementById('Value_0').value.trim();
+    var r = document.getElementById('results');
+    if (!po) { r.innerHTML = '<p>検索基準を少なくとも 1 つ入力してください。</p>'; return; }
+    r.innerHTML = '<table class="grid"><tr><th>選択</th><th>発注番号</th><th>件名</th>' +
+      '<th>金額</th><th>ステータス</th></tr>' +
+      '<tr><td><input type="radio"></td>' +
+      '<td><a class="polink" id="N58:PosPoNumber:0">' + po + '</a></td>' +
+      '<td>練習サンプル株式会社／Ａ００００００</td><td>16,600</td><td>要確認</td></tr></table>';
+    document.getElementById('N58:PosPoNumber:0').addEventListener('click', function () {
+      currentPo = po; viewPoDetail();
+    });
+  });
+}
+
+function viewPoDetail() {
+  app.innerHTML = header('iSupplier Portal') +
+    '<div class="crumb">発注: 発注 &gt;</div>' +
+    '<div class="main"><h2>標準発注: ' + currentPo + ', 0 (合計 JPY 16,600)</h2>' +
+    '<p>処理 <select><option>確認</option></select> ' +
+    '<button id="ActionGoBtn">進む</button> <button>エクスポート</button></p>' +
+    '<p class="note">発注情報（練習ダミー）: 支払条件 検収翌々月15日支払 / ステータス 要確認</p></div>';
+  bindHome();
+  document.getElementById('ActionGoBtn').addEventListener('click', viewPoConfirm);
+}
+
+function viewPoConfirm() {
+  app.innerHTML = header('iSupplier Portal') +
+    '<div class="crumb">発注: 発注 &gt; オーダー詳細の表示 &gt;</div>' +
+    '<div class="main"><h2>確認 標準発注 : ' + currentPo + ',0 (合計 JPY 16,600)</h2>' +
+    '<p><button>取消</button> <button>エクスポート</button> 処理 ' +
+    '<select><option>発注全体の受理</option></select> ' +
+    '<button id="ActionGoBtn">進む</button></p></div>';
+  bindHome();
+  document.getElementById('ActionGoBtn').addEventListener('click', viewPoNotify);
+}
+
+function viewPoNotify() {
+  app.innerHTML = header('iSupplier Portal') +
+    '<div class="crumb">発注: 発注 &gt; オーダー詳細の表示 &gt; 確認 標準発注 &gt;</div>' +
+    '<div class="main"><h2>通知発注 ' + currentPo + '</h2>' +
+    '<table class="grid"><tr><th>金額</th><td>16,600</td></tr>' +
+    '<tr><th>処理</th><td>受理</td></tr></table>' +
+    '<p><button>取消</button> <button id="PosSubmitBtn">発行</button></p></div>';
+  bindHome();
+  document.getElementById('PosSubmitBtn').addEventListener('click', viewPoDone);
+}
+
+function viewPoDone() {
+  app.innerHTML = header('iSupplier Portal') +
+    '<div class="crumb">発注: 発注 &gt; オーダー詳細の表示 &gt; 確認 標準発注 &gt;</div>' +
+    '<div class="main"><h2>発注確認</h2>' +
+    '<p>発注 ' + currentPo + ' は確認されました。</p>' +
+    '<p><a class="polink" id="backToList">発注要約に戻る</a></p></div>';
+  bindHome();
+  document.getElementById('backToList').addEventListener('click', viewPoList);
+}
+
+function bindHome() {
+  var h = document.getElementById('homeIcon');
+  if (h) { h.addEventListener('click', viewEbsHome); }
+}
+
+viewLogin('');
+</script>
+</body>
+</html>
