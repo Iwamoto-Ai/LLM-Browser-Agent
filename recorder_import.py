@@ -38,7 +38,10 @@ import json
 import re
 
 # {{key}} を data から埋め込む。{{SECRET:NAME}} はコロンを含むため一致せず温存される。
-_PLACEHOLDER = re.compile(r"\{\{([A-Za-z0-9_]+)\}\}")
+# {{キー}} を values から埋め込む。\w は日本語も含むため、Excel の日本語列名
+# （例 {{プロジェクト番号}}）もそのまま使える。{{SECRET:NAME}} はコロンを含むため
+# 一致せず温存される（実行時に環境変数から補完）。
+_PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
 
 
 def load_recording(path: str) -> dict:

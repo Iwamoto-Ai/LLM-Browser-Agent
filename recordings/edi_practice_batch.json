@@ -1,0 +1,51 @@
+{
+  "title": "練習EDI バッチ（明細ごとに 検収照会 → 年月入力 → 検索 → エビデンス保存 を繰り返す）",
+  "setup": [
+    { "type": "setViewport", "width": 1250, "height": 900 },
+    { "type": "navigate", "url": "http://localhost:8000/edi/index.html" },
+    {
+      "type": "change",
+      "value": "{{SECRET:MY_USERNAME}}",
+      "selectors": [["#username"]]
+    },
+    {
+      "type": "change",
+      "value": "{{SECRET:MY_PASSWORD}}",
+      "selectors": [["#password"]]
+    },
+    {
+      "type": "click",
+      "selectors": [["#loginBtn"], ["aria/Login"], ["text/Login"]]
+    }
+  ],
+  "loop": [
+    {
+      "type": "click",
+      "frame": "menu",
+      "selectors": [["#linkKenshu"], ["text/検収照会"]]
+    },
+    {
+      "type": "change",
+      "value": "{{yyyymm}}",
+      "frame": "content",
+      "selectors": [["#yyyymm"]]
+    },
+    {
+      "type": "click",
+      "frame": "content",
+      "selectors": [["#searchBtn"], ["text/検 索"]]
+    },
+    {
+      "type": "screenshot",
+      "name": "{{id}}__{{yyyymm}}",
+      "full_page": false
+    }
+  ],
+  "recover": [
+    {
+      "type": "click",
+      "frame": "menu",
+      "selectors": [["#linkKenshu"], ["text/検収照会"]]
+    }
+  ]
+}
