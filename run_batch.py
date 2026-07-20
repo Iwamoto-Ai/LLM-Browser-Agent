@@ -56,7 +56,7 @@ import os
 import sys
 
 from browser_factory import make_browser
-from recorder_import import missing_placeholders
+from recorder_import import missing_placeholders, load_recording
 from run_recording import exec_step
 
 
@@ -225,12 +225,10 @@ def main() -> None:
     p.set_defaults(headless=False)
     args = p.parse_args()
 
-    with open(args.batch, encoding="utf-8") as f:
-        batch = json.load(f)
+    batch = load_recording(args.batch)   # 行頭 // # コメント対応
     common = {}
     if args.values:
-        with open(args.values, encoding="utf-8") as f:
-            common = json.load(f)
+        common = load_recording(args.values)
 
     headers, rows = load_details(args.details)
     if not rows:

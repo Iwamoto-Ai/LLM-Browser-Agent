@@ -45,8 +45,13 @@ _PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
 
 
 def load_recording(path: str) -> dict:
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    """録画/バッチ定義 JSON を読み込む。**行頭コメント対応**:
+    行の先頭（空白を除く）が ``//`` または ``#`` で始まる行はコメントとして読み飛ばす。
+    行の途中のコメントは非対応（URL の ``http://`` を誤って壊さないための安全設計）。"""
+    with open(path, encoding="utf-8-sig") as f:
+        lines = [ln for ln in f
+                 if not ln.lstrip().startswith(("//", "#"))]
+    return json.loads("".join(lines))
 
 
 def fill_value(text, values: dict):

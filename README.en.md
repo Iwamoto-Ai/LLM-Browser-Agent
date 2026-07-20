@@ -31,6 +31,7 @@ Switchable between **Microsoft Edge (default) / Google Chrome**, running on
 - **3 run modes**: one-shot CLI / template runner / MCP server (conversational operation from Claude Desktop, OpenClaw, or Hermes Agent).
 - **2 LLM backends**: cloud (Anthropic API) / local (Ollama — no API key, fully local).
 - **2 browser engines**: Selenium (default) / Playwright (stable thanks to auto-waiting, full-page screenshots).
+- **Batch execution from Excel/CSV details**: process dozens of registrations/confirmations in one command (progress display, result CSV, re-run failures only).
 - **Deterministic replay of Google Chrome Recorder recordings**: replays a recorded operations file (JSON) reliably without an LLM and without any browser extension (for complex sites).
 - **Secrets never reach the model**: passwords are referenced as `{{SECRET:NAME}}` and the real values are filled in locally at runtime.
 - **Evidence-grade screenshots**: filenames automatically get a timestamp `_YYYYMMDD_HHMMSS` (never overwritten). Selenium also supports full-page capture via CDP.
@@ -87,6 +88,8 @@ Whichever you choose, the core mechanism (operating elements by index number) is
 ```powershell
 cd C:\path\to\LLM-Browser-Agent
 pip install -r requirements.txt
+# Needed only if you want batch details read directly from Excel (.xlsx)
+pip install openpyxl
 # Or install as a package (adds console scripts):
 #   pip install -e ".[all]"   → commands like llm-browser-agent / llm-browser-agent-mcp become available
 # Only if using the cloud (Anthropic API):
@@ -500,6 +503,113 @@ Writing this tool's recording JSON from that output gives stable results. Mappin
 
 ---
 
+## 🔁 Batch execution (process dozens of detail rows from Excel/CSV)
+
+In real work you rarely process one item at a time — you register or confirm **dozens of items in one go**.
+`run_batch.py` treats each row of an Excel/CSV detail file as one item and **repeats the recorded replay
+steps once per row** (no LLM required). Looping, progress display, error handling and re-runs are all
+handled by this layer, so your templates (recordings) stay simple.
+
+```powershell
+python run_batch.py --batch recordings/edi_practice_batch.json --details data/edi_practice_batch.csv --engine playwright --browser edge --no-headless
+```
+
+### 📄 Batch definition JSON (setup / loop / recover / teardown)
+
+Split the steps into "run once" and "repeat per item". Steps use the Chrome Recorder format as-is.
+**Comments are allowed**: any line whose first non-space characters are `//` or `#` is skipped as a
+comment (mid-line comments are not supported — by design, so `http://` in URLs is never broken).
+The same applies to single-run recording JSON files.
+
+```json
+{
+  "title":   "description",
+  "setup":   [ ...login through the start screen (once at the beginning)... ],
+  "loop":    [ ...steps for one item ({{column_name}} is filled from the row)... ],
+  "recover": [ ...steps to get back to the start screen after a failure (optional)... ],
+  "teardown":[ ...logout etc. (once at the end, optional)... ]
+}
+```
+
+- **Notes / milestone display**: put a **comment step** such as
+  `{"type":"comment","text":"Accepting PO {{発注番号}}"}` and it is shown in the run log as 💬
+  without touching the browser (`{{column}}` substitution works too). Handy for showing
+  "what is happening now" during headless runs.
+- **Evidence capture**: place `{"type":"screenshot","name":"{{プロジェクト番号}}__{{発注番号}}","full_page":false}`
+  inside `loop` to save the screen at that point. A timestamp is appended automatically, so files are
+  named "**project__po-number__timestamp.png**" — matching a typical evidence naming rule.
+- **Placeholders work inside selectors too**: e.g. `"selectors": [["aria/{{発注番号}}"]]` clicks the PO-number
+  link that appeared in the search results, keyed by the row's value (no dependence on row position).
+- **`loop` must start and end on the same screen**: finish each item with "return to home" style steps so the
+  next item starts from the same screen (loop invariant). Put the shortest way back into `recover`.
+
+### 📊 Detail file (--details)
+
+- **CSV recommended** (save from Excel as "**CSV UTF-8**"). Row 1 = column names, rows 2+ = data.
+  **Column names become `{{keys}}`** (Japanese column names are fine: `{{プロジェクト番号}}`).
+- Reading `.xlsx` directly is also supported (requires `pip install openpyxl`; the first sheet is read).
+  Numbers are converted safely (no `900000000001.0`), dates become `YYYY-MM-DD`.
+- **ID column**: defaults to the first column (change with `--id-column`). Progress, results and re-runs
+  are keyed by this value. In the example below the **project number** is the ID (matching an operation
+  that manages items by project number). Put a **column that is unique per row** first.
+- **skip column**: any row with something in the `skip` column is skipped without being executed
+  (express "not this time" without deleting the row).
+
+```csv
+プロジェクト番号,発注番号,skip
+PM9000000001,900000000001,
+PM9000000002,900000000002,
+PM9000000003,900000000003,1   ← rows with a value in skip are skipped
+```
+
+### 📈 Progress, results, re-runs
+
+- While running, the count and ID are shown live, e.g. `[3/37] PM9000000003 開始` (visible even in
+  headless mode). The full log is also saved to `output/batch_YYYYMMDD_HHMMSS.log`.
+- **One failure does not stop the batch** (default). On failure a screenshot (`fail_<ID>_timestamp.png`)
+  and the page state (same-name .txt) are saved automatically, `recover` returns to the start screen,
+  and the next item proceeds. Use `--stop-on-error` to stop at the first failure.
+- At the end a result CSV `output/batch_result_YYYYMMDD_HHMMSS.csv` (ID, result, reason, evidence) is
+  written and a summary such as "37 items: 35 ok / 2 failed / 0 skipped" is printed.
+- **Re-run failures only**: `--retry-from output/batch_result_….csv` (re-runs just the failed rows of a
+  result CSV). For specific items use `--only PM9000000003,PM9000000005`. For a trial run use `--max-items 3`.
+
+> **⚠️ Beware of double registration when re-running write operations**: a "failure" may actually have
+> registered successfully and only the verification step failed. Check the failure screenshots
+> (fail_*.png) before re-running.
+
+### 🧪 Try it without a real system (practice-site batches)
+
+A batch definition and details for the bundled practice site (`test_site/edi/`) are included. It processes
+4 rows (1 of them skipped) in a row and saves evidence files like `K001__2026-01_timestamp.png`.
+
+```powershell
+# 1) Serve the practice sites (separate terminal)
+cd test_site
+python -m http.server 8000
+
+# 2) Run the batch (4 items: 3 ok / 1 skipped means success)
+$env:MY_USERNAME="demo"; $env:MY_PASSWORD="password123"
+python run_batch.py --batch recordings/edi_practice_batch.json --details data/edi_practice_batch.csv --engine playwright --browser edge --no-headless
+```
+
+**An Oracle-style (tab-navigation, PO acknowledgment) practice site is also bundled** — `test_site/edi2/`
+reproduces the iSupplier-Portal-style flow (login → navigator → Orders → advanced search → accept →
+submit → confirmation → back to home) with **the same element IDs as the real EBS**
+(`#usernameField`, `#POS_ORDERS`, `#SrchBtn`, `#Value_0`, `#ActionGoBtn`, `#PosSubmitBtn`, result link
+`#N58:PosPoNumber:0`). The definition is nearly identical to the production batch except for the URL, so
+you can **rehearse before access to the real system is granted**. Evidence is saved as
+"project__po-number__timestamp.png", and selector placeholders (`aria/{{発注番号}}`) plus Japanese CSV
+column names are exercised too.
+
+```powershell
+# EDI2 (Oracle-style) practice batch (4 items: 3 ok / 1 skipped; evidence like PM9000000001__900000000001_timestamp.png)
+$env:MY_USERNAME="demo"; $env:MY_PASSWORD="password123"
+python run_batch.py --batch recordings/edi2_practice_batch.json --details data/edi2_practice_batch.csv --engine playwright --browser edge --no-headless --viewport-shot
+```
+
+---
+
 ## ⚙️ How it works (why it's stable)
 
 1. **Element indexing**: interactive elements on the page get sequential numbers `[0] [1] [2] …`,
@@ -552,6 +662,10 @@ $env:MY_PASSWORD_ALLOWED_DOMAINS="example.co.jp,localhost"   # input is rejected
 - **Plumbing test `selftest.py`**: **passes on both Selenium and Playwright** (verifies browser-operation health without an LLM).
 - **Recorder replay**: verified import, value substitution, and candidate selector resolution with `recordings/test_site.example.json` (`run_recording.py`).
 - **Page error detection (Playwright)**: JS errors / `console.error` shown in the "注意" section of `state()`.
+- **Batch runner `run_batch.py`**: completed on a real browser against both practice sites
+  (frameset-style `edi/` and Oracle-style `edi2/`): 3 ok / 1 skipped, evidence naming, result CSV and
+  💬 comment display all confirmed. Failure isolation, recover, `--retry-from`, Japanese column names
+  and .xlsx reading pass all mock tests.
 - **MCP server**: verified connection from Hermes Agent (NousResearch), tool discovery (9 tools), and `navigate` execution.
 - **CI (GitHub Actions)**: on every push, ubuntu runs syntax checks + unit tests, and windows-latest runs the real-Edge selftest (both Selenium and Playwright engines).
 - Environment: native Windows 11 + Microsoft Edge and Google Chrome.

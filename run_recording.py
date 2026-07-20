@@ -54,6 +54,10 @@ def exec_step(browser, step: dict, values: dict, out_dir: str,
     run_recording.py（単発リプレイ）と run_batch.py（バッチ）の両方から使う共通実行部。"""
     t = step.get("type")
     fr = step.get("frame")
+    if t == "comment":
+        # 手順のメモ／進捗の節目表示。ブラウザ操作はしない。{{キー}} は明細の値で埋まる。
+        log(f"  {tag}💬 {fill_value(step.get('text', ''), values)}")
+        return None
     if t == "setViewport":
         w, h = step.get("width"), step.get("height")
         if w and h and hasattr(browser, "set_viewport"):

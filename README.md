@@ -76,6 +76,8 @@ LLM（頭脳）は **クラウド（Anthropic API）** でも **ローカル（O
 ```powershell
 cd C:\path\to\LLM-Browser-Agent
 pip install -r requirements.txt
+# Excel ファイル（.xlsx）をバッチの明細として直読みしたい場合に必要
+pip install openpyxl
 # クラウド（Anthropic API）を使う場合のみ:
 copy .env.example .env   # ANTHROPIC_API_KEY を記入
 # ローカル（Ollama）だけで使うなら API キーは不要
@@ -456,6 +458,8 @@ python run_batch.py --batch recordings/edi_practice_batch.json --details data/ed
 ### 📄 バッチ定義 JSON（setup / loop / recover / teardown）
 
 手順を「1 回だけ」と「明細ごとに繰り返す」に分けて書く。ステップは Chrome Recorder 形式そのまま。
+**コメントも書ける**: 行の先頭（空白可）が `//` か `#` の行はコメントとして読み飛ばされる
+（行の途中のコメントは不可 — URL の `http://` を壊さないための仕様）。単発リプレイ用の録画 JSON でも同様に使える。
 
 ```json
 {
@@ -467,6 +471,9 @@ python run_batch.py --batch recordings/edi_practice_batch.json --details data/ed
 }
 ```
 
+- **手順メモ／節目の表示**: `{"type":"comment","text":"発注 {{発注番号}} の受諾を開始"}` という
+  **comment ステップ**を置くと、ブラウザ操作なしで実行ログに 💬 として表示される（`{{列名}}` も使える）。
+  headless 実行時に「いま何をしているか」を見せる進捗の節目としても便利。
 - **エビデンス保存**: `loop` の中に `{"type":"screenshot","name":"{{プロジェクト番号}}__{{発注番号}}","full_page":false}`
   を置くと、その時点の画面を保存する。日時は自動付与されるので、保存名は
   「**プロジェクト番号__発注番号__日時.png**」の形式になる（証跡の命名規則にそのまま合う）。
@@ -481,20 +488,21 @@ python run_batch.py --batch recordings/edi_practice_batch.json --details data/ed
   **列名がそのまま `{{キー}}`** になる（日本語列名も可: `{{プロジェクト番号}}`）。
 - `.xlsx` の直読みも可（`pip install openpyxl` が必要。先頭シートを読む）。
   数値は `900000000001.0` にならないよう整数化、日付は `YYYY-MM-DD` に整形される。
-- **ID 列**: 既定は先頭列（`--id-column` で変更可）。進捗・結果・再実行はこの値で扱うので、
-  発注番号など**行ごとに一意な列**を先頭にするのがおすすめ。
+- **ID 列**: 既定は先頭列（`--id-column` で変更可）。進捗・結果・再実行はこの値で扱う。
+  上の例では**プロジェクト番号**が ID になる（案件をプロジェクト番号で管理している運用に合わせた並び）。
+  **行ごとに一意な列**を先頭に置くこと。
 - **skip 列**: `skip` 列に何か入っている行は実行せずスキップ（行を消さずに「今回は流さない」を表現できる）。
 
 ```csv
-発注番号,プロジェクト番号,skip
-900000000001,PM9000000001,
-900000000002,PM9000000002,
-900000000003,PM9000000003,1   ← skip に値がある行は飛ばす
+プロジェクト番号,発注番号,skip
+PM9000000001,900000000001,
+PM9000000002,900000000002,
+PM9000000003,900000000003,1   ← skip に値がある行は飛ばす
 ```
 
 ### 📈 進捗・結果・再実行
 
-- 実行中は `[3/37] 900000000003 開始` のように**件数と ID を逐次表示**（headless でも見える）。
+- 実行中は `[3/37] PM9000000003 開始` のように**件数と ID を逐次表示**（headless でも見える）。
   全ログは `output/batch_YYYYMMDD_HHMMSS.log` にも保存される。
 - **1 件の失敗では止まらない**（既定）。失敗時はその場のスクショ（`fail_<ID>_日時.png`）と
   画面状態（同名 .txt）を自動保存し、`recover` で開始画面へ戻って次の件へ進む。
@@ -502,7 +510,7 @@ python run_batch.py --batch recordings/edi_practice_batch.json --details data/ed
 - 終了時に `output/batch_result_YYYYMMDD_HHMMSS.csv`（ID・結果・理由・エビデンス）を出力し、
   「37 件中 成功 35 / 失敗 2 / スキップ 0」のように要約する。
 - **失敗分だけ再実行**: `--retry-from output/batch_result_….csv`（結果 CSV の失敗行だけを流し直す）。
-  特定の件だけなら `--only 900000000003,900000000005`。お試しは `--max-items 3`。
+  特定の件だけなら `--only PM9000000003,PM9000000005`。お試しは `--max-items 3`。
 
 > **⚠️ 登録系の再実行は二重登録に注意**: 「実は登録は成功していたが確認段階で失敗扱いになった」ケースが
 > 混ざり得る。再実行の前に、失敗時スクショ（fail_*.png）で実際の画面を確認してから流すこと。
@@ -566,9 +574,12 @@ python run_batch.py --batch recordings/edi2_practice_batch.json --details data/e
 - **配管テスト `selftest.py`**: **Selenium / Playwright とも完走**（LLM なしでブラウザ操作の健全性を確認）。
 - **Recorder リプレイ**: `recordings/test_site.example.json` で取り込み・値の埋め込み・候補セレクタ解決を確認（`run_recording.py`）。
 - **ページエラー検知（Playwright）**: JS エラー / `console.error` を `state()` の「注意」欄に表示。
-- **バッチ実行 `run_batch.py`**: 成功/失敗/スキップの隔離・recover・結果 CSV・`--retry-from`・日本語列名・.xlsx 読込を
-  モックで全テスト合格（実サイトでの検証はこれから。練習サイトのバッチで動作確認可能）。
+- **バッチ実行 `run_batch.py`**: 練習サイト 2 種（フレームセット型 `edi/`・Oracle 型 `edi2/`）で
+  **実ブラウザ完走**（成功 3 / スキップ 1、エビデンス命名・結果 CSV・💬 コメント表示まで確認）。
+  失敗隔離・recover・`--retry-from`・日本語列名・.xlsx 読込はモックで全テスト合格。
 - **MCP サーバー**: Hermes Agent（NousResearch）から接続・ツール検出（9 個）・`navigate` 実行までを確認。
+- **CI（GitHub Actions）**: push のたびに ubuntu で構文チェック＋ユニットテスト、windows-latest で実 Edge の
+  selftest（Selenium / Playwright 両エンジン）を実行。
 - 環境: ネイティブ Windows 11 ＋ Microsoft Edge および Google Chrome。
 
 ---
