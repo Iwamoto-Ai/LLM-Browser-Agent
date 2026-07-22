@@ -224,14 +224,14 @@ API を使えない環境（社内など）向けに、頭脳をローカルの 
 
 ```powershell
 ollama pull qwen3:14b              # 推奨（14B・マルチステップ操作で安定）
-# ollama pull mistral-nemo         # 軽量代替（12B）
+# ollama pull qwen3.5:9b           # 軽量代替（9B）
 
 $env:OLLAMA_THINK="0"                 # 思考オフで徘徊を抑制（qwen3 等の思考型に有効）
 $env:NO_PROXY="localhost,127.0.0.1"   # localhost をプロキシ除外（接続エラー対策）
 python agent_ollama.py --task "..." --model qwen3:14b --browser edge --no-headless
 ```
 
-- **⚠️ 重要**
+**⚠️ 重要**
 - **マルチステップのフォーム操作では tool calling 機能が優れたモデルを選ぶこと。** 
 - **`OLLAMA_THINK=0`**: 思考が長いと同じ操作を繰り返したり別ページを探しに行くことがある。思考オフで決断的になる。
 - **`NO_PROXY=localhost,127.0.0.1`**: `Failed to connect to Ollama` の定番対策（クライアントが localhost をプロキシ経由にするのを防ぐ）。
@@ -246,8 +246,7 @@ python agent_ollama.py --task "..." --model qwen3:14b --browser edge --no-headle
 
 - **Selenium（既定）**: 実績の既定。WebDriver は Selenium Manager が自動取得。
 - **Playwright**: **auto-waiting** で要素が操作可能になるまで自動待機するため、動的ページ・複雑メニューでの
-  取りこぼしが減る。フルページのスクショが標準。`channel="msedge"`/`"chrome"` で**導入済みブラウザ**を使うので
-  ブラウザ本体の DL は不要（`pip install playwright` だけでよい・社内向き）。
+  取りこぼしが減る。フルページのスクショが標準。
 - **速度より安定性**: LLM 駆動では全体時間の支配項は LLM 推論なので、エンジン間の速度差は体感しにくい。
   Playwright の利点は速さより「待機の確実さ」。
 - **MCP との両立**: Playwright の同期 API は asyncio（非同期） 上で動かせないが、本実装は Playwright を**専用スレッド**で
@@ -301,14 +300,14 @@ python run_template.py --template templates/test_site.yaml --values data/test_va
 **⚠️ 注意**
 > Chrome Recorder の「Playwright 形式エクスポート」を使う場合は Chrome 拡張機能が必要となる（社内では使えないことが多い）
 > 本ツールは標準エクスポート形式の**「JSON file」形式**を直接再生するので Chrome 拡張機能不要。（Chrome 101 以降）
-> 録画を Chrome で行い再生を Edge で行う場合でも基本は同じDOMなので動きますが、もし対象サイトがブラウザ判定で表示内容を変えるようなら、再生も Chrome にすること。
+> 録画を Chrome で行い再生を Edge で行う場合でも基本は同じDOMなので動きますが、もし対象サイトがブラウザ判定で表示内容を変えるようなら、再生も Chrome ですること。
 
 **🎥 手順**
 1. Chrome ブラウザで録画したい Web サイトを開く。ページ内で**右クリック**するとメニューが表示されるので、
    1番下の「**検証**」をクリックして DevTools を開く。
 2. 上部の「Elements」がある行の右端、「Network」の右の「**>>**」をクリックし、表示されたメニューの
    1番下の「**Recorder**」をクリック。
-3. **Recorder** パネルが開くので、中央の「**Create recording**」をクリック。
+3. **Recorder** パネルが開くので、右に表示された「**Create a new recording**」をクリック。
 4. 録画名などを指定する（デフォルトのままでも良い）。
 5. 下のほうに赤い〇ボタン「Start recording」をクリックすると録画が始まり、もう一度〇ボタンをクリックすると「End recording」となり録画が停止する。
 6. 録画ファイル名の右に「↑インポート」と「↓エクスポート」があるので「↓エクスポート」をクリック。表示されたメニューの「JSON」を選択し「**JSON file**形式」でエクスポートする。　
@@ -387,7 +386,9 @@ python run_recording.py --recording recordings/edi_practice_direct.json --values
 ```powershell
 # 3-B) ポップアップ版（参照 → 別ウィンドウのカレンダーで 05月 → 検索）: iframe＋別ウィンドウの確認
 python run_recording.py --recording recordings/edi_practice_popup.json --values data/edi_practice_values.json --engine playwright --browser edge --no-headless
+```
 
+```powershell
 # 3-C) フレーム名指定版（frame を "menu"/"content" の名前で指定）: Codegen 由来の名前指定の確認
 python run_recording.py --recording recordings/edi_practice_named.json --values data/edi_practice_values.json --engine playwright --browser edge --no-headless
 ```
@@ -523,8 +524,10 @@ PM9000000003,900000000003,1   ← skip に値がある行は飛ばす
 ```powershell
 # 1) 練習サイトを配信（別ターミナル）
 cd test_site
-python -m http.server 8000
+python -m http.server 8000    #  → 練習サイト: http://localhost:8000/edi2/index.html （demo / password123）
+```
 
+```powershell
 # 2) バッチ実行（4 件: 成功 3 / スキップ 1 になれば OK）
 $env:MY_USERNAME="demo"; $env:MY_PASSWORD="password123"
 python run_batch.py --batch recordings/edi_practice_batch.json --details data/edi_practice_batch.csv --engine playwright --browser edge --no-headless
@@ -548,7 +551,7 @@ python run_batch.py --batch recordings/edi2_practice_batch.json --details data/e
 
 ## ⚙️ 仕組み（なぜ安定するか）
 
-1. **要素のインデックス方式**: ページ上の操作可能な要素に連番 `[0] [1] [2] …` を振り、その一覧を LLM に渡す。
+1. **DOM（Document Object Model）ベースで要素インデックス方式**: ページ上の操作可能な要素に連番 `[0] [1] [2] …` を振り、その一覧を LLM に渡す。
    LLM は番号で `click_element` / `input_text` を呼ぶ。座標やセレクタを推測させないので安定する。
 2. **入力欄の現在値**: `get_page_state` には各入力欄の「現在値」も出る。入力後に値が入ったかを LLM が検証できる。
 3. **主なテキスト**: 見出し・`role=alert`・成功メッセージ等の「操作はできないが状況判断に重要なテキスト」も
@@ -562,9 +565,9 @@ python run_batch.py --batch recordings/edi2_practice_batch.json --details data/e
 
 ## 🔒 秘密情報の扱い
 
-パスワード等は **モデルに渡さない**。指示やツール引数では `{{SECRET:NAME}}` と書き、実際の値は
-ローカル（`.env` または MCP の `env`）の環境変数から補完される。ログ表示も `[SECRET:NAME]` にマスクされる。
-`.env` と設定 JSON は Git にコミットしないこと（`.gitignore` 済み）。
+- パスワード等は **モデルに渡さない**。指示やツール引数では `{{SECRET:NAME}}` と書き、実際の値は
+ローカル（`.env` または MCP の `env`）の環境変数から補完される。ログ表示も `[SECRET:NAME]` にマスクされる安全設計。
+- `.env` と設定 JSON は Git にコミットしないこと（`.gitignore` 済み）。
 
 ---
 
