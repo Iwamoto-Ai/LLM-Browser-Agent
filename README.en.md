@@ -31,6 +31,8 @@ Switchable between **Microsoft Edge (default) / Google Chrome**, running on
 - **3 run modes**: one-shot CLI / template runner / MCP server (conversational operation from Claude Desktop, OpenClaw, or Hermes Agent).
 - **2 LLM backends**: cloud (Anthropic API) / local (Ollama — no API key, fully local).
 - **2 browser engines**: Selenium (default) / Playwright (stable thanks to auto-waiting, full-page screenshots).
+- **An escape hatch for locked-down workplaces**: drive WebDriver over HTTP from Power Automate Desktop and
+  run the same batches without any browser extension ([guide](docs/PAD_WebDriver.md)).
 - **Batch execution from Excel/CSV details**: process dozens of registrations/confirmations in one command (progress display, result CSV, re-run failures only).
 - **Deterministic replay of Google Chrome Recorder recordings**: replays a recorded operations file (JSON) reliably without an LLM and without any browser extension (for complex sites).
 - **Secrets never reach the model**: passwords are referenced as `{{SECRET:NAME}}` and the real values are filled in locally at runtime.
@@ -607,6 +609,38 @@ column names are exercised too.
 $env:MY_USERNAME="demo"; $env:MY_PASSWORD="password123"
 python run_batch.py --batch recordings/edi2_practice_batch.json --details data/edi2_practice_batch.csv --engine playwright --browser edge --no-headless --viewport-shot
 ```
+
+---
+
+## 🏢 For locked-down workplaces (PAD + WebDriver)
+
+If you cannot install Python on the work PC, **the same batch operation can be built with Power Automate
+Desktop (PAD) alone**. PAD's web automation normally needs a browser extension, but **WebDriver has nothing
+to do with that extension**: `msedgedriver.exe` itself runs as a local HTTP server, so driving it from PAD's
+"Invoke web service" action lets you **control the browser with no extension at all**.
+
+- Reading details, looping, skip handling, progress, result CSV, evidence screenshots → **native PAD actions**
+- Browser operations → **HTTP to WebDriver** (element lookup and actions are unified into one
+  `/execute/sync` JavaScript call)
+
+The build guide is in **[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)** (only 5 HTTP calls are needed,
+plus the shared JavaScript, flow structure and troubleshooting). The document is written in Japanese.
+
+At home you can verify the exact same sequence with a **reference implementation that sends the same HTTP
+calls in the same order** as PAD would (standard library only — no Selenium, no Playwright), and export that
+sequence as the PAD guide:
+
+```powershell
+# in another terminal: msedgedriver.exe --port=9515
+python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json --details data/edi2_practice_batch.csv --trace output/pad_trace.md
+```
+
+Adding `--robin` also generates **Robin code you can paste straight into PAD** (Robin is the language PAD
+flows are actually written in), so you do not have to place actions one by one: `{{column}}` becomes
+`%Row['column']%` and `{{SECRET:…}}` becomes a credential-variable reference. Swap the batch definition JSON
+and you get the flow for that workflow. The practice site
+`test_site/edi2/index.html` is a **single file, so no Python server is required** — open it via `file:///…`
+and use it as a practice target for PAD.
 
 ---
 

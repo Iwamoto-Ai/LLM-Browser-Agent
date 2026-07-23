@@ -22,6 +22,8 @@ LLM（頭脳）は **クラウド（Anthropic API）** でも **ローカル（O
 - **3 つの実行形態**: 単発 CLI / テンプレート実行 / MCP サーバー（Claude Desktop・OpenClaw・Hermes Agent から会話操作）。
 - **2 つの LLM バックエンド**: クラウド（Anthropic API）/ ローカル（Ollama・API キー不要・完全ローカル）。
 - **2 つのブラウザエンジン**: Selenium（既定）/ Playwright（auto-waiting で安定、フルページスクショ）。
+- **開発ツールが使えない職場向けの逃げ道**: Power Automate Desktop から WebDriver を HTTP で操作し、
+  ブラウザ拡張機能なしで同じバッチ運用ができる（[手順書](docs/PAD_WebDriver.md)）。
 - **Excel/CSV の明細をバッチ実行**: 数十件の登録・確認を 1 コマンドで繰り返す（進捗表示・結果 CSV・失敗分だけ再実行）。
 - **Google Chrome Recorder の録画を決定論リプレイ**: ブラウザ拡張機能不要でブラウザの操作を記録したファイル（JSON）を LLM なしで確実に再生（複雑サイト向け）。
 - **秘密情報をモデルに渡さない**: パスワードは `{{SECRET:NAME}}` で参照し、実値は実行時にローカルで補完。
@@ -546,6 +548,35 @@ python run_batch.py --batch recordings/edi_practice_batch.json --details data/ed
 $env:MY_USERNAME="demo"; $env:MY_PASSWORD="password123"
 python run_batch.py --batch recordings/edi2_practice_batch.json --details data/edi2_practice_batch.csv --engine playwright --browser edge --no-headless --viewport-shot
 ```
+
+---
+
+## 🏢 開発ツールが使えない環境向け（PAD ＋ WebDriver）
+
+会社の PC に Python を入れられない場合でも、**Power Automate Desktop（PAD）だけで同じバッチ運用ができる**。
+PAD の Web 自動化は専用のブラウザ拡張機能を必要とするが、**WebDriver は拡張機能とは無関係**で、
+`msedgedriver.exe` 自体がローカルの HTTP サーバーとして動くため、PAD の「Web サービスの呼び出し」から
+HTTP で指示すれば**拡張機能なしでブラウザを操作できる**。
+
+- 明細の読み込み・ループ・skip 判定・進捗・結果 CSV・エビデンスのスクショ → **PAD の標準アクション**
+- ブラウザ操作 → **WebDriver へ HTTP**（要素の特定と操作は `/execute/sync` の JavaScript に一本化）
+
+組み立て手順は **[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)** にまとめてある
+（使う HTTP 呼び出しは 5 種類だけ・共通 JavaScript・フロー構成・トラブルシュート）。
+
+自宅では、**PAD が送るのと同じ HTTP 呼び出しを同じ順序で送る参照実装**で動作を確認し、
+その呼び出し列を PAD 用の手順書として書き出せる（Selenium も Playwright も使わない標準ライブラリのみ）。
+
+```powershell
+# 別ターミナルで: msedgedriver.exe --port=9515
+python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json --details data/edi2_practice_batch.csv --trace output/pad_trace.md
+```
+
+さらに `--robin` を付けると、**PAD にそのまま貼り付けられる Robin コード**（PAD のフローの実体）を生成する。
+アクションを 1 つずつ手で置く必要はなく、`{{列名}}` は `%Row['列名']%` へ、`{{SECRET:…}}` は資格情報変数の参照へ
+自動変換される。バッチ定義 JSON を差し替えれば、その業務のフローがそのまま生成される。
+練習サイト `test_site/edi2/index.html` は**単一ファイルなので Python のサーバー不要**で、
+`file:///…` で開いて PAD の練習台にできる。
 
 ---
 

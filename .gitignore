@@ -18,6 +18,10 @@ output/
 # もしリポジトリで配布したい画像があれば、次の形で個別に戻す:
 #   !docs/sample.png
 
+# PAD 用に生成したフロー（実環境向けは社内 URL・実発注番号を含むため追跡しない）
+*.robin.txt
+*.jsact.js
+
 # Chrome Recorder の生エクスポート（既定名 "Recording*.json"）はどこに置いても無視
 Recording*.json
 
