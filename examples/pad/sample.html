@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<!--
+  sample.html — PAD + WebDriver サンプル用のデモページ
+  単一ファイルで動きます。サーバー不要。C:\temp\sample.html などに置いて
+  file:///C:/temp/sample.html で開いてください。
+
+  実在するシステムとは無関係の、説明用の架空の画面です。
+-->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Demo Order Portal</title>
+<style>
+  body { font-family: "Segoe UI", "Meiryo", sans-serif; margin: 0; background: #f4f6f8; color: #1f2933; }
+  header { background: #24486e; color: #fff; padding: 12px 20px; display: flex; align-items: center; gap: 18px; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header a { color: #cfe0f5; font-size: 13px; text-decoration: none; }
+  main { padding: 24px; max-width: 860px; }
+  .card { background: #fff; border: 1px solid #d5dce4; border-radius: 4px; padding: 20px; margin-bottom: 18px; }
+  h2 { font-size: 15px; margin: 0 0 14px; }
+  label { display: block; font-size: 13px; margin: 10px 0 4px; }
+  input[type=text], input[type=password] { padding: 6px 8px; border: 1px solid #b8c2cc; border-radius: 3px; width: 240px; font-size: 14px; }
+  button { padding: 7px 16px; border: 1px solid #24486e; background: #2f5c8a; color: #fff; border-radius: 3px; cursor: pointer; font-size: 13px; }
+  button.sub { background: #fff; color: #24486e; }
+  table { border-collapse: collapse; width: 100%; margin-top: 12px; font-size: 13px; }
+  th, td { border: 1px solid #d5dce4; padding: 7px 9px; text-align: left; }
+  th { background: #eef2f6; font-weight: 600; }
+  a.rowlink { color: #1b5eab; }
+  .hidden { display: none; }
+  .done { background: #e7f6ec; border: 1px solid #79c295; padding: 14px 16px; border-radius: 4px; font-size: 14px; }
+  .muted { color: #6b7885; font-size: 12px; margin-top: 6px; }
+  nav { display: flex; gap: 10px; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Demo Order Portal</h1>
+  <a href="#" id="home-link" aria-label="Home" onclick="go('home');return false;">Home</a>
+</header>
+
+<main>
+
+  <!-- ============ ログイン ============ -->
+  <section id="scr-login" class="card">
+    <h2>Sign in</h2>
+    <label for="login-user">User</label>
+    <input type="text" id="login-user" aria-label="User">
+    <label for="login-pass">Password</label>
+    <input type="password" id="login-pass" aria-label="Password">
+    <p class="muted">デモページです。任意の値で入れます。</p>
+    <p><button id="btn-signin" aria-label="Sign in" onclick="go('home')">Sign in</button></p>
+  </section>
+
+  <!-- ============ ホーム ============ -->
+  <section id="scr-home" class="card hidden">
+    <h2>Home</h2>
+    <nav>
+      <button class="sub" id="menu-orders" aria-label="Orders" onclick="go('search')">Orders</button>
+      <button class="sub" id="menu-reports" aria-label="Reports" onclick="go('home')">Reports</button>
+    </nav>
+    <p class="muted">Orders から検索画面に進みます。</p>
+  </section>
+
+  <!-- ============ 検索 ============ -->
+  <section id="scr-search" class="card hidden">
+    <h2>Order search</h2>
+    <label for="search-key">Order key</label>
+    <input type="text" id="search-key" aria-label="Order key">
+    <p><button id="btn-search" aria-label="Search" onclick="doSearch()">Search</button></p>
+    <div id="result-wrap" class="hidden">
+      <table>
+        <thead><tr><th>Order key</th><th>Status</th></tr></thead>
+        <tbody id="result-body"></tbody>
+      </table>
+    </div>
+    <p id="no-result" class="hidden muted">No records found.</p>
+  </section>
+
+  <!-- ============ 明細 ============ -->
+  <section id="scr-detail" class="card hidden">
+    <h2>Order detail</h2>
+    <p>Order key: <strong id="detail-key"></strong></p>
+    <p class="muted">Confirm を押すと確認処理が実行されます。</p>
+    <p><button id="btn-confirm" aria-label="Confirm" onclick="doConfirm()">Confirm</button></p>
+  </section>
+
+  <!-- ============ 完了 ============ -->
+  <section id="scr-done" class="card hidden">
+    <h2>Result</h2>
+    <div class="done" id="done-msg"></div>
+    <p><button class="sub" id="btn-back" aria-label="Back to home" onclick="go('home')">Back to home</button></p>
+  </section>
+
+</main>
+
+<script>
+  // 存在する Order key はこの3つだけ。それ以外は "No records found."
+  // 実システムの「検索0件」を再現するために、あえて限定しています。
+  var VALID_KEYS = ["K-1001", "K-1002", "K-1003"];
+  var currentKey = "";
+
+  function go(screen) {
+    var ids = ["login", "home", "search", "detail", "done"];
+    for (var i = 0; i < ids.length; i++) {
+      document.getElementById("scr-" + ids[i]).classList.add("hidden");
+    }
+    document.getElementById("scr-" + screen).classList.remove("hidden");
+    if (screen === "search") {
+      document.getElementById("search-key").value = "";
+      document.getElementById("result-wrap").classList.add("hidden");
+      document.getElementById("no-result").classList.add("hidden");
+    }
+  }
+
+  function doSearch() {
+    var key = document.getElementById("search-key").value.trim();
+    var hit = VALID_KEYS.indexOf(key) >= 0;
+    var body = document.getElementById("result-body");
+    // ヒットしなければ行を作らない。隠し要素をクリックできてしまうのを避けるため、
+    // 「見えないが DOM には在る」状態を作らないようにしている。
+    body.innerHTML = "";
+    document.getElementById("result-wrap").classList.toggle("hidden", !hit);
+    document.getElementById("no-result").classList.toggle("hidden", hit);
+    if (hit) {
+      currentKey = key;
+      var tr = document.createElement("tr");
+      var td1 = document.createElement("td");
+      var a = document.createElement("a");
+      a.href = "#";
+      a.className = "rowlink";
+      a.id = "result-link";
+      a.textContent = key;
+      a.setAttribute("aria-label", key);
+      a.onclick = function () { openDetail(); return false; };
+      td1.appendChild(a);
+      var td2 = document.createElement("td");
+      td2.textContent = "Open";
+      tr.appendChild(td1);
+      tr.appendChild(td2);
+      body.appendChild(tr);
+    }
+  }
+
+  function openDetail() {
+    document.getElementById("detail-key").textContent = currentKey;
+    go("detail");
+  }
+
+  function doConfirm() {
+    document.getElementById("done-msg").textContent =
+      "Order " + currentKey + " has been confirmed.";
+    go("done");
+  }
+
+  go("login");
+</script>
+
+</body>
+</html>

@@ -8,175 +8,224 @@ PAD の「Web サービスの呼び出し」がまさにそれに当たる。
 このドキュメントは、`run_batch.py`（Python 版バッチランナー）と同じことを、
 **Python を使わず PAD だけで**実現するための組み立て手順である。
 
+企業環境では次のような制約が同時に成立することがある。この手法はそこを通り抜けるためのもの。
+
+- ブラウザー拡張機能のインストールが禁止されている
+- Python / Node.js などの開発ツールがインストールできない
+- PowerShell スクリプトの実行が禁止されている
+- 一方で PAD 無料版は使える
+
+**実機（PAD 無料版 / Windows 11 / Edge）で完走を確認済み。** 以下の記述は原則として実機で
+確認できた内容で、未確認のものはその旨を明記している。
+
+すぐ動かせるサンプルは [`examples/pad/`](../examples/pad/) にある。
+
 ---
 
 ## 🧭 全体像
 
+```
+┌──────────────────────────┐
+│ Power Automate Desktop   │
+│  Web.InvokeWebService    │  ← 標準アクション。拡張機能不要
+└────────────┬─────────────┘
+             │ HTTP + JSON (W3C WebDriver)
+             │ http://127.0.0.1:9515
+┌────────────▼─────────────┐
+│ msedgedriver.exe         │  ← System.RunApplication で起動
+└────────────┬─────────────┘
+             │ DevTools Protocol
+┌────────────▼─────────────┐
+│ Microsoft Edge           │
+└──────────────────────────┘
+```
+
 | 役割 | 担当 |
-|---|---|
+| --- | --- |
 | 明細（Excel/CSV）の読み込み、件数ループ、skip 判定、進捗、結果 CSV、リトライ | **PAD の標準アクション** |
 | ブラウザの起動・画面遷移・クリック・入力・スクショ | **WebDriver**（PAD から HTTP で指示） |
 
 Python 版との対応:
 
 | Python 版 (`run_batch.py`) | PAD 版 |
-|---|---|
+| --- | --- |
 | `--details` の CSV/xlsx 読み込み | 「CSV ファイルから読み取る」 |
 | 明細ごとのループ | 「For each」 |
 | `skip` 列 | 「If」 |
-| `setup` / `loop` / `recover` | サブフロー 3 つに分ける |
-| 失敗しても次の件へ | 「エラー発生時（On block error）」 |
-| 進捗表示 | 「テキストをファイルに書き込む」／通知 |
-| 結果 CSV | 「CSV ファイルに書き込む」 |
-| エビデンスのスクショ | PAD の「スクリーンショットを取得」 |
+| `--max-items` | カウンタ変数 + 「If」 |
+| `setup` / `loop` / `recover` | 同じ 3 部構成（サブフローに分けてもよい） |
+| 失敗しても次の件へ | `FailOnErrorStatus: False` + `ok` 判定 + `NEXT LOOP` |
+| `--retry-from` | 結果 CSV を明細として読み直す（`RetryMode`） |
+| 進捗表示 | 「テキストをファイルに書き込む」 |
+| 結果 CSV | 「テキストをファイルに書き込む」（追記） |
+| エビデンスのスクショ | WebDriver の `/screenshot` + 「Base64 をファイルに変換する」 |
+
+> 初版では「失敗しても次の件へ」を PAD の［エラー発生時（On block error）］で実現する想定だった。
+> しかし `FailOnErrorStatus: False` を指定すると HTTP エラーでフローが止まらないため、
+> **［エラー発生時］は不要**であることが実機で判明した。現在は `ok` 判定と `NEXT LOOP` で
+> 制御している。
 
 ---
 
 ## 🛠️ 事前準備
 
-1. **msedgedriver.exe** を用意する（Edge のバージョンと**必ず一致**させる。Edge が更新されたら入れ替える）。
-2. PAD の最初に「**アプリケーションの実行**」で次を起動する。
-   - アプリケーション: `C:\path\to\msedgedriver.exe`
-   - 引数: `--port=9515`
-   - ウィンドウ スタイル: 非表示 / 実行後: **待たない**
-3. **プロキシ除外**: 社内プロキシがあると `localhost` 宛が失敗することがある。
-   Windows のプロキシ設定で `localhost;127.0.0.1` を除外に入れておく
-   （Ollama で `NO_PROXY=localhost` を設定したのと同じ対策）。
-4. 終了時に `taskkill /IM msedgedriver.exe /F` を実行するフローを入れておくと、プロセスが残らない。
+1. **msedgedriver.exe** を用意する（Edge のバージョンと**必ず一致**させる。Edge が更新されたら
+   入れ替える）。
+2. **プロキシ除外**: 社内プロキシがあると `localhost` 宛が失敗する。Windows のプロキシ設定で
+   `localhost;127.0.0.1` を除外に入れる（Ollama で `NO_PROXY=localhost` を設定したのと同じ対策）。
+3. **フローの先頭で古いドライバーを終了させる。** 前回の実行が異常終了すると
+   `msedgedriver.exe` がポート 9515 を掴んだまま残り、新しいドライバーが起動できない。
+   その状態では**古い方が応答してしまい**、Edge とバージョンが違えば `session not created` になる。
+
+```
+System.TerminateProcess.TerminateProcessByName ProcessName: $'''msedgedriver'''
+WAIT 1
+System.RunApplication.RunApplication ApplicationPath: DriverExe CommandLineArguments: $'''--port=9515''' WindowStyle: System.ProcessWindowStyle.Hidden ProcessId=> DriverPid
+WAIT 3
+```
+
+`taskkill` を「アプリケーションの実行」で呼ぶ必要はない。`System.TerminateProcess` で足りる。
 
 ---
 
-## 🤖 Robin コードを自動生成して貼り付ける（推奨）
+## ⚠️ Web.InvokeWebService の引数（最重要）
 
-PAD のフローは内部的に **Robin 言語**で表現されており、フローデザイナーのキャンバスに
-**Robin のテキストを貼り付ける（Ctrl+V）とアクションが並ぶ**。つまり、上のアクションを 1 つずつ
-手で置く代わりに、**生成したコードを貼り付けるだけ**でフローを組める。
+**ここを外すと何ひとつ動かない。** 実機で確定した書式は次のとおり。
 
-```powershell
-# 自宅の Python 環境で生成（ブラウザも WebDriver も不要）
-python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
-    --details "C:\PAD\edi2_batch.csv" --id-column "プロジェクト番号" `
-    --robin output/pad_flow.robin.txt `
-    --driver-exe "C:\WebDriver\msedgedriver.exe" --pad-out-dir "C:\PAD\output"
+```
+Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
 ```
 
-生成される内容:
+### `EncodeRequestBody: False` が必須
 
-- 設定変数（ドライバのパス／URL／明細 CSV／出力先／資格情報の参照）
-- **共通 JavaScript は別ファイル**（`pad_flow.jsact.js`）として同時生成され、フローからは
-  「ファイルからテキストを読み取る」で `%JsAct%` に読み込む
-- WebDriver 起動 → セッション開始 → `SessionId` の取り出し
-- **セットアップ**（ログイン〜開始画面）の Web サービス呼び出し一式
-- 明細 CSV の読み込み → **`LOOP FOREACH`** → skip 判定 → 1 件分の操作 → エビデンス →
-  失敗時は結果 CSV に記録して次の件へ
-- 後片付け（セッション削除・ドライバ終了・結果の表示）
+既定では本文が URL エンコードされて送信され、WebDriver は
+`invalid argument: missing command parameters` を返す。**この 1 語が最大の関門だった。**
 
-### 📌 貼り付けの制約（実機で判明）
+### `Url:` であって `URL:` ではない
 
-PAD は貼り付けたテキストを解釈できないと**エラーも出さず黙って無視する**。実機での切り分けの結果、
-制約は次のとおりだった（PAD 無料版・Windows 11 で確認）。
+大文字にすると引数として認識されない。
 
-| 内容 | 結果 |
-|---|---|
-| 記号なしの短い文字列 | ○ |
-| 波かっこ `{ }` を含む | ○ |
-| **単引用符 `'` を含む** | **× 無視される** |
-| 角かっこ `[ ]`・比較演算子 | ○ |
-| JSON 形式（`{"a": ["b"]}`） | ○ |
-| 約 300 文字 / 約 700 文字 | ○ |
+### `FailOnErrorStatus: False` を付ける
 
-つまり**長さは問題ではなく、`$'''…'''` の中身のエスケープが原因**だった。実機で確定した規則は次の 2 つ。
+WebDriver は要素が見つからない等で 4xx/5xx を返す。既定のままだとフローがそこで停止するため、
+バッチ処理にならない。`False` にして、成否はレスポンス JSON の `ok` で判定する。
 
-| 文字 | 書き方 | 理由 |
-|---|---|---|
+### 存在しない引数
+
+以下は PAD の `Web.InvokeWebService` には**ない**。書くと貼り付けが失敗する。
+
+- `ConnectionTimeout`
+- `FollowRedirection`
+- `ClearCookies`
+- `Encoding`（`Web.Encoding.Utf8` / `Web.FileEncoding.UTF8` いずれも不可）
+
+> 初版に「日本語が化けるならエンコードを UTF-8 にする」と書いていたが、**この引数は存在しない**。
+> 日本語は既定で正しく送れている。
+
+---
+
+## 🔌 使う HTTP 呼び出しは 6 種類だけ
+
+| 目的 | メソッド | URL | 本文 |
+| --- | --- | --- | --- |
+| ① セッション開始（ブラウザ起動） | POST | `http://127.0.0.1:9515/session` | `{"capabilities":{"alwaysMatch":{"browserName":"MicrosoftEdge"}}}` |
+| ② ウィンドウサイズ | POST | `…/session/%SessionId%/window/rect` | `{"width":1920,"height":1080}` |
+| ③ ページを開く | POST | `…/session/%SessionId%/url` | `{"url":"https://…"}` |
+| ④ **クリック／入力／文字確認（共通）** | POST | `…/session/%SessionId%/execute/sync` | `{"script":"%JsAct%","args":[[セレクタ候補],"click"/"fill"/"exists","値"]}` |
+| ⑤ **スクリーンショット** | GET | `…/session/%SessionId%/screenshot` | （なし） |
+| ⑥ セッション終了 | DELETE | `…/session/%SessionId%` | （なし） |
+
+`Web.Method.Post` / `Web.Method.Get` / `Web.Method.Delete` はいずれも実機で有効。
+
+① の応答から `sessionId` を取り出し、以降で使う URL を先に組み立てておくと 1 行が短く保てる。
+
+```
+Variables.ConvertJsonToCustomObject Json: SessionResp CustomObject=> SessionObj
+SET SessionId TO SessionObj['value']['sessionId']
+SET ExecUrl TO $'''%DriverUrl%/session/%SessionId%/execute/sync'''
+SET GoUrl TO $'''%DriverUrl%/session/%SessionId%/url'''
+SET RectUrl TO $'''%DriverUrl%/session/%SessionId%/window/rect'''
+SET ShotUrl TO $'''%DriverUrl%/session/%SessionId%/screenshot'''
+SET QuitUrl TO $'''%DriverUrl%/session/%SessionId%'''
+```
+
+### カスタムオブジェクトはブラケット記法で参照する
+
+```
+SET SessionId TO SessionObj['value']['sessionId']    ← 正しい
+SET SessionId TO SessionObj.value.sessionId          ← 動かない
+```
+
+WebDriver の応答は常に `{"value": …}` で包まれているので、`['value']` を経由するのが基本形。
+
+> **要素の操作を ④ に一本化するのがコツ。** W3C 標準の「要素を検索して要素 ID を得る →
+> その ID を操作する」方式は往復が増え、`element-6066-11e4-a52e-4f735466cecf` という長いキーの
+> 取り回しが PAD では煩雑になる。④ の JavaScript 方式なら、**PAD 側は同じ形のアクション 1 種類**を
+> 用意し、`args` だけ差し替えればよい。
+
+---
+
+## 📌 Robin リテラルのエスケープ（実機で判明）
+
+PAD は貼り付けたテキストを解釈できないと**エラーも出さず黙って無視する**。原因は 2 系統ある。
+
+### 系統 1: エスケープ
+
+| 文字 | リテラル内の書き方 | 理由 |
+| --- | --- | --- |
 | 単引用符 `'` | `\'` にエスケープ（または使わない） | 生のままだと貼り付けが無視される |
 | バックスラッシュ `\` | **`\\` に二重化** | `\%` が「エスケープされた %」と解釈され、変数展開の `%` が対応せず失敗する |
+| 二重引用符 `"` | `"` でも `\"` でもよい | PAD から取り出すと `\"` に正規化される |
+| 波かっこ `{ }`・角かっこ `[ ]`・比較演算子 | そのまま | 問題なし |
 
-たとえば `$'''%OutDir%\%ShotName%.png'''` は貼り付けできず、`$'''%OutDir%\\%ShotName%.png'''` なら通る。
-そのため生成コードは次のように単引用符を避けている。
+`$'''%OutDir%\%ShotName%.png'''` は貼り付けできず、`$'''%OutDir%\\%ShotName%.png'''` なら通る。
 
-- **JavaScript の文字列はバッククォート** `` `…` `` で書く（`'` も `"` も使わない）。
+### 系統 2: 1 行の長さ
+
+**長すぎる 1 行も黙って無視される。** 約 300 文字・約 700 文字は通るが、共通 JavaScript
+（約 1,700 文字）を 1 つの `SET` に入れると無視される。
+
+対処は 2 つある。
+
+- **変数への継ぎ足しで組み立てる**（推奨）。1 行 100 文字程度に分ければ確実に通る。
+  ```
+  SET JsAct TO $'''前半…'''
+  SET JsAct TO $'''%JsAct%後半…'''
+  ```
+- **`.js` ファイルに逃がして読み込む。** 生成される `pad_flow.jsact.js` を PAD 実行 PC の
+  出力フォルダに置き、「ファイルからテキストを読み取る」で `%JsAct%` に入れる。
+  それも通らない場合は「変数の設定」を手で 1 つ置き、値の欄に `.js` の中身を直接貼る
+  （UI の入力欄なら長い文字列でも入る）。変数名は `JsAct`。
+
+### 系統 3: 変数の渡し方
+
+```
+File: ShotPath            ← 正しい（変数の中身が渡る）
+File: $'''ShotPath'''     ← 誤り（"ShotPath" という文字列になる）
+```
+
+これは**静かに失敗する**ので厄介。「ShotPath」という名前のファイルが作られたり、Base64 として
+解釈できない文字列が渡ったりする。
+
+### 生成コードが単引用符を避けている理由
+
+- **JavaScript の文字列はバックティック** `` `…` `` で書く（`'` も `"` も使わない）。
   実行時に単引用符が必要な箇所は `String.fromCharCode(39)` で作る。
-- **`{{列名}}` は `%Row['列名']%` にしない。** ループ先頭で `SET Col1 TO Row['発注番号']` のように
+- **`{{列名}}` は `%Row['列名']%` にしない。** ループ先頭で `SET Col1 TO Row['プロジェクト番号']` のように
   変数へ取り出し、リテラル内では `%Col1%` を使う（`SET` 行の `'` はリテラルの外なので問題ない）。
 - **`xpath///*[@id="X"]` は `id/X` に変換**する（JS 側が `document.getElementById` で解決する）。
   引用符が残る候補は生成時に除外される。
 
-### 📌 それでも貼り付けがうまくいかないとき
+### 切り分けの手順
 
-PAD は貼り付けたテキストを解釈できないと**エラーも出さず黙って無視する**。経験上の対処:
-
-- **長すぎる 1 行は貼れない。** 共通 JavaScript（約 1,700 文字）を `SET` で直接貼ろうとすると無視される。
-  そのため生成物では **`.js` ファイルに逃がして読み込む**方式にしてある。
-  生成された `pad_flow.jsact.js` を、PAD 実行 PC の出力フォルダ（既定 `C:\PAD\output`）に置くこと。
-- **どうしても読み込みアクションが通らない場合**は、「変数の設定」アクションを手で 1 つ置き、
-  値の欄に `.js` の中身を直接貼り付ける（UI の入力欄なら長い文字列でも入る）。
-  変数名は `JsAct` にする。
-- **一括貼り付けが無視される場合は分割する。** 「設定〜セッション開始まで」「セットアップ」
-  「ループ」「後片付け」の 4 ブロックに分けて貼ると、どこで弾かれているか特定しやすい。
-- 1 行だけ弾かれている場合、その行のアクション名が PAD のバージョンと違う可能性が高い。
-  PAD で同じアクションを 1 つ置いてコピー（Ctrl+C）し、正しい書式に置き換える。
-
-`{{列名}}` は **`%Row['列名']%`** に自動変換されるので、明細の値がそのまま流し込まれる
-（`aria/{{発注番号}}` のようなセレクタ内の指定も変換される）。
-`{{SECRET:…}}` は **`%EdiUser%` / `%EdiPassword%`** への参照に置き換わるため、
-生成物に資格情報の平文は入らない。PAD 側で「資格情報」または暗号化変数を割り当てること。
-
-### ✅ 実機で確認できたアクション書式（PAD 無料版 / Windows 11）
-
-貼り付けが通ることを確認済み:
-
-| 用途 | Robin |
-|---|---|
-| WebDriver 起動 | `System.RunApplication.RunApplication` |
-| HTTP 呼び出し | `Web.InvokeWebService.InvokeWebService` |
-| JSON 解析 | `Variables.ConvertJsonToCustomObject` |
-| CSV 読み込み | `File.ReadCsvFile.ReadCsvFile` |
-| テキスト追記 | `File.WriteText` |
-| 現在日時 | `DateTime.GetCurrentDateTime.Local` |
-| **スクリーンショット** | **`Workstation.TakeScreenshot.TakeScreenshotAndSaveToFile`**（`File:` と `ImageFormat: System.ImageFormat.Png`） |
-| ループ / 条件 / 変数 | `LOOP FOREACH` / `IF` / `SET` |
-
-> **⚠️ ファイル名に日時を入れるときの注意**
-> `DateTime.DateTimeFormat.DateAndTime` は `2026/07/23 8:41:00` のような値を返し、`/` と `:` は
-> Windows のファイル名に使えない。`Text.ConvertDateTimeToText` で `yyyyMMdd_HHmmss` に整形してから使う。
-> また出力フォルダの変数（`OutDir`）末尾に `\` を付けないこと（パスが二重区切りになる）。
-
-> **貼り付け後に必ず確認する点**
-> `※要確認` と書かれた行（ドライバ起動・CSV 読み込み・スクリーンショット・プロセス終了）は、
-> PAD のバージョンによってアクション名や引数が異なることがある。
-> PAD で同じアクションを 1 つキャンバスに置き、それを選択してコピー（Ctrl+C）してテキストに貼ると
-> **その環境での正しい書式**が分かるので、差分があれば置き換える。
-
----
-
-## 🔌 使う HTTP 呼び出しは 5 種類だけ
-
-PAD の「Web サービスの呼び出し」で、**メソッド `POST`／`GET`／`DELETE`**、
-**コンテンツタイプ `application/json`**、本文は下表の JSON を指定する。
-応答は「**JSON をカスタム オブジェクトに変換**」で解析する。
-
-| 目的 | メソッド | URL | 本文 |
-|---|---|---|---|
-| ① セッション開始（ブラウザ起動） | POST | `http://127.0.0.1:9515/session` | `{"capabilities":{"alwaysMatch":{"browserName":"MicrosoftEdge"}}}` |
-| ② ウィンドウサイズ | POST | `…/session/%SessionId%/window/rect` | `{"width":1400,"height":900}` |
-| ③ ページを開く | POST | `…/session/%SessionId%/url` | `{"url":"https://…"}` |
-| ④ **クリック／入力（共通）** | POST | `…/session/%SessionId%/execute/sync` | `{"script":%JsAct%,"args":[ [セレクタ候補], "click" か "fill", "値" ]}` |
-| ⑤ セッション終了 | DELETE | `…/session/%SessionId%` | （なし） |
-
-① の応答 `{"value":{"sessionId":"…"}}` から `sessionId` を取り出し、変数 `%SessionId%` に入れて以降で使う。
-
-> **要素の操作を ④ に一本化するのがコツ。**
-> W3C 標準の「要素を検索して要素 ID を得る → その ID を操作する」方式は往復が増え、
-> `element-6066-11e4-a52e-4f735466cecf` という長いキーの取り回しが PAD では煩雑になる。
-> ④ の JavaScript 方式なら、**PAD 側は同じ形のアクション 1 種類**を用意し、`args` だけ差し替えればよい。
+一括貼り付けが無視される場合は、「設定〜セッション開始」「セットアップ」「ループ」「後片付け」の
+4 ブロックに分けて貼ると、どこで弾かれているか特定できる。1 行だけ弾かれている場合は、
+その行のアクション名が PAD のバージョンと違う可能性が高い。**PAD で同じアクションを 1 つ
+キャンバスに置いてコピー（Ctrl+C）し、テキストに貼れば、その環境での正しい書式が分かる。**
 
 ---
 
 ## 📜 共通 JavaScript（変数 `%JsAct%` に入れておく）
-
-フローの最初に「**変数の設定**」で、この JavaScript を丸ごと 1 つのテキスト変数に入れる。
-以後、④ の呼び出しではこの変数を使い回す（毎回書かない）。
 
 ```javascript
 var cands = arguments[0], action = arguments[1], value = arguments[2];
@@ -229,31 +278,345 @@ return { ok: false, used: null };
 
 できること:
 
-- **セレクタ候補を順に試す** — 先頭から探し、最初に見つかった要素を操作する（1 つ目が変わっても次で拾える）。
-- **セレクタの書き方は録画 JSON と同じ** — `#id` や `.class`（CSS）、`xpath/…`、`text/表示文字`、`aria/表示名`。
-- `action` は `"click"` / `"fill"` / `"exists"`（`exists` は画面に指定文字があるかの確認。完了メッセージの検証に使う）。
+- **セレクタ候補を順に試す** — 先頭から探し、最初に見つかった要素を操作する（1 つ目が変わっても
+  次で拾える）。
+- **セレクタの書き方は録画 JSON と同じ** — `#id` や `.class`（CSS）、`xpath/…`、`text/表示文字`、
+  `aria/表示名`、`pierce/…`。
+- `action` は `click` / `fill` / `exists`（`exists` は画面に指定文字があるかの確認。
+  完了メッセージの検証に使う）。
 - 戻り値 `{"ok":true,"used":"実際に一致したセレクタ"}` — **`ok` が false ならその件を失敗**として扱う。
+  `used` を残しておくと、どの候補で当たったかがデバッグ時に分かる。
+
+呼び出し側は毎回この形になる。
+
+```
+SET ActBody TO $'''{"script": "%JsAct%", "args": [["#btn-search", "aria/検索"], "click", ""]}'''
+Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+IF ActObj['value']['ok'] <> True THEN
+    SET RowError TO $'''ステップN（click #btn-search）で要素が見つかりません'''
+END
+```
+
+> **隠れている要素に注意。** `querySelector` は `display:none` の要素も返す。`el.click()` は
+> 見えない要素でも `onclick` を発火させるため、「検索 0 件なのに次へ進んでしまう」ことがある。
+> 対象の画面がヒット時だけ行を生成する作りなら問題ないが、`hidden` クラスで隠すだけの作りなら
+> `find()` に可視判定を足すか、`exists` で件数表示を確認する。
 
 ---
 
+## 🤖 録画JSONファイルをPADのRobinコードへ pad_webdriver_ref.py で変換（推奨）
+
+PAD のフローは内部的に **Robin 言語**で表現されており、フローデザイナーのキャンバスに
+**Robin のテキストを貼り付ける（Ctrl+V）とアクションが並ぶ**。この性質を使い、
+**Chrome Recorder の録画 JSON から PAD のフローを機械的に生成する**のがこの節の内容。
+
+アクションを 1 つずつ手で置く必要がない。それ以上に重要なのは、**この手順書に書かれた
+落とし穴がすべて生成器に組み込まれている**ことで、`EncodeRequestBody: False` の指定漏れや
+`SET` の右辺の `%` 誤用のような、貼り付けが黙って無視される類のミスを踏まなくなる。
+
+### 🗺️ 全体の流れ
+
+```
+┌──── 変換環境（Python が使える PC。ブラウザも WebDriver も不要）────┐
+│                                                           │
+│  ① Chrome DevTools の Recorder で業務操作を録画            │
+│           │  「JSON file」形式でエクスポート               │
+│           ▼                                               │
+│  ② recordings/<name>.json                                 │
+│           │  setup / loop / recover / teardown に分割      │
+│           │  値を {{列名}} / {{SECRET:…}} に置き換え       │
+│           ▼                                               │
+│  ③ バッチ定義 JSON                                        │
+│           │                                               │
+│           │  python pad_webdriver_ref.py --robin …         │
+│           ▼                                               │
+│  ④ output/pad_flow.robin.txt   ← PAD に貼り付ける本体      │
+│     output/pad_flow.jsact.js   ← 長い行が貼れない時の保険  │
+│                                                           │
+│     （任意）--trace で手順書 pad_trace.md も出せる         │
+└───────────────────────┬───────────────────────────────────┘
+                        │  生成した Robin を実行環境へ渡す
+┌───────────────────────▼───────────────────────────────────┐
+│        実行環境（PAD だけ使える PC。Python は不要）        │
+│                                                           │
+│  ⑤ C:\temp に置く                                         │
+│       msedgedriver.exe ／ 明細CSV ／ pad_flow.jsact.js     │
+│           ▼                                               │
+│  ⑥ PAD で新規フロー → キャンバスに Ctrl+V                  │
+│           ▼                                               │
+│  ⑦ MaxItems = 1 で試走 → 目で確認 → 10 に上げて本番        │
+│           ▼                                               │
+│  ⑧ C:\temp に出力                                         │
+│       <ID>__<業務キー>__日時.png（エビデンス）             │
+│       pad_result.csv（結果・再実行の入力にもなる）          │
+│       pad_progress.log（進捗）                             │
+└───────────────────────────────────────────────────────────┘
+```
+
+**実行環境に Python が無くてもよい**のがこの方式の要点。変換だけを Python が使える PC で行い、
+できあがった Robin コードを実行環境の PAD に貼り付けて使う。変換にはブラウザも WebDriver も
+必要ないので、実行環境の準備や許可を待っている間にフローを作り込んでおける。
+
+なお、録画（①）は**対象システムにアクセスできる環境**で行う必要がある。②③④の変換作業だけが
+Python を要求する部分で、ここは対象システムに触らない。
+
+---
+
+### 手順 ①〜③：録画 JSON をバッチ定義 JSON にする
+
+録画のしかたは README の「Chrome Recorder で録画 → 決定論リプレイ」を参照。
+エクスポートした JSON を、次の 4 つのセクションに振り分ける。
+
+```
+{
+  "title":   "発注確認（注文受諾）",
+  "setup":   [ …ログイン〜ループの起点まで（最初に 1 回）… ],
+  "loop":    [ …1 件分の手順（{{列名}} が明細の値で埋まる）… ],
+  "recover": [ …失敗後に起点へ戻る最短手順… ],
+  "teardown":[ …ログアウト等（任意）… ]
+}
+```
+
+**振り分けで押さえる点が 4 つある。**
+
+**`loop` の始点と終点を同じ画面にそろえる。** 1 件の最後に「ホームへ戻る」等を入れておけば、
+次の件が必ず同じ状態から始まる。これが崩れると 2 件目以降の失敗理由が
+「要素が見つからない」ばかりになって原因が追えない。
+
+**`recover` を必ず書く。** 生成器は `recover` を「失敗した次の件の前に実行する復帰処理」として
+使う。省略すると開始 URL を開き直すフォールバックになり、ログインが必要なサイトでは
+セッションが切れる。`recover` が無いと **1 件の失敗が全件に連鎖する**。
+
+**`setup` の末尾に完了確認を置く。** 起点に到達できたかを検証する 1 ステップを足すと、
+到達していない状態でループに入るのを止められる（`Halt` が効く）。
+
+```
+{"type": "assertText", "text": "<開始画面に必ず出る文字列>"}
+```
+
+**値を置き換える。** 明細から埋める値は `{{列名}}`、ID とパスワードは `{{SECRET:名前}}`。
+セレクタの中でも使える（`"selectors": [["aria/{{発注番号}}"]]`）。
+
+> **⚠️ 録画直後の JSON には入力した実値がそのまま残る。** 保存・コミット・共有の前に
+> 必ず置き換えること。
+
+---
+
+### 手順 ④：Robin コードを生成する
+
+```
+# Python が使える環境で変換する（ブラウザも WebDriver も不要）
+python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
+    --details "C:\temp\edi2_batch.csv" --id-column "プロジェクト番号" `
+    --robin output/pad_flow.robin.txt `
+    --driver-exe "C:\temp\msedgedriver.exe" --pad-out-dir "C:\temp"
+```
+
+**引数のパスは 2 種類あるので混ぜないこと。**
+
+| 引数 | どのマシンのパスか |
+| --- | --- |
+| `--batch` / `--robin` | **変換環境**（Python が使える PC）のパス。リポジトリ相対でよい |
+| `--details` / `--driver-exe` / `--pad-out-dir` | **実行環境**（PAD を動かす PC）のパス。生成された Robin に文字列として埋め込まれる |
+
+| 引数 | 役割 |
+| --- | --- |
+| `--batch` | バッチ定義 JSON（③で作ったもの） |
+| `--details` | 明細 CSV のパス。`SET DetailsFile` になる |
+| `--id-column` | ID 列の名前。この列が `Col1` になり、進捗・結果・再実行のキーになる |
+| `--robin` | 出力先。同名で `.jsact.js` も一緒に出る |
+| `--driver-exe` | `msedgedriver.exe` のパス。`SET DriverExe` になる |
+| `--pad-out-dir` | 出力フォルダ。`SET BaseDir` になる |
+
+`--details` と `--driver-exe` が `--pad-out-dir` の配下にある場合、生成される Robin は
+それらを `%BaseDir%` 相対で出力する。上の例なら次のようになり、**配布時に直すのは
+`BaseDir` の 1 行だけ**で済む。
+
+```
+SET BaseDir TO $'''C:\\temp'''
+SET DriverExe TO $'''%BaseDir%\\msedgedriver.exe'''
+SET DetailsFile TO $'''%BaseDir%\\edi2_batch.csv'''
+SET ResultFile TO $'''%BaseDir%\\pad_result.csv'''
+SET LogFile TO $'''%BaseDir%\\pad_progress.log'''
+SET ShotDir TO $'''%BaseDir%'''
+```
+
+配下でないパスを渡した場合は絶対パスのまま出力されるので、環境ごとに 3 行を直すことになる。
+
+#### 生成器が自動で行う変換
+
+| 録画 JSON | 生成される Robin |
+| --- | --- |
+| `{{列名}}` | ループ先頭で `SET Col1 TO Row['列名']` として取り出し、以降は `%Col1%` で参照 |
+| `{{SECRET:…USER…}}` / `{{SECRET:…}}` | `%IdSafe%` / `%PwSafe%`（JSON 用にエスケープ済みの変数） |
+| `xpath///*[@id="X"]` | `id/X`（リテラルに引用符を持ち込まないため） |
+| 単引用符を含むセレクタ候補 | 生成時に除外（貼り付けが無視されるため） |
+| 共通 JavaScript | 1 行 100 文字程度に分割して `SET JsAct TO $'''%JsAct%…'''` で継ぎ足し |
+
+**`%Row['列名']%` を直接使わないのが要点。** リテラル内に単引用符が入ると PAD が
+貼り付けを無視するため、ループ先頭で変数へ取り出す形に変換している。
+
+#### 生成される制御構造
+
+録画には含まれない運用機能が付く。すべて手順書の該当節と同じ実装。
+
+- **手動ログイン（既定）** … `LoginMode = manual`。人が手でログインし、PAD はパスワードを
+  一度も受け取らない。録画されたログイン手順は `IF LoginMode = auto THEN` の中に入る
+- **セットアップ失敗の検知** … `Halt` が立つと明細を 1 件も流さずに中止する
+- **件数制限** … `MaxItems`。打ち切った行は「未実行」として結果に残る
+- **skip 列** … 値がある行は飛ばす
+- **失敗分の再実行** … `RetryMode = True` で結果 CSV を明細として読み直す
+- **失敗後の復帰** … `PrevFailed` を悲観的に立て、次の件の前に `recover` を実行する
+- **エビデンス** … WebDriver の `/screenshot`（ブラウザのページだけが写る）＋日時つき命名
+- **失敗時エビデンス** … `fail__` 接頭辞で保存する
+- **結果 CSV と進捗ログ** … 成功・失敗・スキップ・未実行を 1 行ずつ記録
+
+#### 生成時の自動チェック
+
+書き出しの直前に、実機で判明している落とし穴を機械的に洗って警告する。
+**PAD は解釈できない行をエラーも出さずに無視する**ため、生成時に気づけないと
+「貼り付けたのにアクションが足りない」という形で後から発覚する。
+
+- 700 文字を超える行
+- `SET x TO %y%` … 変数の代入で `%` を使っている
+- `EncodeRequestBody: False` の欠落
+- リテラル内のエスケープされていない単引用符
+
+**警告が出たら貼り付ける前に直すこと。** 何も出なければそのまま進んでよい。
+
+---
+
+### 手順 ⑤：実行環境にファイルを置く
+
+`C:\temp`（= `--pad-out-dir` に指定した場所）に次を置く。
+
+| ファイル | 用途 |
+| --- | --- |
+| `msedgedriver.exe` | Edge と**同じメジャーバージョン**のもの |
+| 明細 CSV | `--details` で指定した名前。1 行目が列名 |
+| `pad_flow.jsact.js` | 共通 JavaScript。継ぎ足しが通れば使わないが、保険として置く |
+
+`localhost` / `127.0.0.1` がプロキシ除外に入っていることも確認する。
+
+---
+
+### 手順 ⑥：PAD に貼り付ける
+
+1. PAD で新しいデスクトップフローを作る（**Power Fx は有効にしない**）
+2. `pad_flow.robin.txt` をテキストエディタで開き、**全選択してコピー**
+3. フローデザイナーのキャンバスをクリックして **Ctrl+V**
+
+**アクションが並べば成功。** 何も起きない、または一部しか並ばない場合は、
+「Robin リテラルのエスケープ」の節の切り分け手順を使う。要点は 2 つ。
+
+- **4 ブロックに分けて貼る**（設定〜セッション開始／セットアップ／ループ／後片付け）と
+  どこで弾かれているか特定できる
+- **弾かれた行のアクション名が PAD のバージョンと違う可能性が高い。** PAD で同じアクションを
+  1 つキャンバスに置いてコピー（Ctrl+C）してテキストに貼れば、その環境での正しい書式が分かる
+
+`SET JsAct TO …` の継ぎ足しが通らなかった場合だけ、その行を削除して
+「変数の設定」アクションを 1 つ置き、値の欄に `pad_flow.jsact.js` の中身を直接貼る
+（UI の入力欄なら長い文字列でも入る）。変数名は `JsAct`。
+
+---
+
+### 手順 ⑦：試走から本番へ
+
+**いきなり全件流さない。** 生成時の既定は `MaxItems = 1` になっている。
+
+| 回 | 設定 | 確認すること |
+| --- | --- | --- |
+| 1 回目 | `MaxItems = 1` | ブラウザが起動する／ログインできる／1 件が「成功」になる／エビデンスが開ける |
+| 2 回目 | `MaxItems = 10` | 2 件目以降も通る／skip 行が飛ぶ／結果 CSV の列がずれない |
+| 3 回目 | 失敗を仕込む | `fail__` の PNG が実体としてできる／次の件が復帰して成功する |
+
+3 回目が**いちばん省略されやすく、いちばん重要**。成功経路だけ確認して配布すると、
+最初の失敗が起きたときに証跡が無いことに気づく。やり方は「失敗経路の検証方法」の節に書いた。
+
+---
+
+### 手順 ⑧：出力を確認する
+
+| 出力 | 内容 |
+| --- | --- |
+| `<ID>__<業務キー>__yyyyMMdd_HHmmss.png` | 成功時のエビデンス |
+| `fail__<ID>__<業務キー>__yyyyMMdd_HHmmss.png` | 失敗時の画面 |
+| `pad_result.csv` | ID・業務キー・結果・理由・エビデンス・実行日時 |
+| `pad_progress.log` | 実行開始の区切り行と 1 件ごとの開始・成功・失敗 |
+
+`pad_result.csv` は**そのまま明細として読み直せる列構成**にしてある。失敗分だけ流し直すには
+`RetryMode` を `True` にするだけ。
+
+> **⚠️ 登録系の再実行は二重登録に注意。** 再実行の前に `fail__` の画像で実際の画面を
+> 確認すること。
+
+---
+
+### （任意）手順書だけを出す
+
+`--robin` の代わりに `--trace` を使うと、**PAD が送るのと同じ HTTP 呼び出しを同じ順序で
+実際に送りながら**、その呼び出し列を Markdown の表として書き出せる。フローを人に説明する
+資料や、生成物が期待どおりか確かめる用途に使う。
+
+```
+# 別ターミナルで: msedgedriver.exe --port=9515
+python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
+    --details data/edi2_practice_batch.csv --trace output/pad_trace.md
+```
+
+「何番目に・どのメソッドで・どの URL へ・どんな本文を送るか」が全件出力される
+（セッション ID は `{session}` に伏せ、秘密情報は `[SECRET:名前]` の表記で残らない）。
+
+---
+
+### フローが増えたときの進め方
+
+**2 本目以降はバッチ定義 JSON を差し替えるだけ。** 生成器・手順書・落とし穴の対処は
+共通なので、1 本目で通った環境なら 2 本目は録画からフロー完成までが一気に進む。
+
+ただし**フロー間で規約をそろえること。** 特に `--id-column` に何を指定するか、
+結果 CSV の列構成、エビデンスの命名は、フロー 1 と 2 で違うと運用側が混乱する。
+
 ## 🔁 フローの組み立て
 
-### 1. 準備（1 回だけ）
+1 件動かすのと、数十件を安全に流すのは別の問題。次の 3 部構成にする。
 
-1. 「アプリケーションの実行」で `msedgedriver.exe --port=9515`
-2. 「変数の設定」で `%JsAct%` に上記 JavaScript
-3. 「Web サービスの呼び出し」で ①セッション開始 → 「JSON をカスタム オブジェクトに変換」→
-   `%SessionId%` に `value.sessionId` を格納
-4. ②ウィンドウサイズ、③ログイン画面を開く
-5. ④で ID・パスワードを `fill`、ログインボタンを `click`
-   - **資格情報はフローに直書きしない**。PAD の「資格情報」または暗号化変数を使う。
+```
+setup   … ドライバ起動 → セッション → ログイン → ループの起点へ移動 → 失敗検知
+loop    … 1 件分の処理を繰り返す
+recover … 失敗した件のあと、次の件の前に起点へ戻す
+```
 
-### 2. 明細を読む
+### 1. セットアップ（最初に 1 回）
+
+1. 古いドライバーを終了 → `msedgedriver.exe --port=9515` を起動
+2. `%JsAct%` を用意（継ぎ足しまたはファイル読み込み）
+3. ① セッション開始 → `%SessionId%` と各 URL を組み立て
+4. ② ウィンドウサイズ、③ 対象ページを開く
+5. **ログイン**（→ 次節）
+6. **ループの起点へ移動**（ループ不変条件をそろえるための一手）
+
+### 2. セットアップ失敗を検知して止める ★重要
+
+ログインや起点への移動に失敗したまま明細ループに入ると、**全件が「ステップ 1 で要素が
+見つかりません」という偽の失敗になる。** 本当の原因が結果 CSV から読み取れなくなり、
+再実行時に「本当に未処理か」を 1 件ずつ確認する手間が発生する。
+
+```
+IF RowError <> $'''''' THEN
+    SET Halt TO True
+END
+IF Halt = False THEN
+    …CSV 読み込みとループ全体…
+END
+```
+
+### 3. 明細を読む
 
 「**CSV ファイルから読み取る**」で明細を `%Rows%` に読み込む（「最初の行に列名が含まれる」を ON）。
-列は Python 版と同じ規約にする。
 
-```csv
+```
 プロジェクト番号,発注番号,skip
 PM9000000001,900000000001,
 PM9000000002,900000000002,
@@ -263,88 +626,391 @@ PM9000000003,900000000003,1
 - **先頭列（プロジェクト番号）が ID** — 進捗表示・結果 CSV・再実行はこの値で扱う。
 - **skip 列に値がある行は飛ばす**（行を消さずに「今回は流さない」を表現できる）。
 
-### 3. 明細ごとのループ
+### 4. 件数制限
 
-「**For each**」で `%Rows%` を回し、中を「**エラー発生時（On block error）**」で囲む。
-1 件分の中身は、④の呼び出しを手順どおり並べるだけ。
+いきなり全件流さないための安全弁。本番初日は 1 件にして、画面と結果を目で確認してから上げる。
 
 ```
-For each %Row% in %Rows%
-  If %Row['skip']% ≠ '' then  → 結果に「スキップ」を追加して Next
-  On block error（例外時は「ブロックの最後に移動」＋失敗を記録）
-    ④ click  [["#POS_ORDERS"]]
-    ④ click  [["#POS_PURCHASE_ORDERS"]]
-    ④ click  [["aria/拡張検索","#SrchBtn"]]
-    ④ fill   [["#Value_0"]] , 値 = %Row['発注番号']%
-    ④ click  [["aria/進む","#AdvGoBtn"]]
-    ④ click  [["aria/%Row['発注番号']%"]]      ← セレクタに明細の値を埋める
-    ④ click  [["#ActionGoBtn"]]
-    ④ click  [["#ActionGoBtn"]]
-    ④ click  [["#PosSubmitBtn"]]
-    ④ exists 値 = "は確認されました。"          ← 完了の確認（ok=false なら失敗扱い）
-    「スクリーンショットを取得」→ ファイル名 %Row['プロジェクト番号']%__%Row['発注番号']%__%日時%.png
-    ④ click  [["aria/ホーム","#homeIcon"]]      ← 次の件のために起点へ戻る
-  End
-End
+IF Attempted >= MaxItems THEN
+    File.WriteText … $'''%Col1%,%Col2%,未実行,"件数上限 %MaxItems% 件に達したため",,'''
+    NEXT LOOP
+END
+SET Attempted TO Attempted + 1
 ```
 
-**ループの始点と終点は同じ画面にする**（ループ不変条件）。1 件の最後に「ホームへ戻る」を入れておけば、
-次の件が必ず同じ状態から始まる。失敗時も同じ手順を「エラー発生時」の中で実行して復帰させる。
+**打ち切った行を「未実行」として記録に残す**のが要点。どこから再開すればよいかが分かる。
 
-### 4. 結果の記録と再実行
+### 5. 明細ごとのループ
 
-- 各件の結果（ID／成功・失敗・スキップ／理由／エビデンスのパス）をデータテーブルに追加し、
-  最後に「**CSV ファイルに書き込む**」で保存する。
-- **失敗分だけの再実行**は、その結果 CSV を明細として読み込み、`結果` 列が `失敗` の行だけ回せばよい。
-- 失敗時は「スクリーンショットを取得」で `fail_<ID>_日時.png` も保存しておくと原因調査が早い。
+```
+LOOP FOREACH Row IN Rows
+    SET Col1 TO Row['プロジェクト番号']
+    SET Col2 TO Row['発注番号']
+    SET RowError TO $''''''
 
-> **⚠️ 登録系の再実行は二重登録に注意。**「実は登録は成功していたが確認段階で失敗扱いになった」ことがある。
-> 再実行の前に失敗時スクショで実際の画面を確認すること。
+    …再実行モードの絞り込み / skip 判定 / 件数上限（いずれも NEXT LOOP）…
 
-### 5. 後片付け
+    IF PrevFailed THEN
+        …起点へ戻る操作…
+        SET PrevFailed TO False
+    END
+    SET PrevFailed TO True          # ← 悲観的に置く
 
-⑤ セッション終了（DELETE）→ 「アプリケーションの実行」で `taskkill /IM msedgedriver.exe /F`。
+    …④ の呼び出しを手順どおり並べる。各ステップの後で ok を判定し、
+      失敗ならエビデンスと結果 CSV を書いて NEXT LOOP…
+
+    …エビデンス保存…
+    …起点へ戻る…
+
+    SET PrevFailed TO False         # ← 最後まで通ったらここで戻す
+    SET OkCount TO OkCount + 1
+END
+```
+
+**ループの始点と終点は同じ画面にする**（ループ不変条件）。1 件の最後に「起点へ戻る」を
+入れておけば、次の件が必ず同じ状態から始まる。これが崩れると、2 件目以降の失敗理由が
+「要素が見つからない」ばかりになって原因が追えない。
+
+### 6. 失敗後の復帰 ★重要
+
+**失敗した画面のまま次の件を始めると、1 件の失敗が全件に連鎖する。**
+フラグを立てる箇所を 1 つに減らすには、上のような**悲観的な初期化**が使える。
+`SET PrevFailed TO True` を件の先頭に置き、最後まで通ったときだけ `False` に戻す。
+失敗経路が何箇所あっても 1 行で済む。
+
+実機では、発行完了後に意図的に失敗させた次の行が 18 秒後に正常完了することを確認した。
 
 ---
 
-## 🧪 会社の環境が無くても練習できる
+## 🔐 資格情報の扱い
 
-同梱の練習サイト `test_site/edi2/index.html` は、実 EBS と**同じ要素 ID**
+### 推奨：手動ログイン
+
+**Key Vault 連携の資格情報機能はプレミアム機能である。** 無料版で最も安全なのは、フローが
+ブラウザーを開いたところで一旦止め、**人が手でログインする**方式。
+
+```
+Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' Message: $'''開いたブラウザーでログインし、[OK]を押してください。''' Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn
+IF LoginBtn = $'''Cancel''' THEN
+    SET Halt TO True
+END
+```
+
+**PAD がパスワードを一度も受け取らない。** 変数ペイン・実行ログ・エラーメッセージのどこにも
+残りようがない。パスワードを扱うコードがフローに存在しないこと自体が、運用上の安全になる。
+有人実行で 10 件程度ならこれで足りる。
+
+> WebDriver は**自分が起動したブラウザーしか操作できない。** 別に開いてある普段のブラウザーで
+> ログインしても、フローはそのタブを見られない。
+
+### 後で自動ログインに設計変更したくなった時の注意点
+
+やむを得ず自動化する場合は、
+
+- フローに直書きしない（`SET Pw TO $'''abc123'''` は作らない）
+- 入力ダイアログの［入力の種類］を「パスワード」にする
+- 結果 CSV とログに変数を出さない
+- ログイン失敗時の理由は固定文字列にする（エラー本文には送信した JSON = パスワードが
+  含まれることがある）
+- 使い終わったら `SET Pw TO $''''''` で消す
+- `"` と `\` を含むパスワードは JSON 本文を壊すため、`\` → `\\`、`"` → `\"` の順で
+  エスケープする
+
+エスケープの書式は実機で確認済み。**アクション名は `Text.Replace.ReplaceText`**（`Text.Replace`
+では通らない）。`ComparisonType` が必須で、正規表現を使わない場合は `IsRegEx:` を書かない。
+
+```
+Text.Replace.ReplaceText Text: EdiPassword TextToFind: $'''\\''' IgnoreCase: False ReplaceWith: $'''\\\\''' ActivateEscapeSequences: False ComparisonType: Text.TextComparisonType.CultureSensitive Result=> PwSafe
+Text.Replace.ReplaceText Text: PwSafe TextToFind: $'''\"''' IgnoreCase: False ReplaceWith: $'''\\\"''' ActivateEscapeSequences: False ComparisonType: Text.TextComparisonType.CultureSensitive Result=> PwSafe
+```
+
+**バックスラッシュを先に処理する順序を守ること。** 逆にすると、1 段目で入れた `\\` を
+2 段目がさらに書き換えてしまう。
+
+**`ActivateEscapeSequences: False` が重要。** `True` にすると置き換え先の `\\` が
+エスケープ列として解釈されてバックスラッシュ 1 個に戻り、意図が反転する。
+
+ダイアログとの対応:
+
+| ダイアログ | Robin |
+| --- | --- |
+| 解析するテキスト | `Text:` |
+| 検索するテキスト | `TextToFind:` |
+| 検索と置換に正規表現を使う | `IsRegEx:`（オフなら省略される） |
+| 大文字と小文字を区別しない | `IgnoreCase:` |
+| 置き換え先のテキスト | `ReplaceWith:` |
+| エスケープ シーケンスをアクティブ化 | `ActivateEscapeSequences:` |
+| 比較の種類 | `ComparisonType:`（既定 `Text.TextComparisonType.CultureSensitive`） |
+| 生成された変数 | `Result=>`（既定名 `Replaced`） |
+
+---
+
+## 📸 エビデンス（スクリーンショット）
+
+### PAD の標準アクションは全画面
+
+`Workstation.TakeScreenshot.TakeScreenshotAndSaveToFile` は**デスクトップ全体**を撮る。
+他のウィンドウやメールの件名まで写り込むため、証跡として扱いにくく、情報管理の面でも避けたい。
+
+### WebDriver に撮らせる（推奨）
+
+`GET /session/{id}/screenshot` は**ページの表示領域だけ**を Base64 の PNG で返す。
+
+```
+Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+SET ShotB64 TO ShotObj['value']
+File.ConvertFromBase64 Base64Text: ShotB64 File: ShotPath IfFileExists: File.IfExists.DoNothing
+```
+
+利点が 3 つある。
+
+- **フォーカスに依存しない。** 実行中に通知ウィンドウが前面に出ても影響しない
+- **他のウィンドウが写り込まない**
+- ブラウザーの枠や URL バーが入らない
+
+制約は 1 つ、**スクロールしないと見えない範囲は写らない。** 完了メッセージが下方に出る画面では、
+ウィンドウを縦長にするか、撮る直前に先頭へスクロールする。
+
+`ShotObj` / `ShotResp` は `ActObj` / `ActResp` と**別の変数名にする**。使い回すと直前の `ok` 判定を
+壊す。
+
+### 列挙型の名前空間がアクションごとに違う
+
+```
+File.WriteText            … IfFileExists: File.IfFileExists.Append / Overwrite
+File.ConvertFromBase64    … IfFileExists: File.IfExists.DoNothing / Overwrite
+```
+
+`IfFileExists` と `IfExists` で別物。デザイナーから 1 つ生成して確認するのが確実。
+
+### `DoNothing` の静かな失敗
+
+`File.ConvertFromBase64` は書き込めなくてもエラーを出さずに通過する。
+**結果 CSV にパスが書かれていることは、ファイルが存在する証拠にならない。**
+検証時は実体を必ず目で確認すること。
+
+### ウィンドウサイズ
+
+エビデンスに写る範囲はウィンドウサイズで決まる。**複数の PC に配布する場合は、一番小さい画面に
+収まるサイズにそろえる。** 大きすぎる値を指定すると OS 側でクランプされ、環境によって写る範囲が
+変わってしまう。解像度がまちまちなら `POST …/window/maximize` を使う手もあるが、
+その場合はエビデンスの画像サイズが PC ごとに変わる。
+
+---
+
+## 🕒 日時とファイル名
+
+`DateTime.DateTimeFormat.DateAndTime` は `2026/07/23 8:41:00` のような値を返し、`/` と `:` は
+Windows のファイル名に使えない。テキストに整形してから使う。
+
+```
+DateTime.GetCurrentDateTime.Local DateTimeFormat: DateTime.DateTimeFormat.DateAndTime CurrentDateTime=> NowDt
+Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt CustomFormat: $'''yyyyMMdd_HHmmss''' Result=> Stamp
+```
+
+**`MM` は月、`mm` は分。** `yyyymmdd` と書くと月の位置に分が入る。
+
+ファイル名は「ID ＋業務キー＋日時」で一意にする。失敗時は接頭辞を付けると探しやすい。
+
+```
+<ID>__<業務キー>__yyyyMMdd_HHmmss.png
+fail__<ID>__<業務キー>__yyyyMMdd_HHmmss.png
+```
+
+出力フォルダの変数（`BaseDir` / `OutDir`）**末尾に `\` を付けないこと**（パスが二重区切りになる）。
+
+---
+
+## 📊 結果 CSV と再実行
+
+列構成は、**その CSV をそのまま明細として読み直せる形**にする。
+
+```
+プロジェクト番号,発注番号,結果,理由,エビデンス,実行日時
+```
+
+ID だけでなく**業務キー（例では発注番号）も必ず含める**。これが無いと再実行時に対象を特定できない。
+
+再実行はモードフラグ 1 つで実現できる。
+
+```
+SET RetryMode TO False
+IF RetryMode THEN
+    SET DetailsFile TO $'''%BaseDir%\\pad_result.csv'''
+    SET ResultFile TO $'''%BaseDir%\\pad_result_retry.csv'''
+END
+```
+
+ループ先頭で結果列を見て絞る。
+
+```
+IF RetryMode THEN
+    IF Row['結果'] <> $'''失敗''' THEN
+        NEXT LOOP
+    END
+END
+```
+
+**出力先は必ず別名にする。** 同じファイルを読みながら書くと壊れる。再実行 CSV には `skip` 列が
+無いので、`skip` の判定は `IF RetryMode = False THEN` で囲む。
+
+進捗ログには**失敗も書く**こと。失敗を結果 CSV にだけ書いていると、ログには「開始」だけが残り、
+「成功が出ていない」ことから推測させる形になる。
+
+> **⚠️ 登録系の再実行は二重登録に注意。**「実は登録は成功していたが確認段階で失敗扱いになった」
+> ことがある。再実行の前に失敗時のエビデンスで実際の画面を確認すること。
+
+---
+
+## ✅ 実機で確認できたアクション書式（PAD 無料版 / Windows 11）
+
+| 用途 | Robin |
+| --- | --- |
+| プロセス終了 | `System.TerminateProcess.TerminateProcessByName ProcessName:` |
+| WebDriver 起動 | `System.RunApplication.RunApplication ApplicationPath: CommandLineArguments: WindowStyle: System.ProcessWindowStyle.Hidden ProcessId=>` |
+| HTTP 呼び出し | `Web.InvokeWebService.InvokeWebService`（引数は上記の節） |
+| JSON 解析 | `Variables.ConvertJsonToCustomObject Json: CustomObject=>` |
+| CSV 読み込み | `File.ReadFromCSVFile.ReadCSV CSVFile: Encoding: File.CSVEncoding.UTF8 TrimFields: FirstLineContainsColumnNames: ColumnsSeparator: File.CSVColumnsSeparator.Comma CSVTable=>` |
+| テキスト追記 | `File.WriteText File: TextToWrite: AppendNewLine: IfFileExists: File.IfFileExists.Append` |
+| Base64 → ファイル | `File.ConvertFromBase64 Base64Text: File: IfFileExists: File.IfExists.DoNothing` |
+| 全画面スクショ | `Workstation.TakeScreenshot.TakeScreenshotAndSaveToFile File: ImageFormat: System.ImageFormat.Png` |
+| 現在日時 | `DateTime.GetCurrentDateTime.Local DateTimeFormat: DateTime.DateTimeFormat.DateAndTime CurrentDateTime=>` |
+| 日時 → テキスト | `Text.ConvertDateTimeToText.FromCustomDateTime DateTime: CustomFormat: Result=>` |
+| ダイアログ | `Display.ShowMessageDialog.ShowMessage Title: Message: Icon: Buttons: Display.Buttons.OKCancel DefaultButton: IsTopMost: ButtonPressed=>` |
+| テキストの置換 | `Text.Replace.ReplaceText Text: TextToFind: IgnoreCase: ReplaceWith: ActivateEscapeSequences: ComparisonType: Text.TextComparisonType.CultureSensitive Result=>` |
+| ループ / 条件 / 変数 | `LOOP FOREACH … IN … END` / `NEXT LOOP` / `IF … THEN … END` / `SET … TO …` |
+
+`LOOP FOREACH` の内側でネストした `IF` と `NEXT LOOP` も正常に動作する。
+
+> 初版では CSV 読み込みを `File.ReadCsvFile.ReadCsvFile` と記載していたが、**これは誤り**。
+> 正しくは `File.ReadFromCSVFile.ReadCSV` である。
+
+### 🚫 無効だった引数・構文
+
+- `AfterCompletion`
+- `Encoding: Web.Encoding.Utf8`（`Web.InvokeWebService` にエンコード引数は無い）
+- `EXIT FUNCTION`
+- `Web.InvokeWebService` の `ConnectionTimeout` / `FollowRedirection` / `ClearCookies` / `Encoding`
+- `URL:`（正しくは `Url:`）
+
+---
+
+## 🧪 実環境が無くても練習できる
+
+同梱の練習サイト `test_site/edi2/index.html` は、実 EBS と同じ要素 ID
 （`#usernameField` / `#POS_ORDERS` / `#SrchBtn` / `#Value_0` / `#ActionGoBtn` / `#PosSubmitBtn` /
 検索結果リンク `#N58:PosPoNumber:0`）で発注確認の流れを再現している。
-**単一ファイルなので Python のサーバーは不要** — ファイルをダブルクリックして
-`file:///…/test_site/edi2/index.html` で開けば動く（③のページを開く URL にこのパスを指定すればよい）。
+**単一ファイルなので Python のサーバーは不要** — `file:///…/test_site/edi2/index.html` で開けば動く。
 
-ログインは `demo` / `password123`。この練習サイトで PAD のフローを完成させてから、
-URL と資格情報だけを本番向けに差し替えるのが安全な進め方。
+ログインは `demo` / `password123`。この練習サイトでフローを完成させてから、URL と資格情報だけを
+本番向けに差し替えるのが安全な進め方。
+
+> **練習サイトの限界。** この練習サイトは**存在しない発注番号でも受け付けて確認完了まで通る。**
+> 検索ヒット 0 件の状態を再現できないため、「該当データが無い」という実務で最も多い失敗を
+> サイト側では起こせない。失敗経路の検証には
+> [`examples/pad/sample.html`](../examples/pad/sample.html) を使うか、フローに一時的な
+> 意図的失敗を仕込む（下記）。
+
+### 失敗経路の検証方法
+
+成功経路が通っても、**失敗経路は一度も動いていない。** 本番で価値を持つのはむしろこちらなので、
+配布前に一度は通しておく。
+
+セレクタを壊すと全件が失敗して復帰の確認ができないため、**行によって結果が変わる仕掛け**を
+一時的に入れる。挿入場所は**エビデンス保存の直前**（＝登録が完了し、起点ではない画面にいる状態）。
+
+```
+# ★テスト用（確認後に削除する）
+IF Col2 = $'''<テスト用の業務キー>''' THEN
+    SET RowError TO $'''テスト用の意図的な失敗（発行後）'''
+    …既存の失敗ブロックと同じ処理…
+    NEXT LOOP
+END
+```
+
+明細は「失敗させる行 → 正常な行」の順に並べる。**2 行目が成功すれば復帰処理が効いている。**
+これは「登録は成功したが確認段階で失敗と記録された」という、二重登録の危険が生まれる状況
+そのものなので、一度実際に発生させておく意味がある。
 
 ---
 
-## 📄 手順書の自動生成（自宅で使う）
+## 📦 サンプル
 
-自宅の Python 環境で、**PAD が送るのと同じ HTTP 呼び出しを同じ順序で送る参照実装**を用意している。
+[`examples/pad/`](../examples/pad/) に、社内固有の情報を含まない**公開用の動くサンプル**がある。
+
+| ファイル | 内容 |
+| --- | --- |
+| `sample.html` | ログイン → 検索 → 明細 → 確認 の 4 画面を持つデモページ（単一ファイル） |
+| `sample_batch.csv` | 明細（`ID,KEY,skip` の 3 列） |
+| `pad_sample.robin.txt` | PAD に貼り付けるフロー |
+
+3 ファイルを `C:\temp\` に置き、`msedgedriver.exe` を同じ場所に用意してから
+`pad_sample.robin.txt` を PAD のキャンバスに貼り付けて実行する。
+
+付属の `sample_batch.csv` は、**1 回の実行で成功・失敗・復帰・スキップの 4 経路すべてを通る**
+並びになっている。
+
+| 行 | キー | 結果 |
+| --- | --- | --- |
+| DEMO-001 | K-1001 | 成功 |
+| DEMO-002 | K-9999 | 失敗（存在しないキー → 検索 0 件） |
+| DEMO-003 | K-1002 | **復帰して成功**（ここが成功すれば復帰処理が効いている） |
+| DEMO-004 | K-1003 | スキップ |
+
+`sample.html` は有効キーを 3 つに限定してあり、それ以外は「No records found」で
+検索結果の行自体を生成しない。練習サイトで再現できない「検索 0 件」を、こちらでは
+意図的に作れるようにしている。
+
+---
+
+## 📄 手順書の自動生成（変換環境で使う）
+
+変換環境（Python が使える PC）向けに、**PAD が送るのと同じ HTTP 呼び出しを同じ順序で送る参照実装**を用意している。
 実際に練習サイトへ流して成功を確認しつつ、その呼び出し列を Markdown の表として書き出せる。
 
-```powershell
+```
 # 別ターミナルで: msedgedriver.exe --port=9515
 python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
     --details data/edi2_practice_batch.csv --trace output/pad_trace.md
 ```
 
-`output/pad_trace.md` に「何番目に・どのメソッドで・どの URL へ・どんな本文を送るか」が全件出力される
-（セッション ID は `{session}` に伏せ、秘密情報は `[SECRET:名前]` の表記で残らない）。
-**バッチ定義 JSON を変えれば、その業務の手順書がそのまま生成される**ので、
-フロー 2（納入登録）・フロー 3（エビデンス取得）でも同じ手順で PAD 版を起こせる。
+`output/pad_trace.md` に「何番目に・どのメソッドで・どの URL へ・どんな本文を送るか」が
+全件出力される（セッション ID は `{session}` に伏せ、秘密情報は `[SECRET:名前]` の表記で残らない）。
+**バッチ定義 JSON を変えれば、その業務の手順書がそのまま生成される。**
 
 ---
 
 ## ❓ うまくいかないとき
 
-| 症状 | 確認すること |
-|---|---|
-| ①で接続できない | `msedgedriver.exe` が起動しているか、ポート 9515、プロキシ除外に `localhost` |
-| ①で `session not created` | **Edge とドライバのバージョン不一致**（Edge 更新後によく起きる） |
-| ④が `ok:false` | セレクタ候補が古い。画面を F12 で確認して候補を足す。画面遷移の直後なら待機を入れる |
-| 画面遷移が間に合わない | ④の前に「待機」を 1〜2 秒入れるか、`exists` で目的の文字が出るまでループする |
-| 日本語が化ける | 「Web サービスの呼び出し」のエンコードを UTF-8 にする |
-| 実行後もブラウザが残る | ⑤の DELETE と `taskkill` を最後に必ず通す（エラー時も通るようにする） |
+| 症状 | 原因 | 対処 |
+| --- | --- | --- |
+| ①で接続できない | ドライバーが起動していない / プロキシ | ポート 9515、プロキシ除外に `localhost` |
+| `session not created` | Edge とドライバのバージョン不一致 / 古いドライバがポートを占有 | ドライバを入れ替える / 起動前にプロセス終了 |
+| `invalid argument: missing command parameters` | 本文が URL エンコードされている | **`EncodeRequestBody: False`** |
+| `無効な URI: URスキームが有効ではありません` | `Url:` に本文用の変数を渡している | URL 用の変数を渡す |
+| `パラメーター 値:変数 X が存在しません` | 変数名の誤り、または未初期化 | 変数名を確認 |
+| 貼り付けても何も起きない | 1 行が長すぎる / `'` が未エスケープ | 行を分割する / `\'` にする |
+| 変数が展開されない | `\%` と書いている | `%` にする |
+| ファイルパスが二重区切りになる | フォルダ変数の末尾に `\` | 末尾の `\` を外す |
+| ④が `ok:false` | セレクタが古い | F12 で確認して候補を足す / 画面遷移直後なら待機を入れる |
+| 検索 0 件なのに次へ進む | 隠れている要素をクリックしている | 可視判定を足す / `exists` で確認 |
+| 画面遷移が間に合わない | 待機不足 | ④の前に 1〜2 秒待つか、`exists` で目的の文字が出るまで待つ |
+| スクショが全画面 | PAD の標準アクションは全画面固定 | WebDriver の `/screenshot` を使う |
+| PNG ができないのにエラーも出ない | `IfExists.DoNothing` で静かに通過 | 実体を目で確認する |
+| 1 件失敗したら以降も全部失敗 | 失敗した画面のまま次の件を始めている | 復帰処理を入れる |
+| 全件が「ステップ 1 で失敗」 | セットアップ（ログイン）が失敗している | セットアップ失敗の検知を入れる |
+| ファイル名の月が変な数字 | `yyyymmdd` と書いた（`mm` は分） | `yyyyMMdd` |
+| 実行後もブラウザが残る | 後片付けを通っていない | ⑥の DELETE と `System.TerminateProcess` を最後に必ず通す |
+
+---
+
+## ⚠️ 制約と限界
+
+- **ブラウザー更新のたびにドライバーの入れ替えが必要。** 自動化されないメンテナンス作業が残る
+- **CAPTCHA やボット検知は回避できない**
+- **`iframe` 内の要素には届かない。** 別途 `/frame` への切り替えが必要
+- スクリーンショットは表示領域のみ。ページ全体の撮影は W3C の仕様外
+- Power Fx を有効にしたフローでは書式が変わる（1 起点のインデックス、厳格な型システム、
+  データテーブルとカスタムオブジェクトが型なし扱いになりキャストが必要）。
+  **既存フローの後付け有効化はできない**ため、移行するなら作り直しになる
