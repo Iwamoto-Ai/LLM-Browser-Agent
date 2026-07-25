@@ -465,6 +465,18 @@ def _robin_under_base(path_str: str, out_dir: str) -> str:
     return _robin_str(path_str)
 
 
+def _safe_comment(text: str, cols: list) -> str:
+    """Robin のコメント行に出す文字列。
+
+    {{列名}} は変数参照に変換されるが、{{SECRET:…}} は変換対象外なので
+    そのまま書くと生成物に未解決のプレースホルダが残る。
+    コメントに秘密情報の名前を出す必要はないため、角かっこ表記に置き換える。"""
+    t = _to_robin_var(text, cols)
+    t = re.sub(r"\{\{SECRET:([^}]*)\}\}", r"[SECRET:\1]", t)
+    t = t.replace("{{", "[").replace("}}", "]")
+    return t
+
+
 # ---------------------------------------------------------------- Robin 部品
 # 実機で確認した必須引数。EncodeRequestBody: False が無いと本文が URL エンコードされ、
 # WebDriver が invalid argument: missing command parameters を返して何も動かない。
@@ -600,6 +612,11 @@ def _lint_robin(lines: list, log=print) -> list:
     warns = []
     for i, ln in enumerate(lines, 1):
         s = ln.strip()
+        # 未解決のプレースホルダはコメント行に残っていても不可。
+        # 列名やSECRETの変換漏れをここで捕まえる。閉じかっこ側は見ない
+        # （WebDriver の JSON 本文が正当に }}} で終わるため）。
+        if "{{" in s:
+            warns.append(f"{i}行: 未解決のプレースホルダが残っています: {s[:80]}")
         if s.startswith("#"):
             continue
         if len(ln) > 700:
@@ -765,7 +782,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             A("#   ［入力ダイアログを表示］を 2 つ置き（パスワード側は入力の種類を")
             A("#   「パスワード」にする）、生成変数を EdiUser / EdiPassword に")
             A("#   リネームしたものに置き換えること。")
-            A("# ★ ログイン部分の範囲は {{SECRET:…}} の位置から機械的に判定している。")
+            A("# ★ ログイン部分の範囲は SECRET プレースホルダの位置から機械的に判定している。")
             A("#   録画の形によっては境界がずれるので、貼り付け後に目で確認すること。")
             A("IF LoginMode = $'''auto''' THEN")
             A("    SET EdiUser TO $''''''")
@@ -773,15 +790,28 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             A("    # JSON 本文を壊さないよう \\ → \\\\ 、\" → \\\" の順でエスケープする。")
             A("    # 順序を守ること（逆にすると 1 段目で入れた \\\\ を 2 段目が書き換える）。")
             A("    # ActivateEscapeSequences: False が重要（True だと \\\\ が 1 個に戻る）。")
-            for src, dst in (("EdiUser", "IdSafe"), ("EdiPassword", "PwSafe")):
-                A(f"    Text.Replace.ReplaceText Text: {src} TextToFind: $'''\\\\''' "
-                  f"IgnoreCase: False ReplaceWith: $'''\\\\\\\\''' "
+            # 生成物の他の箇所と同じく、二重引用符は素のまま書く（Robin では
+            # " も \" も同じ意味だが、パス以外に単独のバックスラッシュを残さない）。
+            BS, DQ = chr(92), chr(34)
+            # 一時変数へ往復させる。1段目は var → varEsc、2段目は varEsc → var。
+            # どちらの行も入力と出力が別変数なので、同一変数への書き戻し
+            # （自己代入）が PAD で許されるかどうかに依存しない。
+            # 最終的にエスケープ済みの値が元の変数に入るため、本文では
+            # そのまま %EdiUser% / %EdiPassword% を参照できる。
+            for var in ("EdiUser", "EdiPassword"):
+                tmp = var + "Esc"
+                A(f"    Text.Replace.ReplaceText Text: {var} "
+                  f"TextToFind: $'''{BS}{BS}''' IgnoreCase: False "
+                  f"ReplaceWith: $'''{BS}{BS}{BS}{BS}''' "
                   f"ActivateEscapeSequences: False "
-                  f"ComparisonType: Text.TextComparisonType.CultureSensitive Result=> {dst}")
-                A(f"    Text.Replace.ReplaceText Text: {dst} TextToFind: $'''\\\"''' "
-                  f"IgnoreCase: False ReplaceWith: $'''\\\\\\\"''' "
+                  f"ComparisonType: Text.TextComparisonType.CultureSensitive "
+                  f"Result=> {tmp}")
+                A(f"    Text.Replace.ReplaceText Text: {tmp} "
+                  f"TextToFind: $'''{DQ}''' IgnoreCase: False "
+                  f"ReplaceWith: $'''{BS}{BS}{DQ}''' "
                   f"ActivateEscapeSequences: False "
-                  f"ComparisonType: Text.TextComparisonType.CultureSensitive Result=> {dst}")
+                  f"ComparisonType: Text.TextComparisonType.CultureSensitive "
+                  f"Result=> {var}")
 
         # ★ ログイン範囲を抜けたら、ここで auto ブロックを閉じる。
         #   閉じ忘れると以降のセットアップ手順が auto の中に入ってしまい、
@@ -791,14 +821,14 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             A("")
             A("# ---------- 使い終わったパスワードは即座に消す ----------")
             A("SET EdiPassword TO $''''''")
-            A("SET PwSafe TO $''''''")
+            A("SET EdiPasswordEsc TO $''''''")
             A("")
             in_auto = False
 
         ind = "    " if in_auto else ""
 
         if t == "comment":
-            A(f"{ind}# 💬 {_to_robin_var(st.get('text', ''), cols)}")
+            A(f"{ind}# 💬 {_safe_comment(st.get('text', ''), cols)}")
             continue
         if t == "setViewport":
             n += 1
@@ -824,8 +854,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             value = st.get("value", "")
             if str(value).startswith("{{SECRET:"):
                 name = value[len("{{SECRET:"):-2]
-                # エスケープ済みの変数を使う（生の %EdiPassword% は使わない）
-                value = "%IdSafe%" if "USER" in name.upper() else "%PwSafe%"
+                # エスケープ済み（上の Text.Replace で同変数に上書きしてある）
+                value = "%EdiUser%" if "USER" in name.upper() else "%EdiPassword%"
             L.extend(_robin_act(cands, action, value, ind,
                                 f"{action} {cands[0] if cands else ''}", n, cols))
             A(f"{ind}WAIT 1")
@@ -837,7 +867,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
         A("")
         A("# ---------- 使い終わったパスワードは即座に消す ----------")
         A("SET EdiPassword TO $''''''")
-        A("SET PwSafe TO $''''''")
+        A("SET EdiPasswordEsc TO $''''''")
     A("")
     A("# ---------- セットアップ失敗を検知して止める ----------")
     A("# ここで止めないと、ループ先頭で RowError がリセットされるため、")
@@ -917,7 +947,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
         for st in recover:
             t = st.get("type")
             if t == "comment":
-                A(f"{inner}    # 💬 {_to_robin_var(st.get('text', ''), cols)}")
+                A(f"{inner}    # 💬 {_safe_comment(st.get('text', ''), cols)}")
             elif t in ("click", "doubleClick", "change"):
                 cands = _candidates(st)
                 act = "fill" if t == "change" else "click"
@@ -961,7 +991,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     for st in loop_steps:
         t = st.get("type")
         if t == "comment":
-            A(f"{inner}# 💬 {_to_robin_var(st.get('text', ''), cols)}")
+            A(f"{inner}# 💬 {_safe_comment(st.get('text', ''), cols)}")
             continue
         if t == "screenshot":
             A(f"{inner}# エビデンス保存（%RowId%__%RowKey%__日時）")
@@ -1010,7 +1040,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
         for st in teardown:
             t = st.get("type")
             if t == "comment":
-                A(f"# 💬 {_to_robin_var(st.get('text', ''), cols)}")
+                A(f"# 💬 {_safe_comment(st.get('text', ''), cols)}")
             elif t in ("click", "doubleClick", "change"):
                 cands = _candidates(st)
                 act = "fill" if t == "change" else "click"
