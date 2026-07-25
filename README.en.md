@@ -614,33 +614,100 @@ python run_batch.py --batch recordings/edi2_practice_batch.json --details data/e
 
 ## 🏢 For locked-down workplaces (PAD + WebDriver)
 
-If you cannot install Python on the work PC, **the same batch operation can be built with Power Automate
-Desktop (PAD) alone**. PAD's web automation normally needs a browser extension, but **WebDriver has nothing
+**Even when the execution environment (e.g. a work PC) cannot have Python installed, the same batch
+operation can be built with Power Automate Desktop (PAD) alone.** Only the conversion from a recording JSON
+to Robin code needs Python, and that can happen on a separate machine; you then paste the resulting Robin
+into PAD on the execution environment. PAD's web automation normally needs a browser extension, but **WebDriver has nothing
 to do with that extension**: `msedgedriver.exe` itself runs as a local HTTP server, so driving it from PAD's
 "Invoke web service" action lets you **control the browser with no extension at all**.
 
-- Reading details, looping, skip handling, progress, result CSV, evidence screenshots → **native PAD actions**
+- Reading details, looping, skip handling, item limit, progress, result CSV → **native PAD actions**
 - Browser operations → **HTTP to WebDriver** (element lookup and actions are unified into one
   `/execute/sync` JavaScript call)
+- Evidence → **WebDriver's `/screenshot`** (captures only the browser page, not the desktop)
 
-The build guide is in **[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)** (only 5 HTTP calls are needed,
-plus the shared JavaScript, flow structure and troubleshooting). The document is written in Japanese.
+**This setup has been verified end to end on real hardware** (PAD free edition / Windows 11 / Edge, against
+the bundled practice site `test_site/edi2/`: 3 ok / 1 skipped). The build guide, the Robin syntax confirmed
+on a real machine, and the full list of pitfalls are in **[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)**
+(written in Japanese).
 
-At home you can verify the exact same sequence with a **reference implementation that sends the same HTTP
-calls in the same order** as PAD would (standard library only — no Selenium, no Playwright), and export that
-sequence as the PAD guide:
+### 🗺️ From a recording JSON to a PAD flow
 
-```powershell
-# in another terminal: msedgedriver.exe --port=9515
-python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json --details data/edi2_practice_batch.csv --trace output/pad_trace.md
+**The execution environment does not need Python.** Only the conversion runs on a machine that has Python;
+the resulting Robin is pasted into PAD on the execution environment. Conversion needs neither a browser nor
+WebDriver, so you can build the flow while waiting for the execution environment to be prepared or approved
+(step 1, the recording itself, does need access to the target system).
+
+```
+Conversion environment (a PC with Python; no browser, no WebDriver needed)
+  1. Record the task with Chrome Recorder → export as JSON
+  2. Split into setup / loop / recover / teardown; replace values with {{column}} / {{SECRET:…}}
+  3. python pad_webdriver_ref.py --robin output/pad_flow.robin.txt …
+       └→ pad_flow.robin.txt (paste this into PAD) + pad_flow.jsact.js (fallback)
+                    │
+                    │  hand the generated Robin to the execution environment
+                    ▼
+Execution environment (only PAD available; no Python needed)
+  4. Put in C:\temp: msedgedriver.exe / details CSV / pad_flow.jsact.js
+  5. Create a new desktop flow in PAD (Power Fx disabled) → Ctrl+V on the canvas
+  6. Trial run with MaxItems = 1 → inspect → raise to 10 for production
+  7. Outputs in C:\temp: evidence PNGs / pad_result.csv / pad_progress.log
 ```
 
-Adding `--robin` also generates **Robin code you can paste straight into PAD** (Robin is the language PAD
-flows are actually written in), so you do not have to place actions one by one: `{{column}}` becomes
-`%Row['column']%` and `{{SECRET:…}}` becomes a credential-variable reference. Swap the batch definition JSON
-and you get the flow for that workflow. The practice site
-`test_site/edi2/index.html` is a **single file, so no Python server is required** — open it via `file:///…`
-and use it as a practice target for PAD.
+### ⚙️ The conversion command
+
+```
+# Convert on a machine that has Python (no browser, no WebDriver needed)
+python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
+    --details "C:\temp\edi2_batch.csv" --id-column "プロジェクト番号" `
+    --robin output/pad_flow.robin.txt `
+    --driver-exe "C:\temp\msedgedriver.exe" --pad-out-dir "C:\temp"
+```
+
+**Two kinds of paths are involved — don't mix them.** `--batch` / `--robin` are paths on the **conversion
+environment** and may be repository-relative. `--details` / `--driver-exe` / `--pad-out-dir` are paths on the
+**execution environment** (the PC that runs PAD); they are embedded into the generated Robin as strings. When the
+latter live under the same folder they are emitted relative to `%BaseDir%`, so **only one line needs editing
+when you distribute the flow**.
+
+What you get is not the raw recorded steps but **a flow with the control structure real operation needs**.
+
+| Generated feature | What it does |
+| --- | --- |
+| Manual login (default) | A human logs in by hand and **PAD never receives the password**. The recorded login steps go into the `LoginMode = auto` branch |
+| Setup failure detection | If login or navigation to the start screen fails, no detail rows are processed at all |
+| Item limit / skip column | `MaxItems` for trial runs; rows with a value in `skip` are skipped; rows cut off are recorded as "not run" |
+| Recovery after failure | `recover` runs before the next item, so **one failure does not cascade to every row** |
+| Failure evidence | Saves `fail__<ID>__<key>__timestamp.png` |
+| Result CSV / progress log | The result CSV **can be read back as the details file**, so failures can be re-run directly |
+| Generation-time lint | Warns about lines over 700 chars, misuse of `%` on the right side of `SET`, a missing `EncodeRequestBody: False`, and unescaped single quotes in literals |
+
+That last one matters. **PAD silently ignores lines it cannot parse**, so anything not caught at generation
+time surfaces later as "I pasted it but some actions are missing".
+
+`{{column}}` is extracted at the top of the loop as `SET Col1 TO Row['column']` and referenced as `%Col1%`
+afterwards (a single quote inside a literal makes PAD ignore the paste). `{{SECRET:…}}` becomes a reference
+to a JSON-escaped variable, so **no plaintext secret ends up in the generated file**.
+
+### 🧪 Export just the guide / practice locally
+
+Using `--trace` instead of `--robin` **sends the exact same HTTP calls in the same order as PAD would**,
+while writing that call sequence out as a Markdown guide (standard library only — no Selenium, no Playwright).
+
+```
+# in another terminal: msedgedriver.exe --port=9515
+python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
+    --details data/edi2_practice_batch.csv --trace output/pad_trace.md
+```
+
+The practice site `test_site/edi2/index.html` is a **single file, so no Python server is required** — open it
+via `file:///…` and use it as a PAD practice target, even on the execution environment.
+
+A **public-facing sample** containing no company-specific information is also bundled under `examples/pad/`
+(a demo page `sample.html`, a details CSV, and a Robin file to paste). Its details CSV is ordered so that a
+**single run exercises all four paths: success, failure, recovery, and skip**, letting you see the failure
+behavior from the very first run.
+
 
 ---
 

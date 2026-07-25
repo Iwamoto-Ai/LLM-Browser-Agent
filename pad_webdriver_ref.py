@@ -427,7 +427,10 @@ def _robin_filter_candidates(cands: list) -> list:
 
 def _robin_col_var(col: str, cols: list) -> str:
     """列名 → Robin の変数名（ASCII）。%Row['列名']% はリテラル内に単引用符が入り
-    PAD が貼り付けを無視するため、ループ先頭で変数に取り出して %Col1% の形で使う。"""
+    PAD が貼り付けを無視するため、ループ先頭で変数に取り出して %Col1% の形で使う。
+
+    Col 番号は「ID 列を必ず Col1」にそろえる（write_robin が cols を id_col で
+    事前に埋める）。以降は録画での出現順。"""
     if col not in cols:
         cols.append(col)
     return f"%Col{cols.index(col) + 1}%"
@@ -448,6 +451,79 @@ def _robin_str(s: str) -> str:
     return "$'''" + s.replace("\\", "\\\\").replace("'", "\\'") + "'''"
 
 
+def _robin_under_base(path_str: str, out_dir: str) -> str:
+    """out_dir 配下のパスは %BaseDir% 相対のリテラルにする。
+
+    配布時に直すのが BaseDir の 1 行だけで済むようにするため。
+    out_dir の外にあるパスは絶対パスのまま出す。"""
+    base = out_dir.rstrip("\\/")
+    sep = "\\"
+    if path_str.lower().startswith((base + sep).lower()):
+        rest = path_str[len(base) + 1:]
+        esc = rest.replace("\\", "\\\\").replace("'", "\\'")
+        return "$'''%BaseDir%" + "\\\\" + esc + "'''"
+    return _robin_str(path_str)
+
+
+def _safe_comment(text: str, cols: list) -> str:
+    """Robin のコメント行に出す文字列。
+
+    {{列名}} は変数参照に変換されるが、{{SECRET:…}} は変換対象外なので
+    そのまま書くと生成物に未解決のプレースホルダが残る。
+    コメントに秘密情報の名前を出す必要はないため、角かっこ表記に置き換える。"""
+    t = _to_robin_var(text, cols)
+    t = re.sub(r"\{\{SECRET:([^}]*)\}\}", r"[SECRET:\1]", t)
+    t = t.replace("{{", "[").replace("}}", "]")
+    return t
+
+
+# ---------------------------------------------------------------- Robin 部品
+# 実機で確認した必須引数。EncodeRequestBody: False が無いと本文が URL エンコードされ、
+# WebDriver が invalid argument: missing command parameters を返して何も動かない。
+_WEB_FLAGS = "EncodeRequestBody: False FailOnErrorStatus: False"
+
+
+def _web(url: str, method: str, body: str, resp: str, status: str,
+         indent: str = "") -> str:
+    """Web サービス呼び出し 1 行。body が None なら RequestBody を省く（GET/DELETE 用）。"""
+    b = f"RequestBody: {body} " if body else ""
+    return (f"{indent}Web.InvokeWebService.InvokeWebService Url: {url} "
+            f"Method: Web.Method.{method} Accept: AppJson ContentType: AppJson "
+            f"{b}{_WEB_FLAGS} Response=> {resp} StatusCode=> {status}")
+
+
+def _robin_shot(indent: str, file_var: str) -> list:
+    """エビデンス取得。WebDriver の /screenshot はページの表示領域だけを返すので、
+    デスクトップや他ウィンドウが写り込まず、フォーカスにも依存しない。
+    変数名を ActObj / ActResp と分けるのは、直前の ok 判定を壊さないため。"""
+    return [
+        _web("ShotUrl", "Get", None, "ShotResp", "ShotStatus", indent),
+        f"{indent}Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj",
+        f"{indent}SET ShotB64 TO ShotObj['value']",
+        f"{indent}File.ConvertFromBase64 Base64Text: ShotB64 File: {file_var} "
+        f"IfFileExists: File.IfExists.DoNothing",
+    ]
+
+
+def _robin_fail(indent: str) -> list:
+    """RowError が立っていたら、エビデンスと結果を記録して次の件へ。
+    PrevFailed は件の先頭で True に置いてあるので、ここで触る必要はない。"""
+    ind2 = indent + "    "
+    return [
+        f"{indent}IF RowError <> $'''''' THEN",
+        f"{ind2}SET NgCount TO NgCount + 1",
+        *_robin_shot(ind2, "FailShot"),
+        f"{ind2}File.WriteText File: ResultFile "
+        f"TextToWrite: $'''%RowId%,%RowKey%,失敗,\"%RowError%\",\"%FailShot%\",%RecStamp%''' "
+        f"AppendNewLine: True IfFileExists: File.IfFileExists.Append",
+        f"{ind2}File.WriteText File: LogFile "
+        f"TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' "
+        f"AppendNewLine: True IfFileExists: File.IfFileExists.Append",
+        f"{ind2}NEXT LOOP",
+        f"{indent}END",
+    ]
+
+
 def _robin_act(cands: list, action: str, value: str, indent: str, note: str,
                step_no: int, cols: list) -> list:
     """要素操作 1 ステップ分の Robin（本文組み立て → Web サービス呼び出し → 成否判定）。"""
@@ -456,62 +532,193 @@ def _robin_act(cands: list, action: str, value: str, indent: str, note: str,
     # 注記はリテラルに入るため、単引用符を含めない形に整える
     note = _to_robin_var(note, cols).replace("'", "").replace("[", "").replace("]", "")
     body_args = json.dumps([cands, action, value], ensure_ascii=False)
-    # %JsAct% と %Row['列名']% は Robin 側で展開させたいので、文字列のまま残す
+    # %JsAct% は Robin 側で展開させたいので、文字列のまま残す
+    # exists は「文字列が見つからない」、click/fill は「要素が見つからない」
+    why = "画面に文字列がありません" if action == "exists" else "で要素が見つかりません"
+    reason = (f"ステップ{step_no}（{note}）{why}" if action == "exists"
+              else f"ステップ{step_no}（{note}）{why}")
     return [
         f"{indent}# [{step_no}] {note}",
         f"{indent}SET ActBody TO $'''{{\"script\": \"%JsAct%\", \"args\": {body_args}}}'''",
-        f"{indent}Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post "
-        f"Accept: AppJson ContentType: AppJson RequestBody: ActBody "
-        f"FailOnErrorStatus: False "
-        f"Response=> ActResp StatusCode=> ActStatus",
+        _web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent),
         f"{indent}Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj",
         f"{indent}IF ActObj['value']['ok'] <> True THEN",
-        f"{indent}    SET RowError TO $'''ステップ{step_no}（{note}）で要素が見つかりません'''",
+        f"{indent}    SET RowError TO $'''{reason}'''",
         f"{indent}END",
     ]
 
 
+def _robin_act_best_effort(cands: list, action: str, value: str, indent: str,
+                           note: str, cols: list) -> list:
+    """復帰処理や後片付け用。成否を判定せず、通るところまで進める。"""
+    cands = [_to_robin_var(c, cols) for c in _robin_filter_candidates(cands)]
+    value = _to_robin_var(value, cols)
+    note = _to_robin_var(note, cols).replace("'", "").replace("[", "").replace("]", "")
+    body_args = json.dumps([cands, action, value], ensure_ascii=False)
+    return [
+        f"{indent}# {note}",
+        f"{indent}SET ActBody TO $'''{{\"script\": \"%JsAct%\", \"args\": {body_args}}}'''",
+        _web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent),
+        f"{indent}WAIT 1",
+    ]
+
+
+def _split_login(setup: list) -> tuple:
+    """setup を「ログイン部分」と「それ以外」に分ける。
+
+    {{SECRET:…}} を入力するステップが 1 つでもあれば、そこから
+    「最後の SECRET ステップの直後の click」までをログイン部分とみなす。
+    録画の形によっては境界がずれるので、生成物にその旨のコメントを入れる。
+    戻り値: (login_indices:set, has_login:bool)"""
+    idx = [i for i, st in enumerate(setup)
+           if st.get("type") == "change" and str(st.get("value", "")).startswith("{{SECRET:")]
+    if not idx:
+        return set(), False
+    lo, hi = min(idx), max(idx)
+    end = hi
+    for j in range(hi + 1, len(setup)):
+        if setup[j].get("type") in ("click", "doubleClick"):
+            end = j
+            break
+    return set(range(lo, end + 1)), True
+
+
+def _prescan_cols(steps: list, cols: list) -> None:
+    """{{列名}} の参照を先に全部拾って cols を確定させる。
+
+    結果 CSV のヘッダーを書く時点で列名が分かっていないと、業務キーの列名が
+    プレースホルダのまま出力されてしまうため、emit の前に 1 周する。
+    登録順は emit 時と同じなので Col 番号はずれない。"""
+    for st in steps:
+        for sel in _candidates(st):
+            _to_robin_var(sel, cols)
+        for key in ("value", "text", "name", "url"):
+            v = st.get(key)
+            if v is not None:
+                _to_robin_var(v, cols)
+
+
+def _lint_robin(lines: list, log=print) -> list:
+    """生成した Robin を貼り付ける前に、実機で判明している落とし穴を機械的に洗う。
+
+    PAD は解釈できない行をエラーも出さずに無視するため、生成時に気づけないと
+    「貼り付けたのに一部のアクションが無い」という形で後から発覚する。
+    検出するもの:
+      * 長すぎる 1 行（黙って無視される）
+      * `SET x TO %y%` — 変数を変数に代入するとき % で囲んではいけない
+      * Web サービス呼び出しに EncodeRequestBody: False が無い
+      * $'''…''' の中のエスケープされていない単引用符
+    """
+    warns = []
+    for i, ln in enumerate(lines, 1):
+        s = ln.strip()
+        # 未解決のプレースホルダはコメント行に残っていても不可。
+        # 列名やSECRETの変換漏れをここで捕まえる。閉じかっこ側は見ない
+        # （WebDriver の JSON 本文が正当に }}} で終わるため）。
+        if "{{" in s:
+            warns.append(f"{i}行: 未解決のプレースホルダが残っています: {s[:80]}")
+        if s.startswith("#"):
+            continue
+        if len(ln) > 700:
+            warns.append(f"{i}行: 1行が長すぎます（{len(ln)}文字）。分割してください")
+        m = re.match(r"^SET\s+\w+\s+TO\s+%(\w+)%\s*$", s)
+        if m:
+            warns.append(
+                f"{i}行: SET の右辺で % を使っています。"
+                f"変数の代入は `TO {m.group(1)}` と裸で書きます: {s}")
+        if "InvokeWebService" in s and "EncodeRequestBody: False" not in s:
+            warns.append(f"{i}行: EncodeRequestBody: False がありません（本文がURLエンコードされます）")
+        for lit in re.findall(r"\$'''(.*?)'''", s):
+            body = lit.replace("\\'", "")
+            if "'" in body:
+                warns.append(f"{i}行: リテラル内の単引用符が未エスケープです（\\' にする）: {s[:80]}")
+    for w in warns:
+        log(f"  ⚠ {w}")
+    return warns
+
+
 def write_robin(batch: dict, details_path: str, id_col: str, path: str,
-                driver_exe: str = r"C:\WebDriver\msedgedriver.exe",
-                out_dir: str = r"C:\PAD\output") -> str:
+                driver_exe: str = r"C:\temp\msedgedriver.exe",
+                out_dir: str = r"C:\temp") -> str:
     """PAD に貼り付けられる Robin コードを生成する。
 
     PAD のフローデザイナーはアクションのコピー＆ペーストにテキスト（Robin）を使うため、
     生成したコードをキャンバスに貼り付ければフローが組み上がる。
-    ※ アクション名や引数は PAD のバージョンで差異があるため、`※要確認` を付けた行は
-      実機で同じアクションを 1 つ置いてコピーし、差分があれば置き換えること。
+
+    生成されるフローの構造（docs/PAD_WebDriver.md と対応）:
+      setup   … ドライバ起動 → セッション → ログイン → 起点へ移動 → 失敗検知(Halt)
+      loop    … skip 判定 / 再実行絞り込み / 件数上限 / 復帰 / 1 件分の操作 / エビデンス
+      recover … 失敗した件のあと、次の件の前に起点へ戻す（batch の recover を使う）
     """
     js_one = js_act_oneline()
-    cols: list = []          # 明細で参照する列名（%Col1%, %Col2%, … の順）
+    # ID 列を必ず Col1 にそろえる（明細 CSV の先頭列 = ID という運用に合わせる）
+    cols: list = [id_col]
     L: list = []
     A = L.append
+
+    setup = batch.get("setup", [])
+    loop_steps = batch.get("loop", [])
+    recover = batch.get("recover", [])
+    teardown = batch.get("teardown", [])
+    login_idx, has_login = _split_login(setup)
+
+    # 列名を先に確定させる（結果 CSV のヘッダーで業務キーの列名が必要）
+    for _sec in (setup, loop_steps, recover, teardown):
+        _prescan_cols(_sec, cols)
+
+    # 起点へ戻る URL（recover が空のときのフォールバックに使う）
+    start_url = ""
+    for st in setup:
+        if st.get("type") == "navigate":
+            start_url = st.get("url", "")
+            break
 
     A("# ============================================================")
     A(f"# 自動生成: {batch.get('title', '')}")
     A("# 貼り付け方: PAD のフローデザイナーでキャンバスをクリックし Ctrl+V")
     A("# 前提: msedgedriver.exe（Edge と同じバージョン）／localhost をプロキシ除外")
-    A("# ※要確認 と書いた行は、PAD のバージョンでアクション名・引数が異なる場合がある")
+    A("# 解説: docs/PAD_WebDriver.md")
     A("# ============================================================")
     A("")
-    A("# --- 設定（環境に合わせて変更する） ---")
-    A(f"SET DriverExe TO {_robin_str(driver_exe)}")
+    A("# --- 設定：配布時に触るのはこの BaseDir だけにする ---")
+    A(f"SET BaseDir TO {_robin_str(out_dir)}")
+    A("# ※ BaseDir の末尾に \\ を付けないこと（%BaseDir%\\file.png が二重になる）")
+    A(f"SET DriverExe TO {_robin_under_base(driver_exe, out_dir)}")
     A("SET DriverUrl TO $'''http://127.0.0.1:9515'''")
-    A(f"SET DetailsFile TO {_robin_str(details_path)}")
-    A(f"SET OutDir TO {_robin_str(out_dir)}")
-    A("# ※ OutDir の末尾に \\ を付けないこと（%OutDir%\\file.png が二重になる）")
-    A("# 資格情報はフローに直書きしない。PAD の資格情報か暗号化変数に入れて参照する。")
-    A("SET EdiUser TO $'''%YourCredentialUser%'''")
-    A("SET EdiPassword TO $'''%YourCredentialPassword%'''")
+    A(f"SET DetailsFile TO {_robin_under_base(details_path, out_dir)}")
+    A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''")
+    A("SET LogFile TO $'''%BaseDir%\\\\pad_progress.log'''")
+    A("SET ShotDir TO $'''%BaseDir%'''")
+    A("")
+    A("# --- 運用スイッチ ---")
+    A("# まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす")
+    A("SET MaxItems TO 1")
+    A("# 失敗分だけを再実行するとき True（読み込み元と出力先が自動で切り替わる）")
+    A("SET RetryMode TO False")
+    if has_login:
+        A("# manual = 人が手でログイン（PAD はパスワードを一切扱わない）★推奨")
+        A("# auto   = 録画されたログイン手順を実行する")
+        A("SET LoginMode TO $'''manual'''")
+    A("IF RetryMode THEN")
+    A("    SET DetailsFile TO $'''%BaseDir%\\\\pad_result.csv'''")
+    A("    SET ResultFile TO $'''%BaseDir%\\\\pad_result_retry.csv'''")
+    A("END")
     A("")
     A("# --- 要素操作の共通 JavaScript ---")
     A("# PAD は長すぎる 1 行を貼り付けても黙って無視するため、短い行に分けて継ぎ足す。")
     A("# （%JsAct% は直前までの内容。順番どおりに貼ること）")
     for line in _robin_js_chunks(js_one):
         A(line)
-    A("# ※ もし継ぎ足しがうまくいかない場合は、同時生成した pad_flow.jsact.js の中身を")
+    A("# ※ 継ぎ足しがうまくいかない場合は、同時生成した pad_flow.jsact.js の中身を")
     A("#   「変数の設定」アクション（変数名 JsAct）の値の欄に手で貼り付けてもよい。")
     A("")
-    A("# --- WebDriver を起動 ---  ※要確認（アクション名）")
+    A("# --- 古いドライバーが残っていたら終了する ---")
+    A("# 前回の実行が異常終了すると msedgedriver がポート 9515 を掴んだまま残り、")
+    A("# 新しいドライバーが起動できない（古い方が応答してしまう）。")
+    A("System.TerminateProcess.TerminateProcessByName ProcessName: $'''msedgedriver'''")
+    A("WAIT 1")
+    A("")
+    A("# --- WebDriver を起動 ---")
     A("System.RunApplication.RunApplication ApplicationPath: DriverExe "
       "CommandLineArguments: $'''--port=9515''' WindowStyle: System.ProcessWindowStyle.Hidden "
       "ProcessId=> DriverPid")
@@ -522,160 +729,356 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
       "{\"browserName\": \"MicrosoftEdge\"}}}'''")
     A("SET AppJson TO $'''application/json'''")
     A("SET NewUrl TO $'''%DriverUrl%/session'''")
-    A("Web.InvokeWebService.InvokeWebService Url: NewUrl Method: Web.Method.Post "
-      "Accept: AppJson ContentType: AppJson RequestBody: SessionBody "
-      "FailOnErrorStatus: False "
-      "Response=> SessionResp StatusCode=> SessionStatus")
-    A("# ↓ ここで「sessionId がありません」と出たら、WebDriver がセッションを作れていない。")
-    A("#   下の 1 行を有効にすると、WebDriver からの生の応答（原因）を確認できる。")
+    A(_web("NewUrl", "Post", "SessionBody", "SessionResp", "SessionStatus"))
+    A("# ↓ 「sessionId がありません」と出たらこの行を有効にして生の応答を確認する")
     A("# Display.ShowMessageDialog.ShowMessage Title: $\'\'\'WebDriver 応答\'\'\' "
       "Message: SessionResp Icon: Display.Icon.Information Buttons: Display.Buttons.OK "
       "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> BtnDbg")
     A("Variables.ConvertJsonToCustomObject Json: SessionResp CustomObject=> SessionObj")
+    A("# カスタムオブジェクトはブラケット記法で参照する。ドット記法は使えない。")
     A("SET SessionId TO SessionObj['value']['sessionId']")
     A("# 以降で使い回す URL を組み立てておく（1 行を短く保つため）")
     A("SET ExecUrl TO $'''%DriverUrl%/session/%SessionId%/execute/sync'''")
     A("SET GoUrl TO $'''%DriverUrl%/session/%SessionId%/url'''")
     A("SET RectUrl TO $'''%DriverUrl%/session/%SessionId%/window/rect'''")
+    A("SET ShotUrl TO $'''%DriverUrl%/session/%SessionId%/screenshot'''")
     A("SET QuitUrl TO $'''%DriverUrl%/session/%SessionId%'''")
     A("")
 
     # ---- setup ----
     A("# ================= セットアップ（最初に 1 回）=================")
-    A("SET RowError TO $\'\'\'\'\'\'")
+    A("SET RowError TO $''''''")
+    A("SET Halt TO False")
     n = 0
-    for st in batch.get("setup", []):
+    emitted_dialog = False
+    in_auto = False           # IF LoginMode = auto THEN … の中にいるか
+    for i, st in enumerate(setup):
         t = st.get("type")
-        n += 1
+
+        # ログイン部分は auto ブロックに入れる。その手前で手動ログインのダイアログを出す。
+        if has_login and i in login_idx and not emitted_dialog:
+            emitted_dialog = True
+            in_auto = True
+            A("")
+            A("# ---------- 手動ログイン（既定）----------")
+            A("# フローを止めて人がログインする。PAD はパスワードを一度も受け取らないので、")
+            A("# 変数ペイン・実行ログ・エラーメッセージのどこにも残らない。")
+            A("# WebDriver は自分が起動したブラウザーしか操作できない。別に開いてある")
+            A("# 普段のブラウザーでログインしても、フローはそのタブを見られない。")
+            A("IF LoginMode = $'''manual''' THEN")
+            A("    Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' "
+              "Message: $'''いま開いたブラウザーでログインし、開始画面が出てから[OK]を"
+              "押してください。ブラウザーは閉じないでください。''' "
+              "Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel "
+              "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True "
+              "ButtonPressed=> LoginBtn")
+            A("    IF LoginBtn = $'''Cancel''' THEN")
+            A("        SET Halt TO True")
+            A("    END")
+            A("END")
+            A("")
+            A("# ---------- 自動ログイン（LoginMode = auto のときだけ）----------")
+            A("# ★ 資格情報はフローに直書きしない。下の 2 行は、デザイナーから")
+            A("#   ［入力ダイアログを表示］を 2 つ置き（パスワード側は入力の種類を")
+            A("#   「パスワード」にする）、生成変数を EdiUser / EdiPassword に")
+            A("#   リネームしたものに置き換えること。")
+            A("# ★ ログイン部分の範囲は SECRET プレースホルダの位置から機械的に判定している。")
+            A("#   録画の形によっては境界がずれるので、貼り付け後に目で確認すること。")
+            A("IF LoginMode = $'''auto''' THEN")
+            A("    SET EdiUser TO $''''''")
+            A("    SET EdiPassword TO $''''''")
+            A("    # JSON 本文を壊さないよう \\ → \\\\ 、\" → \\\" の順でエスケープする。")
+            A("    # 順序を守ること（逆にすると 1 段目で入れた \\\\ を 2 段目が書き換える）。")
+            A("    # ActivateEscapeSequences: False が重要（True だと \\\\ が 1 個に戻る）。")
+            # 生成物の他の箇所と同じく、二重引用符は素のまま書く（Robin では
+            # " も \" も同じ意味だが、パス以外に単独のバックスラッシュを残さない）。
+            BS, DQ = chr(92), chr(34)
+            # 一時変数へ往復させる。1段目は var → varEsc、2段目は varEsc → var。
+            # どちらの行も入力と出力が別変数なので、同一変数への書き戻し
+            # （自己代入）が PAD で許されるかどうかに依存しない。
+            # 最終的にエスケープ済みの値が元の変数に入るため、本文では
+            # そのまま %EdiUser% / %EdiPassword% を参照できる。
+            for var in ("EdiUser", "EdiPassword"):
+                tmp = var + "Esc"
+                A(f"    Text.Replace.ReplaceText Text: {var} "
+                  f"TextToFind: $'''{BS}{BS}''' IgnoreCase: False "
+                  f"ReplaceWith: $'''{BS}{BS}{BS}{BS}''' "
+                  f"ActivateEscapeSequences: False "
+                  f"ComparisonType: Text.TextComparisonType.CultureSensitive "
+                  f"Result=> {tmp}")
+                A(f"    Text.Replace.ReplaceText Text: {tmp} "
+                  f"TextToFind: $'''{DQ}''' IgnoreCase: False "
+                  f"ReplaceWith: $'''{BS}{BS}{DQ}''' "
+                  f"ActivateEscapeSequences: False "
+                  f"ComparisonType: Text.TextComparisonType.CultureSensitive "
+                  f"Result=> {var}")
+
+        # ★ ログイン範囲を抜けたら、ここで auto ブロックを閉じる。
+        #   閉じ忘れると以降のセットアップ手順が auto の中に入ってしまい、
+        #   manual 運用では実行されず、ループの起点に到達できない。
+        if in_auto and i not in login_idx:
+            A("END")
+            A("")
+            A("# ---------- 使い終わったパスワードは即座に消す ----------")
+            A("SET EdiPassword TO $''''''")
+            A("SET EdiPasswordEsc TO $''''''")
+            A("")
+            in_auto = False
+
+        ind = "    " if in_auto else ""
+
         if t == "comment":
-            A(f"# 💬 {_to_robin_var(st.get('text', ''), cols)}")
-            n -= 1
-        elif t == "setViewport":
-            A(f"# [{n}] ウィンドウサイズ {st.get('width')}x{st.get('height')}")
-            A(f"SET RectBody TO $'''{{\"width\": {int(st.get('width', 1400))}, "
-              f"\"height\": {int(st.get('height', 900))}}}'''")
-            A("Web.InvokeWebService.InvokeWebService Url: RectUrl Method: Web.Method.Post "
-              "Accept: AppJson ContentType: AppJson RequestBody: RectBody "
-              "FailOnErrorStatus: False "
-              "Response=> RectResp StatusCode=> RectStatus")
-        elif t == "navigate":
-            url = st.get("url", "")
-            A(f"# [{n}] ページを開く")
-            A(f"SET UrlBody TO $'''{{\"url\": \"{url}\"}}'''")
-            A("Web.InvokeWebService.InvokeWebService Url: GoUrl Method: Web.Method.Post "
-              "Accept: AppJson ContentType: AppJson RequestBody: UrlBody "
-              "FailOnErrorStatus: False "
-              "Response=> UrlResp StatusCode=> UrlStatus")
-            A("WAIT 2")
-        elif t in ("click", "doubleClick", "change"):
+            A(f"{ind}# 💬 {_safe_comment(st.get('text', ''), cols)}")
+            continue
+        if t == "setViewport":
+            n += 1
+            w = int(st.get("width", 1920) or 1920)
+            h = int(st.get("height", 1080) or 1080)
+            A(f"{ind}# [{n}] ウィンドウサイズ {w}x{h}")
+            A(f"{ind}# エビデンスに写る範囲はこのサイズで決まる。複数の PC に配布する場合は")
+            A(f"{ind}# 一番小さい画面に収まる値にそろえること。")
+            A(f"{ind}SET RectBody TO $'''{{\"width\": {w}, \"height\": {h}}}'''")
+            A(_web("RectUrl", "Post", "RectBody", "RectResp", "RectStatus", ind))
+            continue
+        if t == "navigate":
+            n += 1
+            A(f"{ind}# [{n}] ページを開く")
+            A(f"{ind}SET UrlBody TO $'''{{\"url\": \"{st.get('url', '')}\"}}'''")
+            A(_web("GoUrl", "Post", "UrlBody", "UrlResp", "UrlStatus", ind))
+            A(f"{ind}WAIT 2")
+            continue
+        if t in ("click", "doubleClick", "change"):
+            n += 1
             cands = _candidates(st)
             action = "fill" if t == "change" else "click"
             value = st.get("value", "")
-            # {{SECRET:XXX}} は PAD の変数参照に置き換える
-            if value.startswith("{{SECRET:"):
+            if str(value).startswith("{{SECRET:"):
                 name = value[len("{{SECRET:"):-2]
+                # エスケープ済み（上の Text.Replace で同変数に上書きしてある）
                 value = "%EdiUser%" if "USER" in name.upper() else "%EdiPassword%"
-            L.extend(_robin_act(cands, action, value, "",
+            L.extend(_robin_act(cands, action, value, ind,
                                 f"{action} {cands[0] if cands else ''}", n, cols))
-            A("WAIT 1")
+            A(f"{ind}WAIT 1")
+            continue
+
+    if in_auto:
+        # ログイン手順で setup が終わっている場合（後続のステップが無い場合）
+        A("END")
+        A("")
+        A("# ---------- 使い終わったパスワードは即座に消す ----------")
+        A("SET EdiPassword TO $''''''")
+        A("SET EdiPasswordEsc TO $''''''")
     A("")
-    A("# ※ セットアップ（ログイン）に失敗した場合は、以降の全件が失敗として記録される。")
-    A("#   pad_progress.log と結果 CSV を見て、ログイン部分から確認すること。")
+    A("# ---------- セットアップ失敗を検知して止める ----------")
+    A("# ここで止めないと、ループ先頭で RowError がリセットされるため、")
+    A("# 全件が「ステップ1で要素が見つかりません」という偽の失敗として記録される。")
+    A("IF RowError <> $'''''' THEN")
+    A("    SET Halt TO True")
+    A("END")
     A("")
 
     # ---- 明細読み込み ----
+    # SET の右辺で変数を参照するときは % で囲まない（%Col2% と書くと貼り付けが弾かれる）
+    key_ref = "Col2" if len(cols) > 1 else "$''''''"
     A("# ================= 明細（CSV）を読み込む =================")
-    A("File.ReadFromCSVFile.ReadCSV CSVFile: DetailsFile Encoding: File.CSVEncoding.UTF8 "
-      "TrimFields: True FirstLineContainsColumnNames: True "
+    A("IF Halt = False THEN")
+    A("    File.ReadFromCSVFile.ReadCSV CSVFile: DetailsFile "
+      "Encoding: File.CSVEncoding.UTF8 TrimFields: True "
+      "FirstLineContainsColumnNames: True "
       "ColumnsSeparator: File.CSVColumnsSeparator.Comma CSVTable=> Rows")
-    A(f"SET ResultFile TO $'''%OutDir%\\\\pad_result.csv'''")
-    A("File.WriteText File: ResultFile TextToWrite: $'''ID,結果,理由,エビデンス''' "
-      "AppendNewLine: True IfFileExists: File.IfFileExists.Overwrite")
-    A("SET OkCount TO 0")
-    A("SET NgCount TO 0")
-    A("SET SkipCount TO 0")
+    A("    # 結果 CSV は、そのまま明細として読み直せる列構成にする。")
+    A("    # ID だけでなく業務キーも入れないと、再実行で対象を特定できない。")
+    key_head = cols[1] if len(cols) > 1 else "業務キー"
+    A(f"    File.WriteText File: ResultFile "
+      f"TextToWrite: $'''{id_col},{key_head},結果,理由,エビデンス,実行日時''' "
+      f"AppendNewLine: True IfFileExists: File.IfFileExists.Overwrite")
+    A("    File.WriteText File: LogFile "
+      "TextToWrite: $'''===== 実行開始 上限%MaxItems%件 RetryMode=%RetryMode% =====''' "
+      "AppendNewLine: True IfFileExists: File.IfFileExists.Append")
+    A("    SET OkCount TO 0")
+    A("    SET NgCount TO 0")
+    A("    SET SkipCount TO 0")
+    A("    SET Attempted TO 0")
+    A("    SET PrevFailed TO False")
     A("")
 
     # ---- ループ ----
-    A("# ================= 明細ごとの繰り返し =================")
-    A("LOOP FOREACH Row IN Rows")
     ind = "    "
-    A(f"{ind}# 明細の列を変数に取り出す（リテラル内に単引用符を入れないため）")
+    inner = "        "
+    A(f"{ind}# ================= 明細ごとの繰り返し =================")
+    A(f"{ind}LOOP FOREACH Row IN Rows")
+    A(f"{inner}# 明細の列を変数に取り出す（リテラル内に単引用符を入れないため）")
     A("@@COLVARS@@")
-    A(f"{ind}SET RowId TO Row['{id_col}']")
-    A(f"{ind}SET RowError TO $''''''")
-    A(f"{ind}IF Row['skip'] <> $'''''' THEN")
-    A(f"{ind}    SET SkipCount TO SkipCount + 1")
-    A(f"{ind}    File.WriteText File: ResultFile TextToWrite: $'''%RowId%,スキップ,,''' "
-      "AppendNewLine: True IfFileExists: File.IfFileExists.Append")
-    A(f"{ind}    NEXT LOOP")
-    A(f"{ind}END")
-    A(f"{ind}# 進捗表示（headless でも見えるようにログにも残す）")
-    A(f"{ind}File.WriteText File: $'''%OutDir%\\\\pad_progress.log''' "
-      "TextToWrite: $'''%RowId% 開始''' AppendNewLine: True "
+    A(f"{inner}SET RowId TO Col1")
+    A(f"{inner}SET RowKey TO {key_ref}")
+    A(f"{inner}SET RowError TO $''''''")
+    A("")
+    A(f"{inner}# 再実行モードでは「失敗」行だけを対象にする")
+    A(f"{inner}IF RetryMode THEN")
+    A(f"{inner}    IF Row['結果'] <> $'''失敗''' THEN")
+    A(f"{inner}        NEXT LOOP")
+    A(f"{inner}    END")
+    A(f"{inner}END")
+    A("")
+    A(f"{inner}# skip 列に値がある行は飛ばす（再実行 CSV には skip 列が無いので除外）")
+    A(f"{inner}IF RetryMode = False THEN")
+    A(f"{inner}    IF Row['skip'] <> $'''''' THEN")
+    A(f"{inner}        SET SkipCount TO SkipCount + 1")
+    A(f"{inner}        File.WriteText File: ResultFile "
+      "TextToWrite: $'''%RowId%,%RowKey%,スキップ,,,''' AppendNewLine: True "
       "IfFileExists: File.IfFileExists.Append")
+    A(f"{inner}        NEXT LOOP")
+    A(f"{inner}    END")
+    A(f"{inner}END")
+    A("")
+    A(f"{inner}# 件数上限。打ち切った行も記録に残す（どこから再開するか分かる）")
+    A(f"{inner}IF Attempted >= MaxItems THEN")
+    A(f"{inner}    File.WriteText File: ResultFile "
+      "TextToWrite: $'''%RowId%,%RowKey%,未実行,\"件数上限 %MaxItems% 件に達したため\",,''' "
+      "AppendNewLine: True IfFileExists: File.IfFileExists.Append")
+    A(f"{inner}    NEXT LOOP")
+    A(f"{inner}END")
+    A(f"{inner}SET Attempted TO Attempted + 1")
+    A("")
+    A(f"{inner}# 直前の件が失敗していたら、起点に復帰してから始める。")
+    A(f"{inner}# 失敗した画面のまま次の件を始めると 1 件の失敗が全件に連鎖する。")
+    A(f"{inner}IF PrevFailed THEN")
+    if recover:
+        for st in recover:
+            t = st.get("type")
+            if t == "comment":
+                A(f"{inner}    # 💬 {_safe_comment(st.get('text', ''), cols)}")
+            elif t in ("click", "doubleClick", "change"):
+                cands = _candidates(st)
+                act = "fill" if t == "change" else "click"
+                L.extend(_robin_act_best_effort(
+                    cands, act, st.get("value", ""), inner + "    ",
+                    f"復帰: {act} {cands[0] if cands else ''}", cols))
+            elif t == "navigate":
+                A(f"{inner}    SET UrlBody TO $'''{{\"url\": \"{st.get('url', '')}\"}}'''")
+                A(_web("GoUrl", "Post", "UrlBody", "UrlResp", "UrlStatus", inner + "    "))
+                A(f"{inner}    WAIT 2")
+    elif start_url:
+        A(f"{inner}    # batch に recover が無いので、開始 URL を開き直して復帰する。")
+        A(f"{inner}    # ログインが必要なサイトではセッションが切れる可能性があるため、")
+        A(f"{inner}    # 録画に recover セクションを用意するほうが確実。")
+        A(f"{inner}    SET UrlBody TO $'''{{\"url\": \"{start_url}\"}}'''")
+        A(_web("GoUrl", "Post", "UrlBody", "UrlResp", "UrlStatus", inner + "    "))
+        A(f"{inner}    WAIT 2")
+    else:
+        A(f"{inner}    # ★ 復帰手順が定義されていない。batch に recover を追加すること。")
+        A(f"{inner}    #   このままでは 1 件失敗すると以降が連鎖して失敗する。")
+    A(f"{inner}    SET PrevFailed TO False")
+    A(f"{inner}END")
+    A(f"{inner}# 悲観的に置く。最後まで通れば False に戻る（フラグを立てる箇所が 1 行で済む）")
+    A(f"{inner}SET PrevFailed TO True")
+    A("")
+    A(f"{inner}# 日時つきのファイル名を作る。MM は月、mm は分。")
+    A(f"{inner}DateTime.GetCurrentDateTime.Local "
+      "DateTimeFormat: DateTime.DateTimeFormat.DateAndTime CurrentDateTime=> NowDt")
+    A(f"{inner}Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt "
+      "CustomFormat: $'''yyyyMMdd_HHmmss''' Result=> Stamp")
+    A(f"{inner}Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt "
+      "CustomFormat: $'''yyyy/MM/dd HH:mm:ss''' Result=> RecStamp")
+    A(f"{inner}SET ShotPath TO $'''%ShotDir%\\\\%RowId%__%RowKey%__%Stamp%.png'''")
+    A(f"{inner}SET FailShot TO $'''%ShotDir%\\\\fail__%RowId%__%RowKey%__%Stamp%.png'''")
+    A(f"{inner}File.WriteText File: LogFile "
+      "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 開始''' AppendNewLine: True "
+      "IfFileExists: File.IfFileExists.Append")
+    A("")
 
     m = 0
-    for st in batch.get("loop", []):
+    for st in loop_steps:
         t = st.get("type")
         if t == "comment":
-            A(f"{ind}# 💬 {_to_robin_var(st.get('text', ''), cols)}")
+            A(f"{inner}# 💬 {_safe_comment(st.get('text', ''), cols)}")
             continue
         if t == "screenshot":
-            name = st.get("name", "shot")
-            A(f"{ind}# エビデンス保存（プロジェクト番号__発注番号 で一意になる）")
-            A(f"{ind}# 日時も入れたい場合は「現在の日時を取得」→「日時をテキストに変換」")
-            A(f"{ind}# （書式 yyyyMMdd_HHmmss）を UI で追加し、ファイル名に足すこと。")
-            A(f"{ind}# 既定の日時書式は / や : を含み、そのままではファイル名に使えない。")
-            A(f"{ind}SET ShotName TO {_robin_str(_to_robin_var(name, cols))}")
-            A(f"{ind}Workstation.TakeScreenshot.TakeScreenshotAndSaveToFile "
-              "File: $'''%OutDir%\\\\%ShotName%.png''' "
-              "ImageFormat: System.ImageFormat.Png")
+            A(f"{inner}# エビデンス保存（%RowId%__%RowKey%__日時）")
+            A(f"{inner}# WebDriver に撮らせるとページの表示領域だけが写る。")
+            A(f"{inner}# デスクトップや他ウィンドウは写らず、フォーカスにも依存しない。")
+            A(f"{inner}# 逆にスクロールしないと見えない範囲は写らない点に注意。")
+            L.extend(_robin_shot(inner, "ShotPath"))
+            A("")
             continue
         if t == "assertText":
+            m += 1
             text = st.get("text", "")
-            L.extend(_robin_act([], "exists", text, ind, f"完了確認: {text}", m + 1, cols))
+            A(f"{inner}# 完了確認。「ボタンは押せたが実際には処理されていない」を検知する。")
+            L.extend(_robin_act([], "exists", text, inner,
+                                f"完了確認: {text}", m, cols))
+            L.extend(_robin_fail(inner))
+            A("")
             continue
         if t in ("click", "doubleClick", "change"):
             m += 1
             cands = _candidates(st)
             action = "fill" if t == "change" else "click"
-            value = st.get("value", "")
-            L.extend(_robin_act(cands, action, value, ind,
+            L.extend(_robin_act(cands, action, st.get("value", ""), inner,
                                 f"{action} {cands[0] if cands else ''}", m, cols))
-            A(f"{ind}IF RowError <> $'''''' THEN")
-            A(f"{ind}    SET NgCount TO NgCount + 1")
-            A(f"{ind}    File.WriteText File: ResultFile "
-              "TextToWrite: $'''%RowId%,失敗,%RowError%,''' AppendNewLine: True "
-              "IfFileExists: File.IfFileExists.Append")
-            A(f"{ind}    NEXT LOOP")
-            A(f"{ind}END")
-            A(f"{ind}WAIT 1")
+            L.extend(_robin_fail(inner))
+            A(f"{inner}WAIT 1")
+            A("")
+            continue
 
-    A(f"{ind}SET OkCount TO OkCount + 1")
-    A(f"{ind}File.WriteText File: ResultFile TextToWrite: $'''%RowId%,成功,,''' "
+    A(f"{inner}# ここまで来たら成功")
+    A(f"{inner}SET PrevFailed TO False")
+    A(f"{inner}SET OkCount TO OkCount + 1")
+    A(f"{inner}File.WriteText File: ResultFile "
+      "TextToWrite: $'''%RowId%,%RowKey%,成功,,\"%ShotPath%\",%RecStamp%''' "
       "AppendNewLine: True IfFileExists: File.IfFileExists.Append")
+    A(f"{inner}File.WriteText File: LogFile "
+      "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 成功''' AppendNewLine: True "
+      "IfFileExists: File.IfFileExists.Append")
+    A(f"{ind}END")
     A("END")
     A("")
+
+    # ---- teardown / 後片付け ----
+    if teardown:
+        A("# ================= 後処理（batch の teardown）=================")
+        for st in teardown:
+            t = st.get("type")
+            if t == "comment":
+                A(f"# 💬 {_safe_comment(st.get('text', ''), cols)}")
+            elif t in ("click", "doubleClick", "change"):
+                cands = _candidates(st)
+                act = "fill" if t == "change" else "click"
+                L.extend(_robin_act_best_effort(
+                    cands, act, st.get("value", ""), "",
+                    f"後処理: {act} {cands[0] if cands else ''}", cols))
+        A("")
+
     A("# ================= 後片付け =================")
-    A("Web.InvokeWebService.InvokeWebService Url: QuitUrl Method: Web.Method.Delete "
-      "Accept: AppJson ContentType: AppJson FailOnErrorStatus: False "
-      "Response=> QuitResp StatusCode=> QuitStatus")
+    A(_web("QuitUrl", "Delete", None, "QuitResp", "QuitStatus"))
     A("System.TerminateProcess.TerminateProcessByName ProcessName: $'''msedgedriver'''")
-    A("Display.ShowMessageDialog.ShowMessage Title: $'''完了''' "
-      "Message: $'''成功 %OkCount% / 失敗 %NgCount% / スキップ %SkipCount%''' "
+    A("IF Halt = False THEN")
+    A("    Display.ShowMessageDialog.ShowMessage Title: $'''完了''' "
+      "Message: $'''成功 %OkCount% / 失敗 %NgCount% / スキップ %SkipCount%"
+      "（上限 %MaxItems% 件）  結果CSV: %ResultFile%''' "
       "Icon: Display.Icon.Information Buttons: Display.Buttons.OK "
       "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn")
+    A("END")
+    A("IF Halt THEN")
+    A("    Display.ShowMessageDialog.ShowMessage Title: $'''中止''' "
+      "Message: $'''ログインまたは起点への移動に失敗したため、明細を1件も処理せず"
+      "中止しました。pad_progress.log を確認してください。''' "
+      "Icon: Display.Icon.Warning Buttons: Display.Buttons.OK "
+      "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn")
+    A("END")
 
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    # 収集した参照列を、ループ先頭の変数取り出しに展開する
+    # 収集した参照列を、ループ先頭の変数取り出しに展開する（Col1 = ID 列）
     colvars = "\n".join(
-        f"    SET Col{i + 1} TO Row['{c}']" for i, c in enumerate(cols)
-    ) or "    # （明細の列を参照するステップはありません）"
+        f"        SET Col{i + 1} TO Row['{c}']" for i, c in enumerate(cols)
+    )
     body = "\n".join(L).replace("@@COLVARS@@", colvars)
+    warns = _lint_robin(body.split("\n"))
+    if warns:
+        print(f"  ⚠ 上記 {len(warns)} 件は貼り付けが無視される可能性があります")
     with open(path, "w", encoding="utf-8") as f:
         f.write(body + "\n")
-    # 共通 JavaScript は別ファイルに出す（Robin 側は File.ReadTextFromFile で読む）
+    # 共通 JavaScript は別ファイルにも出す（長い 1 行が貼れないときの逃げ道）
     js_path = os.path.splitext(path)[0]
     if js_path.endswith(".robin"):
         js_path = js_path[: -len(".robin")]

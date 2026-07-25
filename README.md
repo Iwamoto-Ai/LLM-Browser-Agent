@@ -553,30 +553,96 @@ python run_batch.py --batch recordings/edi2_practice_batch.json --details data/e
 
 ## 🏢 開発ツールが使えない環境向け（PAD ＋ WebDriver）
 
-会社の PC に Python を入れられない場合でも、**Power Automate Desktop（PAD）だけで同じバッチ運用ができる**。
+**実行環境（会社の PC など）に Python を入れられない場合でも、Power Automate Desktop（PAD）だけで
+同じバッチ運用ができる。** 録画 JSON から Robin コードへの変換だけを Python が使える別の PC で行い、
+できあがった Robin を実行環境の PAD に貼り付けて使う。
 PAD の Web 自動化は専用のブラウザ拡張機能を必要とするが、**WebDriver は拡張機能とは無関係**で、
 `msedgedriver.exe` 自体がローカルの HTTP サーバーとして動くため、PAD の「Web サービスの呼び出し」から
 HTTP で指示すれば**拡張機能なしでブラウザを操作できる**。
 
-- 明細の読み込み・ループ・skip 判定・進捗・結果 CSV・エビデンスのスクショ → **PAD の標準アクション**
+- 明細の読み込み・ループ・skip 判定・件数制限・進捗・結果 CSV → **PAD の標準アクション**
 - ブラウザ操作 → **WebDriver へ HTTP**（要素の特定と操作は `/execute/sync` の JavaScript に一本化）
+- エビデンス → **WebDriver の `/screenshot`**（デスクトップではなくブラウザのページだけが写る）
 
-組み立て手順は **[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)** にまとめてある
-（使う HTTP 呼び出しは 5 種類だけ・共通 JavaScript・フロー構成・トラブルシュート）。
+**この構成は実機で完走を確認済み**（PAD 無料版 / Windows 11 / Edge、練習サイト `test_site/edi2/` に対して
+成功 3 / スキップ 1）。組み立て手順・実機で確定した Robin の書式・落とし穴の一覧は
+**[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)** にまとめてある。
 
-自宅では、**PAD が送るのと同じ HTTP 呼び出しを同じ順序で送る参照実装**で動作を確認し、
-その呼び出し列を PAD 用の手順書として書き出せる（Selenium も Playwright も使わない標準ライブラリのみ）。
+### 🗺️ 録画 JSON から PAD フローを作る流れ
 
-```powershell
-# 別ターミナルで: msedgedriver.exe --port=9515
-python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json --details data/edi2_practice_batch.csv --trace output/pad_trace.md
+**実行環境に Python は不要。** 変換だけを Python が使える PC で行い、できあがった Robin を
+実行環境の PAD に入れる。変換にはブラウザも WebDriver も要らないので、実行環境の準備や許可を
+待っている間にフローを作り込んでおける（録画①だけは対象システムにアクセスできる環境で行う）。
+
+```
+変換環境（Python が使える PC。ブラウザも WebDriver も不要）
+  ① Chrome Recorder で業務操作を録画 → JSON エクスポート
+  ② setup / loop / recover / teardown に分割、値を {{列名}} / {{SECRET:…}} へ
+  ③ python pad_webdriver_ref.py --robin output/pad_flow.robin.txt …
+       └→ pad_flow.robin.txt（PAD に貼る本体）＋ pad_flow.jsact.js（保険）
+                    │
+                    │  生成した Robin を実行環境へ渡す
+                    ▼
+実行環境（PAD だけ使える PC。Python は不要）
+  ④ C:\temp に置く: msedgedriver.exe / 明細CSV / pad_flow.jsact.js
+  ⑤ PAD で新規フロー（Power Fx は無効）→ キャンバスに Ctrl+V
+  ⑥ MaxItems = 1 で試走 → 目で確認 → 10 に上げて本番
+  ⑦ C:\temp に出力: エビデンスPNG / pad_result.csv / pad_progress.log
 ```
 
-さらに `--robin` を付けると、**PAD にそのまま貼り付けられる Robin コード**（PAD のフローの実体）を生成する。
-アクションを 1 つずつ手で置く必要はなく、`{{列名}}` は `%Row['列名']%` へ、`{{SECRET:…}}` は資格情報変数の参照へ
-自動変換される。バッチ定義 JSON を差し替えれば、その業務のフローがそのまま生成される。
-練習サイト `test_site/edi2/index.html` は**単一ファイルなので Python のサーバー不要**で、
-`file:///…` で開いて PAD の練習台にできる。
+### ⚙️ 変換コマンド
+
+```
+# Python が使える環境で変換する（ブラウザも WebDriver も不要）
+python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
+    --details "C:\temp\edi2_batch.csv" --id-column "プロジェクト番号" `
+    --robin output/pad_flow.robin.txt `
+    --driver-exe "C:\temp\msedgedriver.exe" --pad-out-dir "C:\temp"
+```
+
+**引数のパスは 2 種類あるので混ぜないこと。** `--batch` / `--robin` は**変換環境**のパスで
+リポジトリ相対でよい。`--details` / `--driver-exe` / `--pad-out-dir` は**実行環境**（PAD を動かす PC）の
+パスで、生成された Robin に文字列として埋め込まれる。後者が同じフォルダ配下なら `%BaseDir%` 相対で
+出力されるので、**配布時に直すのは 1 行だけ**になる。
+
+生成されるのは録画の手順そのままではなく、**運用に必要な制御構造を足したフロー**。
+
+| 生成される機能 | 内容 |
+| --- | --- |
+| 手動ログイン（既定） | 人が手でログインし、**PAD はパスワードを一度も受け取らない**。録画されたログイン手順は `LoginMode = auto` 側に入る |
+| セットアップ失敗の検知 | ログインや起点への移動に失敗したら、明細を 1 件も流さず中止 |
+| 件数制限 / skip 列 | `MaxItems` で試走。skip 列の行は飛ばす。打ち切った行は「未実行」として記録 |
+| 失敗後の復帰 | `recover` を次の件の前に実行し、**1 件の失敗が全件に連鎖しない** |
+| 失敗時エビデンス | `fail__<ID>__<業務キー>__日時.png` を保存 |
+| 結果 CSV / 進捗ログ | 結果 CSV は**そのまま明細として読み直せる列構成**（失敗分だけ再実行できる） |
+| 生成時の自動チェック | 700 文字超の行・`SET` の右辺の `%` 誤用・`EncodeRequestBody: False` の欠落・未エスケープの単引用符を警告 |
+
+最後の 1 つが効く。**PAD は解釈できない行をエラーも出さずに無視する**ため、生成時に検出できないと
+「貼り付けたのにアクションが足りない」という形で後から発覚する。
+
+`{{列名}}` はループ先頭で `SET Col1 TO Row['列名']` として取り出され、以降は `%Col1%` で参照される
+（リテラル内に単引用符を入れると貼り付けが無視されるため）。`{{SECRET:…}}` は JSON 用に
+エスケープ済みの変数への参照になり、**生成物に平文は入らない**。
+
+### 🧪 手順書だけを出す / 練習する
+
+`--robin` の代わりに `--trace` を使うと、**PAD が送るのと同じ HTTP 呼び出しを同じ順序で実際に送りながら**、
+その呼び出し列を Markdown の手順書として書き出せる（標準ライブラリのみ。Selenium も Playwright も使わない）。
+
+```
+# 別ターミナルで: msedgedriver.exe --port=9515
+python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
+    --details data/edi2_practice_batch.csv --trace output/pad_trace.md
+```
+
+練習サイト `test_site/edi2/index.html` は**単一ファイルなので Python のサーバー不要**。
+`file:///…` で開いて PAD の練習台にできるので、実行環境でも予行演習ができる。
+
+また、社内固有の情報を含まない**公開用のサンプル**を `examples/pad/` に同梱している
+（デモページ `sample.html` ＋明細 CSV ＋貼り付け用 Robin）。付属の明細は
+**1 回の実行で成功・失敗・復帰・スキップの 4 経路すべてを通る**並びになっているので、
+失敗経路の挙動を最初から体験できる。
+
 
 ---
 
