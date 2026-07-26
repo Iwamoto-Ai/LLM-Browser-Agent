@@ -32,7 +32,7 @@ Switchable between **Microsoft Edge (default) / Google Chrome**, running on
 - **2 LLM backends**: cloud (Anthropic API) / local (Ollama — no API key, fully local).
 - **2 browser engines**: Selenium (default) / Playwright (stable thanks to auto-waiting, full-page screenshots).
 - **An escape hatch for locked-down workplaces**: drive WebDriver over HTTP from Power Automate Desktop and
-  run the same batches without any browser extension ([guide](docs/PAD_WebDriver.md)).
+  run the same batches without any browser extension (💡[guide](docs/PAD_WebDriver.md)).
 - **Batch execution from Excel/CSV details**: process dozens of registrations/confirmations in one command (progress display, result CSV, re-run failures only).
 - **Deterministic replay of Google Chrome Recorder recordings**: replays a recorded operations file (JSON) reliably without an LLM and without any browser extension (for complex sites).
 - **Secrets never reach the model**: passwords are referenced as `{{SECRET:NAME}}` and the real values are filled in locally at runtime.
@@ -55,6 +55,7 @@ Whichever you choose, the core mechanism (operating elements by index number) is
 | Template runner (recommended) | `run_template.py` | Repeatable runs with a per-site YAML + values JSON. Switch with `--backend` / `--engine` |
 | Standalone (one-shot CLI) | `agent.py` (cloud) / `agent_ollama.py` (local) | Runs a natural-language task once, automatically |
 | MCP server | `mcp_server.py` | Operate conversationally from Claude Desktop / OpenClaw / Hermes Agent |
+| Record operations and run on Power Automate Desktop | `pad_webdriver_ref.py` | Converts a recorded operations file into PAD code (Robin). No LLM needed |
 
 ### 2) LLM backend (the brain)
 
@@ -75,6 +76,7 @@ Whichever you choose, the core mechanism (operating elements by index number) is
 - **In-house / offline use** → backend `ollama` (no API key). Doesn't conflict with your company's AI such as Copilot.
 - **Maximum reliability** → backend `anthropic` (cloud). Also good as a behavioral baseline.
 - **Dynamic pages / many fields / worried about missed elements** → engine `playwright` (reliable waiting).
+- **Python and other dev tools are unavailable at work** → record the operations and run them with Power Automate Desktop free edition (PAD).
 - **Start with the minimal setup** → the defaults (Selenium + Anthropic, or Selenium + Ollama) are fine.
 
 ---
@@ -612,13 +614,15 @@ python run_batch.py --batch recordings/edi2_practice_batch.json --details data/e
 
 ---
 
-## 🏢 For locked-down workplaces (PAD + WebDriver)
+## 🏢 For locked-down workplaces (Power Automate Desktop free edition (PAD) + WebDriver)
 
 **Even when the execution environment (e.g. a work PC) cannot have Python installed, the same batch
-operation can be built with Power Automate Desktop (PAD) alone.** Only the conversion from a recording JSON
-to Robin code needs Python, and that can happen on a separate machine; you then paste the resulting Robin
-into PAD on the execution environment. PAD's web automation normally needs a browser extension, but **WebDriver has nothing
-to do with that extension**: `msedgedriver.exe` itself runs as a local HTTP server, so driving it from PAD's
+operation can be run with just WebDriver and Power Automate Desktop free edition (PAD).** Only the
+conversion from a recording JSON into PAD code (Robin) needs Python, and that can happen on a separate
+machine; you then paste the resulting PAD code (Robin) into PAD on the execution environment.
+
+PAD's web automation normally needs a dedicated browser extension, but **WebDriver has nothing to do with
+that extension**: `msedgedriver.exe` itself runs as a local HTTP server, so driving it from PAD's
 "Invoke web service" action lets you **control the browser with no extension at all**.
 
 - Reading details, looping, skip handling, item limit, progress, result CSV → **native PAD actions**
@@ -627,16 +631,16 @@ to do with that extension**: `msedgedriver.exe` itself runs as a local HTTP serv
 - Evidence → **WebDriver's `/screenshot`** (captures only the browser page, not the desktop)
 
 **This setup has been verified end to end on real hardware** (PAD free edition / Windows 11 / Edge, against
-the bundled practice site `test_site/edi2/`: 3 ok / 1 skipped). The build guide, the Robin syntax confirmed
-on a real machine, and the full list of pitfalls are in **[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)**
-(written in Japanese).
+the bundled practice site `test_site/edi2/`: 3 ok / 1 skipped). The build guide, the PAD code (Robin) syntax
+confirmed on a real machine, and the full list of pitfalls are in
+**💡[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)** (written in Japanese).
 
 ### 🗺️ From a recording JSON to a PAD flow
 
 **The execution environment does not need Python.** Only the conversion runs on a machine that has Python;
-the resulting Robin is pasted into PAD on the execution environment. Conversion needs neither a browser nor
-WebDriver, so you can build the flow while waiting for the execution environment to be prepared or approved
-(step 1, the recording itself, does need access to the target system).
+the resulting PAD code (Robin) is pasted into PAD on the execution environment. Conversion needs neither a
+browser nor WebDriver, so you can build the flow while waiting for the execution environment to be prepared
+or approved (step 1, the recording itself, does need access to the target system).
 
 ```
 Conversion environment (a PC with Python; no browser, no WebDriver needed)
@@ -645,16 +649,16 @@ Conversion environment (a PC with Python; no browser, no WebDriver needed)
   3. python pad_webdriver_ref.py --robin output/pad_flow.robin.txt …
        └→ pad_flow.robin.txt (paste this into PAD) + pad_flow.jsact.js (fallback)
                     │
-                    │  hand the generated Robin to the execution environment
+                    │  hand the generated PAD code (Robin) to the execution environment
                     ▼
-Execution environment (only PAD available; no Python needed)
+Execution environment (only WebDriver and PAD; no Python needed)
   4. Put in C:\temp: msedgedriver.exe / details CSV / pad_flow.jsact.js
   5. Create a new desktop flow in PAD (Power Fx disabled) → Ctrl+V on the canvas
   6. Trial run with MaxItems = 1 → inspect → raise to 10 for production
   7. Outputs in C:\temp: evidence PNGs / pad_result.csv / pad_progress.log
 ```
 
-### ⚙️ The conversion command
+### ⚙️ Converting a recording into PAD code — pad_webdriver_ref.py
 
 ```
 # Convert on a machine that has Python (no browser, no WebDriver needed)
@@ -666,21 +670,21 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 
 **Two kinds of paths are involved — don't mix them.** `--batch` / `--robin` are paths on the **conversion
 environment** and may be repository-relative. `--details` / `--driver-exe` / `--pad-out-dir` are paths on the
-**execution environment** (the PC that runs PAD); they are embedded into the generated Robin as strings. When the
-latter live under the same folder they are emitted relative to `%BaseDir%`, so **only one line needs editing
-when you distribute the flow**.
+**execution environment** (the PC that runs PAD); they are embedded into the generated PAD code (Robin) as
+strings. When the latter live under the same folder they are emitted relative to `%BaseDir%`, so **only one
+line needs editing when you distribute the flow**.
 
 What you get is not the raw recorded steps but **a flow with the control structure real operation needs**.
 
 | Generated feature | What it does |
 | --- | --- |
-| Manual login (default) | A human logs in by hand and **PAD never receives the password**. The recorded login steps go into the `LoginMode = auto` branch |
+| Manual login (default) | A human logs in by hand and **PAD never receives the password** |
 | Setup failure detection | If login or navigation to the start screen fails, no detail rows are processed at all |
 | Item limit / skip column | `MaxItems` for trial runs; rows with a value in `skip` are skipped; rows cut off are recorded as "not run" |
 | Recovery after failure | `recover` runs before the next item, so **one failure does not cascade to every row** |
 | Failure evidence | Saves `fail__<ID>__<key>__timestamp.png` |
 | Result CSV / progress log | The result CSV **can be read back as the details file**, so failures can be re-run directly |
-| Generation-time lint | Warns about lines over 700 chars, misuse of `%` on the right side of `SET`, a missing `EncodeRequestBody: False`, and unescaped single quotes in literals |
+| Generation-time lint | Warns about unresolved placeholders, lines over 700 chars, misuse of `%` on the right side of `SET`, a missing `EncodeRequestBody: False`, and unescaped single quotes in literals |
 
 That last one matters. **PAD silently ignores lines it cannot parse**, so anything not caught at generation
 time surfaces later as "I pasted it but some actions are missing".
@@ -704,10 +708,9 @@ The practice site `test_site/edi2/index.html` is a **single file, so no Python s
 via `file:///…` and use it as a PAD practice target, even on the execution environment.
 
 A **public-facing sample** containing no company-specific information is also bundled under `examples/pad/`
-(a demo page `sample.html`, a details CSV, and a Robin file to paste). Its details CSV is ordered so that a
-**single run exercises all four paths: success, failure, recovery, and skip**, letting you see the failure
-behavior from the very first run.
-
+(a demo page `sample.html`, a details CSV, and PAD code (Robin) to paste). Its details CSV is ordered so that
+a **single run exercises all four paths: success, failure, recovery, and skip**, verified on real hardware as
+`2 ok / 1 failed / 1 skipped`.
 
 ---
 
