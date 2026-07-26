@@ -16,33 +16,34 @@ LLM（頭脳）は **クラウド（Anthropic API）** でも **ローカル（O
 ---
 
 ## ✨ 特徴（できること）
-- **無料ソフトウェアでブラウザ操作自動化**: PowerAutomate不要。API キー不要のローカル LLM でも使える。
+- **無料ソフトウェアでブラウザ操作自動化**: API キー不要のローカル LLM でも使える。
 - **業務フローの自動化**: ログイン → メニュー操作 → 複数項目の入力 → 登録 → 完了画面のスクショ、を自然言語で。
 - **サイトごとのテンプレート運用**: 手順（テンプレート）と数値（データ）を分離し、同じ手順を別データで繰り返し実行可能。
-- **3 つの実行形態**: 単発 CLI / テンプレート実行 / MCP サーバー（Claude Desktop・OpenClaw・Hermes Agent から会話操作）。
+- **4 つの実行形態**: 単発 CLI / テンプレート実行 / MCP サーバー（Claude Desktop・OpenClaw・Hermes Agent から会話操作）。
 - **2 つの LLM バックエンド**: クラウド（Anthropic API）/ ローカル（Ollama・API キー不要・完全ローカル）。
 - **2 つのブラウザエンジン**: Selenium（既定）/ Playwright（auto-waiting で安定、フルページスクショ）。
-- **開発ツールが使えない職場向けの逃げ道**: Power Automate Desktop から WebDriver を HTTP で操作し、
-  ブラウザ拡張機能なしで同じバッチ運用ができる（[手順書](docs/PAD_WebDriver.md)）。
 - **Excel/CSV の明細をバッチ実行**: 数十件の登録・確認を 1 コマンドで繰り返す（進捗表示・結果 CSV・失敗分だけ再実行）。
 - **Google Chrome Recorder の録画を決定論リプレイ**: ブラウザ拡張機能不要でブラウザの操作を記録したファイル（JSON）を LLM なしで確実に再生（複雑サイト向け）。
+- **💡開発ツールが使えない環境で使用したい場合の方法**: 操作録画して Power Automate Desktop 無料版 (PAD) へコード変換することで実現。
+  WebDriverでブラウザ拡張機能なしで同じバッチ運用ができる（💡 [手順書](docs/PAD_WebDriver.md)）。
 - **秘密情報をモデルに渡さない**: パスワードは `{{SECRET:NAME}}` で参照し、実値は実行時にローカルで補完。
 - **証跡に強いスクショ**: 保存名に自動で日時 `_YYYYMMDD_HHMMSS` を付与（上書きされない）。
 
 ---
 
-## 🧩 全体像（3 つの軸を組み合わせて使う）
+## 🧩 全体像
 
 このツールは「**実行形態 × LLM バックエンド × ブラウザエンジン**」の 3 軸を自由に組み合わせます。
 どれを選んでも操作の中身（要素番号で操作する仕組み）は同じです。
 
-### 1) 実行形態（どう動かすか）
+### 1) 4つの実行形態（どう動かすか）
 
 | 形態 | ファイル | 説明 |
 |---|---|---|
 | テンプレート実行（推奨） | `run_template.py` | サイトごとの YAML ＋数値 JSON で繰り返し実行。`--backend` / `--engine` で切替 |
 | スタンドアロン（単発 CLI） | `agent.py`（クラウド）/ `agent_ollama.py`（ローカル） | 自然言語タスクを 1 回だけ自動実行 |
 | MCP サーバー | `mcp_server.py` | Claude Desktop / OpenClaw / Hermes Agent から会話しながら操作 |
+| 操作録画しPower Automate Desktopで実行 | `pad_webdriver_ref.py` | 操作録画ファイルをPAD(Robin)コードへ変換 ※LLM不要 |
 
 ### 2) LLM バックエンド（頭脳）
 
@@ -58,12 +59,17 @@ LLM（頭脳）は **クラウド（Anthropic API）** でも **ローカル（O
 | Selenium（既定） | `selenium` | 実績の既定。`--engine selenium` |
 | Playwright | `playwright` | **auto-waiting** で動的ページ・複雑メニューに強い。フルページスクショ。`--engine playwright` |
 
+
+
 ### 🧭 選び方の目安
 
 - **社内・オフラインで使いたい** → バックエンドは `ollama`（API キー不要）。会社の AI が Copilot 等でも干渉しない。
 - **とにかく確実に動かしたい** → バックエンドは `anthropic`（クラウド）。動作基準の確認にも向く。
 - **動的ページ・項目が多い・取りこぼしが不安** → エンジンは `playwright`（待機が確実）。
 - **まず最小構成で試す** → 既定（Selenium ＋ Anthropic、または Selenium ＋ Ollama）でOK。
+- **Pythonなど開発ツールが使えない環境で使用したい**: 操作録画して Power Automate Desktop 無料版 (PAD) で実行。
+  WebDriverでブラウザ拡張機能なしでバッチ運用もできる。LLM不要。（💡 [手順書](docs/PAD_WebDriver.md)）。
+
 
 ---
 
@@ -293,6 +299,10 @@ python run_template.py --template templates/test_site.yaml --values data/test_va
 
 ---
 
+
+
+
+
 ## 🎥 Google Chrome の Recorder でブラウザ操作を録画 → 決定論リプレイ（拡張機能不要）
 
 複雑なメニュー・項目数が多いサイトでは、LLM に毎回判断させるより、**人が一度操作して録画した手順を
@@ -474,7 +484,7 @@ python run_batch.py --batch recordings/edi_practice_batch.json --details data/ed
 }
 ```
 
-- **手順メモ／節目の表示**: `{"type":"comment","text":"発注 {{発注番号}} の受諾を開始"}` という
+- **💡手順メモ／節目の表示**: `{"type":"comment","text":"発注 {{発注番号}} の受諾を開始"}` という
   **comment ステップ**を置くと、ブラウザ操作なしで実行ログに 💬 として表示される（`{{列名}}` も使える）。
   headless 実行時に「いま何をしているか」を見せる進捗の節目としても便利。
 - **エビデンス保存**: `loop` の中に `{"type":"screenshot","name":"{{プロジェクト番号}}__{{発注番号}}","full_page":false}`
@@ -551,11 +561,11 @@ python run_batch.py --batch recordings/edi2_practice_batch.json --details data/e
 
 ---
 
-## 🏢 開発ツールが使えない環境向け（PAD ＋ WebDriver）
+## 🏢 開発ツールが使えない環境向け（Power Automate Desktop 無料版（PAD）＋ WebDriver）
 
-**実行環境（会社の PC など）に Python を入れられない場合でも、Power Automate Desktop（PAD）だけで
-同じバッチ運用ができる。** 録画 JSON から Robin コードへの変換だけを Python が使える別の PC で行い、
-できあがった Robin を実行環境の PAD に貼り付けて使う。
+**実行環境（会社の PC など）に Python を入れられない場合でも、WebDriverとPower Automate Desktop 無料版（PAD）だけで
+バッチ運用ができる。** 録画 JSON から PADコード(Robin)への変換だけを Python が使える別の PC で行い、
+できあがった PADコード(Robin) を実行環境の PAD に貼り付けて使う。
 PAD の Web 自動化は専用のブラウザ拡張機能を必要とするが、**WebDriver は拡張機能とは無関係**で、
 `msedgedriver.exe` 自体がローカルの HTTP サーバーとして動くため、PAD の「Web サービスの呼び出し」から
 HTTP で指示すれば**拡張機能なしでブラウザを操作できる**。
@@ -565,12 +575,12 @@ HTTP で指示すれば**拡張機能なしでブラウザを操作できる**�
 - エビデンス → **WebDriver の `/screenshot`**（デスクトップではなくブラウザのページだけが写る）
 
 **この構成は実機で完走を確認済み**（PAD 無料版 / Windows 11 / Edge、練習サイト `test_site/edi2/` に対して
-成功 3 / スキップ 1）。組み立て手順・実機で確定した Robin の書式・落とし穴の一覧は
-**[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)** にまとめてある。
+成功 3 / スキップ 1）。組み立て手順・実機で確定した PADコード(Robin) の書式・落とし穴の一覧は
+**💡[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)** にまとめてある。
 
 ### 🗺️ 録画 JSON から PAD フローを作る流れ
 
-**実行環境に Python は不要。** 変換だけを Python が使える PC で行い、できあがった Robin を
+**実行環境に Python は不要。** 変換だけを Python が使える PC で行い、できあがった PADコード(Robin) を
 実行環境の PAD に入れる。変換にはブラウザも WebDriver も要らないので、実行環境の準備や許可を
 待っている間にフローを作り込んでおける（録画①だけは対象システムにアクセスできる環境で行う）。
 
@@ -581,16 +591,16 @@ HTTP で指示すれば**拡張機能なしでブラウザを操作できる**�
   ③ python pad_webdriver_ref.py --robin output/pad_flow.robin.txt …
        └→ pad_flow.robin.txt（PAD に貼る本体）＋ pad_flow.jsact.js（保険）
                     │
-                    │  生成した Robin を実行環境へ渡す
+                    │  生成した PADコード(Robin) を実行環境へ渡す
                     ▼
-実行環境（PAD だけ使える PC。Python は不要）
+実行環境（WebDriverとPAD だけ使える PC。　Python は不要）
   ④ C:\temp に置く: msedgedriver.exe / 明細CSV / pad_flow.jsact.js
   ⑤ PAD で新規フロー（Power Fx は無効）→ キャンバスに Ctrl+V
   ⑥ MaxItems = 1 で試走 → 目で確認 → 10 に上げて本番
   ⑦ C:\temp に出力: エビデンスPNG / pad_result.csv / pad_progress.log
 ```
 
-### ⚙️ 変換コマンド
+### ⚙️ 操作録画をPADコードへ変換ツール　pad_webdriver_ref.py
 
 ```
 # Python が使える環境で変換する（ブラウザも WebDriver も不要）
@@ -602,14 +612,14 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 
 **引数のパスは 2 種類あるので混ぜないこと。** `--batch` / `--robin` は**変換環境**のパスで
 リポジトリ相対でよい。`--details` / `--driver-exe` / `--pad-out-dir` は**実行環境**（PAD を動かす PC）の
-パスで、生成された Robin に文字列として埋め込まれる。後者が同じフォルダ配下なら `%BaseDir%` 相対で
+パスで、生成された PADコード(Robin) に文字列として埋め込まれる。後者が同じフォルダ配下なら `%BaseDir%` 相対で
 出力されるので、**配布時に直すのは 1 行だけ**になる。
 
 生成されるのは録画の手順そのままではなく、**運用に必要な制御構造を足したフロー**。
 
 | 生成される機能 | 内容 |
 | --- | --- |
-| 手動ログイン（既定） | 人が手でログインし、**PAD はパスワードを一度も受け取らない**。録画されたログイン手順は `LoginMode = auto` 側に入る |
+| 手動ログイン（既定） | 人が手でログインし、**PAD はパスワードを一度も受け取らない**。|
 | セットアップ失敗の検知 | ログインや起点への移動に失敗したら、明細を 1 件も流さず中止 |
 | 件数制限 / skip 列 | `MaxItems` で試走。skip 列の行は飛ばす。打ち切った行は「未実行」として記録 |
 | 失敗後の復帰 | `recover` を次の件の前に実行し、**1 件の失敗が全件に連鎖しない** |
@@ -639,7 +649,7 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 `file:///…` で開いて PAD の練習台にできるので、実行環境でも予行演習ができる。
 
 また、社内固有の情報を含まない**公開用のサンプル**を `examples/pad/` に同梱している
-（デモページ `sample.html` ＋明細 CSV ＋貼り付け用 Robin）。付属の明細は
+（デモページ `sample.html` ＋明細 CSV ＋貼り付け用 PADコード(Robin)。付属の明細は
 **1 回の実行で成功・失敗・復帰・スキップの 4 経路すべてを通る**並びになっているので、
 失敗経路の挙動を最初から体験できる。
 
@@ -664,7 +674,7 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 
 - パスワード等は **モデルに渡さない**。指示やツール引数では `{{SECRET:NAME}}` と書き、実際の値は
 ローカル（`.env` または MCP の `env`）の環境変数から補完される。ログ表示も `[SECRET:NAME]` にマスクされる安全設計。
-- `.env` と設定 JSON は Git にコミットしないこと（`.gitignore` 済み）。
+- `.env` と設定 JSON は Git にcommitしないこと（`.gitignore` 済み）。
 
 ---
 
@@ -687,7 +697,7 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 ## ❓ トラブルシュート
 
 - **ドライバ取得に失敗** … 社内など制限環境では Selenium Manager がドライバ取得に失敗することがある。
-  社内ミラー or 手動で msedgedriver/chromedriver を PATH に置く（バージョンはブラウザに合わせる）。Playwright なら `channel=msedge` で回避しやすい。
+  手動で msedgedriver/chromedriver を PATH に置く（⚠️バージョンはブラウザに合わせる）。Playwright なら `channel=msedge` で回避しやすい。
 - **会社プロキシ** … 必要なら `HTTPS_PROXY` を設定。localhost 接続は `NO_PROXY=localhost,127.0.0.1` で除外。
 - **`Failed to connect to Ollama`** … Ollama 本体が未起動か localhost がプロキシ経由。`ollama ps` で確認し
   `NO_PROXY` を設定。別ポートなら `OLLAMA_HOST` も指定。
