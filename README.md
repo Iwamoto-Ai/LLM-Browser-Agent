@@ -370,6 +370,7 @@ python run_recording.py --recording recordings/test_site.example.json --values d
 > **使い分け**: 毎回手順が決まっている定型業務は **録画リプレイ（確実）**、画面差異や判断が要る作業は
 > **LLM 駆動（テンプレート運用）** が向く。両者は同じ `browser` 層を共有する。
 
+
 ### 🧪 実環境がなくても試せる：ローカル練習サイト（iframe＋ポップアップ）
 
 実際の業務システムにアクセスできなくても、**iframe（フレームセット）と別ウィンドウのカレンダーを備えた
@@ -414,6 +415,7 @@ python run_recording.py --recording recordings/edi_practice_named.json --values 
 > この練習サイトで「frame／popup を含む録画リプレイ」が通ることを確認しておけば、実環境が用意できたときに
 > 同じ手順（録画 → JSON → `run_recording.py`）でそのまま本番へ移行できる。
 
+
 ### 🧭 Playwright Codegen をセレクタ・フレーム名の調査に使う
 
 Playwright には操作を記録して**Playwright コード**を生成する [Codegen](https://playwright.dev/python/docs/codegen) がある。
@@ -451,8 +453,6 @@ page.locator("frame[name=\"content\"]").content_frame.locator("#yyyymm").fill("2
   `{{SECRET:NAME}}` に置き換え、可変値は `{{key}}` にする（Recorder と同じ運用）。
 - Codegen は「調査・下書き」に使い、実行は本ツールの JSON リプレイ（秘密情報マスク・値の差し替え・
   日時スクショ・エンジン切替つき）で行うのが、統一運用としておすすめ。
-
-
 
 
 
@@ -528,6 +528,7 @@ PM9000000003,900000000003,1   ← skip に値がある行は飛ばす
 > **⚠️ 登録系の再実行は二重登録に注意**: 「実は登録は成功していたが確認段階で失敗扱いになった」ケースが
 > 混ざり得る。再実行の前に、失敗時スクショ（fail_*.png）で実際の画面を確認してから流すこと。
 
+
 ### 🧪 実環境がなくても試せる（練習サイトでバッチ体験）
 
 付属の練習サイト（`test_site/edi/`）に対するバッチ定義と明細を同梱している。明細 4 行
@@ -559,6 +560,7 @@ $env:MY_USERNAME="demo"; $env:MY_PASSWORD="password123"
 python run_batch.py --batch recordings/edi2_practice_batch.json --details data/edi2_practice_batch.csv --engine playwright --browser edge --no-headless --viewport-shot
 ```
 
+
 ---
 
 ## 🏢 開発ツールが使えない環境向け（Power Automate Desktop 無料版（PAD）＋ WebDriver）
@@ -575,8 +577,10 @@ HTTP で指示すれば**拡張機能なしでブラウザを操作できる**�
 - エビデンス → **WebDriver の `/screenshot`**（デスクトップではなくブラウザのページだけが写る）
 
 **この構成は実機で完走を確認済み**（PAD 無料版 / Windows 11 / Edge、練習サイト `test_site/edi2/` に対して
-成功 3 / スキップ 1）。組み立て手順・実機で確定した PADコード(Robin) の書式・落とし穴の一覧は
+成功 3 / スキップ 1）。**社内プロキシ経由の外部サイトにも接続でき、実業務システムでの処理も確認済み。**
+組み立て手順・実機で確定した PADコード(Robin) の書式・落とし穴の一覧は
 **💡[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)** にまとめてある。
+
 
 ### 🗺️ 録画 JSON から PAD フローを作る流れ
 
@@ -589,7 +593,7 @@ HTTP で指示すれば**拡張機能なしでブラウザを操作できる**�
   ① Chrome Recorder で業務操作を録画 → JSON エクスポート
   ② setup / loop / recover / teardown に分割、値を {{列名}} / {{SECRET:…}} へ
   ③ python pad_webdriver_ref.py --robin output/pad_flow.robin.txt …
-       └→ pad_flow.robin.txt（PAD に貼る本体）＋ pad_flow.jsact.js（保険）
+       └→ pad_flow.robin.txt（PAD に貼る本体）＋ pad_flow.jsact.js
                     │
                     │  生成した PADコード(Robin) を実行環境へ渡す
                     ▼
@@ -600,6 +604,7 @@ HTTP で指示すれば**拡張機能なしでブラウザを操作できる**�
   ⑦ C:\temp に出力: エビデンスPNG / pad_result.csv / pad_progress.log
 ```
 
+
 ### ⚙️ 操作録画をPADコードへ変換ツール　pad_webdriver_ref.py
 
 ```
@@ -607,19 +612,27 @@ HTTP で指示すれば**拡張機能なしでブラウザを操作できる**�
 python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
     --details "C:\temp\edi2_batch.csv" --id-column "プロジェクト番号" `
     --robin output/pad_flow.robin.txt `
-    --driver-exe "C:\temp\msedgedriver.exe" --pad-out-dir "C:\temp"
+    --driver-exe "C:\temp\msedgedriver.exe" --pad-out-dir "C:\temp" `
+    --proxy "proxy.example.com:8080"
 ```
+
+`--proxy` は**プロキシサーバー経由でインターネットへ出る環境の場合に**指定する。省略しても生成物に切り替えスイッチは入るので、
+あとから `ProxyAddr` を書いて `UseProxy` を `True` にしてもよい。
+
 
 **引数のパスは 2 種類あるので混ぜないこと。** `--batch` / `--robin` は**変換環境**のパスで
 リポジトリ相対でよい。`--details` / `--driver-exe` / `--pad-out-dir` は**実行環境**（PAD を動かす PC）の
 パスで、生成された PADコード(Robin) に文字列として埋め込まれる。後者が同じフォルダ配下なら `%BaseDir%` 相対で
 出力されるので、**配布時に直すのは 1 行だけ**になる。
 
-生成されるのは録画の手順そのままではなく、**運用に必要な制御構造を足したフロー**。
+
+**生成されるのは録画手順そのままではなく、運用に必要な制御構造を足したフロー**。
 
 | 生成される機能 | 内容 |
 | --- | --- |
-| 手動ログイン（既定） | 人が手でログインし、**PAD はパスワードを一度も受け取らない**。|
+| 冒頭にまとまった設定 | **接続先 → プロキシ → フォルダ → 運用スイッチ**の順に並ぶ。環境の切り替えは `TargetUrl` の 1 行 |
+| 手動ログイン（既定） | 人が手でログインし、**繰り返しの起点画面まで進んでから**[OK]。PAD はパスワードを一度も受け取らない |
+| プロキシ切り替え | `UseProxy` の True / False で直結と社内プロキシ経由を行き来できる |
 | セットアップ失敗の検知 | ログインや起点への移動に失敗したら、明細を 1 件も流さず中止 |
 | 件数制限 / skip 列 | `MaxItems` で試走。skip 列の行は飛ばす。打ち切った行は「未実行」として記録 |
 | 失敗後の復帰 | `recover` を次の件の前に実行し、**1 件の失敗が全件に連鎖しない** |
@@ -633,6 +646,11 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 `{{列名}}` はループ先頭で `SET Col1 TO Row['列名']` として取り出され、以降は `%Col1%` で参照される
 （リテラル内に単引用符を入れると貼り付けが無視されるため）。`{{SECRET:…}}` は JSON 用に
 エスケープ済みの変数への参照になり、**生成物に平文は入らない**。
+
+**手動ログインは「起点画面まで人が進む」方式。** ログイン後の画面構成（ナビゲータの展開順など）は
+サイト側の都合で変わることがあり、機械的に辿らせると起点に着けずに止まる。人が起点まで進めば
+その差異に影響されないので、録画のログイン以降の手順は `LoginMode` が `auto` のときだけ実行される。
+
 
 ### 🧪 手順書だけを出す / 練習する
 
@@ -648,7 +666,10 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 練習サイト `test_site/edi2/index.html` は**単一ファイルなので Python のサーバー不要**。
 `file:///…` で開いて PAD の練習台にできるので、実行環境でも予行演習ができる。
 
-また、社内固有の情報を含まない**公開用のサンプル**を `examples/pad/` に同梱している
+
+
+📦 PAD用 サンプル
+社内固有の情報を含まない**公開用のサンプル**を `examples/pad/` に同梱している
 （デモページ `sample.html` ＋明細 CSV ＋貼り付け用 PADコード(Robin)。付属の明細は
 **1 回の実行で成功・失敗・復帰・スキップの 4 経路すべてを通る**並びになっているので、
 失敗経路の挙動を最初から体験できる。
@@ -671,8 +692,7 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 ---
 
 ## 🔒 秘密情報の扱い
-
-- パスワード等は **モデルに渡さない**。指示やツール引数では `{{SECRET:NAME}}` と書き、実際の値は
+- パスワード等は **AIモデルに渡さない**。指示やツール引数では `{{SECRET:NAME}}` と書き、実際の値は
 ローカル（`.env` または MCP の `env`）の環境変数から補完される。ログ表示も `[SECRET:NAME]` にマスクされる安全設計。
 - `.env` と設定 JSON は Git にcommitしないこと（`.gitignore` 済み）。
 
@@ -687,6 +707,10 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 - **バッチ実行 `run_batch.py`**: 練習サイト 2 種（フレームセット型 `edi/`・Oracle 型 `edi2/`）で
   **実ブラウザ完走**（成功 3 / スキップ 1、エビデンス命名・結果 CSV・💬 コメント表示まで確認）。
   失敗隔離・recover・`--retry-from`・日本語列名・.xlsx 読込はモックで全テスト合格。
+- **PAD ＋ WebDriver（実行環境に Python なし）**: 練習サイト `test_site/edi2/` で完走（成功 3 / スキップ 1）。
+  社内プロキシ経由での外部サイト接続、および**実業務システムでの 1 件処理**（エビデンス保存まで）も確認。
+  Edge とドライバのバージョン一致・`EncodeRequestBody: False`・ポート 9515 の解放が前提条件
+  （💡[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md) のトラブルシュートを参照）。
 - **MCP サーバー**: Hermes Agent（NousResearch）から接続・ツール検出（9 個）・`navigate` 実行までを確認。
 - **CI（GitHub Actions）**: push のたびに ubuntu で構文チェック＋ユニットテスト、windows-latest で実 Edge の
   selftest（Selenium / Playwright 両エンジン）を実行。
@@ -730,3 +754,6 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 - [OpenClaw](https://openclaw.ai/)
 - [Hermes Agent (NousResearch)](https://github.com/NousResearch/hermes-agent)
 - [Hermes Agent — MCP 設定リファレンス](https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference)
+- [Microsoft Power Automate Desktop (PAD)](https://www.microsoft.com/ja-jp/area/biz/smb/column-power-automate-desktop)
+- [Microsoft Edge WebDriver](https://developer.microsoft.com/ja-jp/microsoft-edge/tools/webdriver?form=MA13LH&cs=3787589721)
+- [Google Chrome WebDriver](https://developer.chrome.com/docs/chromedriver?hl=ja)

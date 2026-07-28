@@ -631,7 +631,8 @@ that extension**: `msedgedriver.exe` itself runs as a local HTTP server, so driv
 - Evidence → **WebDriver's `/screenshot`** (captures only the browser page, not the desktop)
 
 **This setup has been verified end to end on real hardware** (PAD free edition / Windows 11 / Edge, against
-the bundled practice site `test_site/edi2/`: 3 ok / 1 skipped). The build guide, the PAD code (Robin) syntax
+the bundled practice site `test_site/edi2/`: 3 ok / 1 skipped). **It also reaches external sites through a
+corporate proxy, and has been used on a real business system.** The build guide, the PAD code (Robin) syntax
 confirmed on a real machine, and the full list of pitfalls are in
 **💡[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)** (written in Japanese).
 
@@ -665,8 +666,12 @@ Execution environment (only WebDriver and PAD; no Python needed)
 python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
     --details "C:\temp\edi2_batch.csv" --id-column "プロジェクト番号" `
     --robin output/pad_flow.robin.txt `
-    --driver-exe "C:\temp\msedgedriver.exe" --pad-out-dir "C:\temp"
+    --driver-exe "C:\temp\msedgedriver.exe" --pad-out-dir "C:\temp" `
+    --proxy "proxy.example.com:8080"
 ```
+
+`--proxy` is only needed when the target is **outside the corporate network**. You can omit it — the generated
+flow still contains the switch, so you can fill in `ProxyAddr` and set `UseProxy` to `True` later.
 
 **Two kinds of paths are involved — don't mix them.** `--batch` / `--robin` are paths on the **conversion
 environment** and may be repository-relative. `--details` / `--driver-exe` / `--pad-out-dir` are paths on the
@@ -678,7 +683,9 @@ What you get is not the raw recorded steps but **a flow with the control structu
 
 | Generated feature | What it does |
 | --- | --- |
-| Manual login (default) | A human logs in by hand and **PAD never receives the password** |
+| Settings grouped at the top | Ordered **target URL → proxy → folders → operational switches**. Switching environments is a one-line change to `TargetUrl` |
+| Manual login (default) | A human logs in by hand **and navigates to the loop start screen** before pressing OK. PAD never receives the password |
+| Proxy switch | `UseProxy` (True / False) toggles between a direct connection and the corporate proxy |
 | Setup failure detection | If login or navigation to the start screen fails, no detail rows are processed at all |
 | Item limit / skip column | `MaxItems` for trial runs; rows with a value in `skip` are skipped; rows cut off are recorded as "not run" |
 | Recovery after failure | `recover` runs before the next item, so **one failure does not cascade to every row** |
@@ -692,6 +699,11 @@ time surfaces later as "I pasted it but some actions are missing".
 `{{column}}` is extracted at the top of the loop as `SET Col1 TO Row['column']` and referenced as `%Col1%`
 afterwards (a single quote inside a literal makes PAD ignore the paste). `{{SECRET:…}}` becomes a reference
 to a JSON-escaped variable, so **no plaintext secret ends up in the generated file**.
+
+**Manual login means the operator reaches the start screen.** The screens right after login (how the
+navigator expands, for example) can change on the site's side, and walking them mechanically leads to a stop
+before the start screen is reached. Letting a human get there sidesteps that entirely, so the recorded steps
+after login only run when `LoginMode` is `auto`.
 
 ### 🧪 Export just the guide / practice locally
 
@@ -770,6 +782,11 @@ $env:MY_PASSWORD_ALLOWED_DOMAINS="example.co.jp,localhost"   # input is rejected
   (frameset-style `edi/` and Oracle-style `edi2/`): 3 ok / 1 skipped, evidence naming, result CSV and
   💬 comment display all confirmed. Failure isolation, recover, `--retry-from`, Japanese column names
   and .xlsx reading pass all mock tests.
+- **PAD + WebDriver (no Python in the execution environment)**: completed against the practice site
+  `test_site/edi2/` (3 ok / 1 skipped). Reaching external sites through a corporate proxy, and
+  **processing one item on a real business system** (through evidence capture), are also confirmed.
+  Prerequisites are a matching Edge/driver version, `EncodeRequestBody: False`, and a free port 9515
+  (see the troubleshooting section of 💡[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)).
 - **MCP server**: verified connection from Hermes Agent (NousResearch), tool discovery (9 tools), and `navigate` execution.
 - **CI (GitHub Actions)**: on every push, ubuntu runs syntax checks + unit tests, and windows-latest runs the real-Edge selftest (both Selenium and Playwright engines).
 - Environment: native Windows 11 + Microsoft Edge and Google Chrome.

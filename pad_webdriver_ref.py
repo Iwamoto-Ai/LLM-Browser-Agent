@@ -639,7 +639,7 @@ def _lint_robin(lines: list, log=print) -> list:
 
 def write_robin(batch: dict, details_path: str, id_col: str, path: str,
                 driver_exe: str = r"C:\temp\msedgedriver.exe",
-                out_dir: str = r"C:\temp") -> str:
+                out_dir: str = r"C:\temp", proxy: str = "") -> str:
     """PAD に貼り付けられる Robin コードを生成する。
 
     PAD のフローデザイナーはアクションのコピー＆ペーストにテキスト（Robin）を使うため、
@@ -680,7 +680,25 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# 解説: docs/PAD_WebDriver.md")
     A("# ============================================================")
     A("")
-    A("# --- 設定：配布時に触るのはこの BaseDir だけにする ---")
+    A("# --- 接続先：環境を切り替えるときはここを直す ---")
+    A("# 練習サイト  : file:///C:/temp/index.html")
+    A("# 本番サイト  : https://… （実環境の URL）")
+    A(f"SET TargetUrl TO {_robin_str(start_url)}")
+    A("")
+    A("# --- プロキシ：社外サイトへ出るときだけ指定する ---")
+    A("# WebDriver が起動するブラウザーは素のプロファイルで、Windows のプロキシ設定を")
+    A("# 引き継がない。社内プロキシ経由でしか外部に出られない環境では下を有効にする。")
+    A("# localhost と file:// はプロキシを通らないので、練習サイトは影響を受けない。")
+    if proxy:
+        A("# UseProxy を False にすると直結（練習サイト用）に戻る。")
+        A("SET UseProxy TO True")
+        A(f"SET ProxyAddr TO {_robin_str(proxy)}")
+    else:
+        A("# 使う場合: UseProxy を True にし、ProxyAddr にプロキシの host:port を書く。")
+        A("SET UseProxy TO False")
+        A("SET ProxyAddr TO $'''proxy.example.com:8080'''")
+    A("")
+    A("# --- フォルダ・ファイル：配布時に触るのはこの BaseDir だけにする ---")
     A(f"SET BaseDir TO {_robin_str(out_dir)}")
     A("# ※ BaseDir の末尾に \\ を付けないこと（%BaseDir%\\file.png が二重になる）")
     A(f"SET DriverExe TO {_robin_under_base(driver_exe, out_dir)}")
@@ -725,8 +743,14 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("WAIT 3")
     A("")
     A("# --- セッション開始（ブラウザ起動）---")
+    A("# プロキシの有無は冒頭の UseProxy で切り替える。")
     A("SET SessionBody TO $'''{\"capabilities\": {\"alwaysMatch\": "
       "{\"browserName\": \"MicrosoftEdge\"}}}'''")
+    A("IF UseProxy THEN")
+    A("    SET SessionBody TO $'''{\"capabilities\": {\"alwaysMatch\": "
+      "{\"browserName\": \"MicrosoftEdge\", \"proxy\": {\"proxyType\": \"manual\", "
+      "\"httpProxy\": \"%ProxyAddr%\", \"sslProxy\": \"%ProxyAddr%\"}}}}'''")
+    A("END")
     A("SET AppJson TO $'''application/json'''")
     A("SET NewUrl TO $'''%DriverUrl%/session'''")
     A(_web("NewUrl", "Post", "SessionBody", "SessionResp", "SessionStatus"))
@@ -763,12 +787,15 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             A("# ---------- 手動ログイン（既定）----------")
             A("# フローを止めて人がログインする。PAD はパスワードを一度も受け取らないので、")
             A("# 変数ペイン・実行ログ・エラーメッセージのどこにも残らない。")
+            A("# ★ ログインだけでなく、繰り返しの起点画面まで人が進めてから[OK]を押す。")
+            A("#   ログイン後の画面構成はサイト側の都合で変わることがあり、機械的に")
+            A("#   辿らせるより確実で、修正も要らない。")
             A("# WebDriver は自分が起動したブラウザーしか操作できない。別に開いてある")
             A("# 普段のブラウザーでログインしても、フローはそのタブを見られない。")
             A("IF LoginMode = $'''manual''' THEN")
             A("    Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' "
-              "Message: $'''いま開いたブラウザーでログインし、開始画面が出てから[OK]を"
-              "押してください。ブラウザーは閉じないでください。''' "
+              "Message: $'''いま開いたブラウザーでログインし、繰り返しの起点画面まで"
+              "進んでから[OK]を押してください。ブラウザーは閉じないでください。''' "
               "Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel "
               "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True "
               "ButtonPressed=> LoginBtn")
@@ -813,17 +840,10 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
                   f"ComparisonType: Text.TextComparisonType.CultureSensitive "
                   f"Result=> {var}")
 
-        # ★ ログイン範囲を抜けたら、ここで auto ブロックを閉じる。
-        #   閉じ忘れると以降のセットアップ手順が auto の中に入ってしまい、
-        #   manual 運用では実行されず、ループの起点に到達できない。
-        if in_auto and i not in login_idx:
-            A("END")
-            A("")
-            A("# ---------- 使い終わったパスワードは即座に消す ----------")
-            A("SET EdiPassword TO $''''''")
-            A("SET EdiPasswordEsc TO $''''''")
-            A("")
-            in_auto = False
+        # ★ 手動ログイン時は、ログイン以降のセットアップ手順（起点画面への移動）も
+        #   人が進める前提にする。実サイトはログイン後の画面構成が録画時と変わる
+        #   ことがあり、機械的に辿らせると起点に着けず Halt するため。
+        #   よって auto ブロックはここでは閉じず、setup の最後まで続ける。
 
         ind = "    " if in_auto else ""
 
@@ -842,8 +862,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             continue
         if t == "navigate":
             n += 1
-            A(f"{ind}# [{n}] ページを開く")
-            A(f"{ind}SET UrlBody TO $'''{{\"url\": \"{st.get('url', '')}\"}}'''")
+            A(f"{ind}# [{n}] ページを開く（URL は冒頭の TargetUrl で設定）")
+            A(f"{ind}SET UrlBody TO $'''{{\"url\": \"%TargetUrl%\"}}'''")
             A(_web("GoUrl", "Post", "UrlBody", "UrlResp", "UrlStatus", ind))
             A(f"{ind}WAIT 2")
             continue
@@ -955,14 +975,14 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
                     cands, act, st.get("value", ""), inner + "    ",
                     f"復帰: {act} {cands[0] if cands else ''}", cols))
             elif t == "navigate":
-                A(f"{inner}    SET UrlBody TO $'''{{\"url\": \"{st.get('url', '')}\"}}'''")
+                A(f"{inner}    SET UrlBody TO $'''{{\"url\": \"%TargetUrl%\"}}'''")
                 A(_web("GoUrl", "Post", "UrlBody", "UrlResp", "UrlStatus", inner + "    "))
                 A(f"{inner}    WAIT 2")
     elif start_url:
         A(f"{inner}    # batch に recover が無いので、開始 URL を開き直して復帰する。")
         A(f"{inner}    # ログインが必要なサイトではセッションが切れる可能性があるため、")
         A(f"{inner}    # 録画に recover セクションを用意するほうが確実。")
-        A(f"{inner}    SET UrlBody TO $'''{{\"url\": \"{start_url}\"}}'''")
+        A(f"{inner}    SET UrlBody TO $'''{{\"url\": \"%TargetUrl%\"}}'''")
         A(_web("GoUrl", "Post", "UrlBody", "UrlResp", "UrlStatus", inner + "    "))
         A(f"{inner}    WAIT 2")
     else:
@@ -1106,6 +1126,9 @@ def main() -> None:
                    help="Robin 生成時に埋め込む msedgedriver のパス")
     p.add_argument("--pad-out-dir", default=r"C:\PAD\output",
                    help="Robin 生成時に埋め込む出力フォルダ")
+    p.add_argument("--proxy", default="",
+                   help="外部サイト用プロキシ host:port（例 proxy.example.com:8080）。"
+                        "localhost/file:// は通さない。省略時はプロキシなし")
     p.add_argument("--max-items", type=int, default=0)
     p.add_argument("--stop-on-error", action="store_true")
     args = p.parse_args()
@@ -1127,7 +1150,7 @@ def main() -> None:
 
     if args.robin:
         out = write_robin(batch, args.details, id_col, args.robin,
-                          args.driver_exe, args.pad_out_dir)
+                          args.driver_exe, args.pad_out_dir, args.proxy)
         js_out = out[:-len(".robin.txt")] + ".jsact.js" if out.endswith(".robin.txt") \
             else os.path.splitext(out)[0] + ".jsact.js"
         print(f"📄 PAD 用 Robin コード: {out}")

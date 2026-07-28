@@ -1,6 +1,6 @@
 # PAD だけでバッチ実行する（ブラウザ拡張機能なし・WebDriver を HTTP で操作）
 
-Power Automate Desktop（PAD）の Web 自動化アクションは専用のブラウザ拡張機能を必要とするが、
+Power Automate Desktop 無料版（PAD）の Web 自動化アクションは専用のブラウザ拡張機能を必要とするが、
 **WebDriver は拡張機能とは無関係**で、`msedgedriver.exe` 自体がローカルの HTTP サーバーとして動く。
 つまり **HTTP リクエストを送れれば、拡張機能なしでブラウザを完全に操作できる**。
 PAD の「Web サービスの呼び出し」がまさにそれに当たる。
@@ -13,7 +13,8 @@ PAD の「Web サービスの呼び出し」がまさにそれに当たる。
 - ブラウザー拡張機能のインストールが禁止されている
 - Python / Node.js などの開発ツールがインストールできない
 - PowerShell スクリプトの実行が禁止されている
-- 一方で PAD 無料版は使える
+- Proxy Server を使用している環境
+- 一方で Power Automate Desktop 無料版 (PAD) は使える
 
 **実機（PAD 無料版 / Windows 11 / Edge）で完走を確認済み。** 以下の記述は原則として実機で
 確認できた内容で、未確認のものはその旨を明記している。
@@ -85,6 +86,43 @@ WAIT 3
 ```
 
 `taskkill` を「アプリケーションの実行」で呼ぶ必要はない。`System.TerminateProcess` で足りる。
+
+---
+
+## 🌐 プロキシ経由でインターネットへ出る環境（社内環境に多い）
+
+**WebDriver が起動するブラウザーは素のプロファイル**で立ち上がり、Windows のプロキシ設定を
+引き継がない。そのため、手動のブラウザーでは見えるサイトが WebDriver 経由では真っ白になる。
+`localhost` と `file://` はプロキシを通らないので、練習サイトだけは影響を受けない。
+
+セッション開始の本文に `proxy` を渡すと解決する。生成物では冒頭のスイッチで切り替えられる。
+
+```
+SET UseProxy TO True
+SET ProxyAddr TO $'''proxy.example.com:8080'''
+…
+SET SessionBody TO $'''{"capabilities": {"alwaysMatch": {"browserName": "MicrosoftEdge"}}}'''
+IF UseProxy THEN
+    SET SessionBody TO $'''{"capabilities": {"alwaysMatch": {"browserName": "MicrosoftEdge", "proxy": {"proxyType": "manual", "httpProxy": "%ProxyAddr%", "sslProxy": "%ProxyAddr%"}}}}'''
+END
+```
+
+- SET UseProxy TO True か False　でプロキシ設定を切り替える。
+- アドレスは **`host:port` の形**で書く（`http://` は付けない）。
+- Edge / Chrome 系は `sslProxy` を見ないことがあるため、`httpProxy` と両方に同じ値を入れる。
+- プロキシのアドレスは Windows の「設定 → ネットワークとインターネット → プロキシ」で確認できる。
+  `netsh winhttp show proxy` が「直接アクセス」と出ても、ブラウザー側に設定されていることがある。
+
+**フローを触る前にプロキシ自体を検証しておくと切り分けが速い。** コマンドプロンプトで次を実行し、
+`HTTP/1.1 200` が返ればアドレスとポートは正しい。
+
+```
+curl -x http://proxy.example.com:8080 https://example.com -I
+```
+
+> **⚠️ 認証プロキシの場合**
+> ユーザー名・パスワードを要求するプロキシでは `proxyType: manual` だけでは通らないことがある。
+> まず認証なしで試し、通らなければネットワーク管理者に方式を確認する。
 
 ---
 
@@ -305,15 +343,17 @@ END
 
 ---
 
-## 🤖 録画JSONファイルをPADのRobinコードへ pad_webdriver_ref.py で変換（推奨）
+## 🤖 録画JSONファイルをPADコード(Robin)へ pad_webdriver_ref.py で変換（推奨）
 
 PAD のフローは内部的に **Robin 言語**で表現されており、フローデザイナーのキャンバスに
 **Robin のテキストを貼り付ける（Ctrl+V）とアクションが並ぶ**。この性質を使い、
 **Chrome Recorder の録画 JSON から PAD のフローを機械的に生成する**のがこの節の内容。
 
-アクションを 1 つずつ手で置く必要がない。それ以上に重要なのは、**この手順書に書かれた
-落とし穴がすべて生成器に組み込まれている**ことで、`EncodeRequestBody: False` の指定漏れや
+**アクションを 1 つずつ手で置く必要がない。**
+それ以上に重要なのは、 **この手順書に書かれた落とし穴がすべて生成器に組み込まれている** 
+ことで、`EncodeRequestBody: False` の指定漏れや
 `SET` の右辺の `%` 誤用のような、貼り付けが黙って無視される類のミスを踏まなくなる。
+
 
 ### 🗺️ 全体の流れ
 
@@ -336,7 +376,9 @@ PAD のフローは内部的に **Robin 言語**で表現されており、フ�
 │                                                           │
 │     （任意）--trace で手順書 pad_trace.md も出せる         │
 └───────────────────────┬───────────────────────────────────┘
+                        │  
                         │  生成した Robin を実行環境へ渡す
+                        │  
 ┌───────────────────────▼───────────────────────────────────┐
 │        実行環境（PAD だけ使える PC。Python は不要）        │
 │                                                           │
@@ -355,8 +397,8 @@ PAD のフローは内部的に **Robin 言語**で表現されており、フ�
 ```
 
 **実行環境に Python が無くてもよい**のがこの方式の要点。変換だけを Python が使える PC で行い、
-できあがった Robin コードを実行環境の PAD に貼り付けて使う。変換にはブラウザも WebDriver も
-必要ないので、実行環境の準備や許可を待っている間にフローを作り込んでおける。
+できあがった PADコード(Robin)を実行環境の PAD に貼り付けて使う。変換にはブラウザも WebDriver も
+必要ない。
 
 なお、録画（①）は**対象システムにアクセスできる環境**で行う必要がある。②③④の変換作業だけが
 Python を要求する部分で、ここは対象システムに触らない。
@@ -401,9 +443,10 @@ Python を要求する部分で、ここは対象システムに触らない。
 > **⚠️ 録画直後の JSON には入力した実値がそのまま残る。** 保存・コミット・共有の前に
 > 必ず置き換えること。
 
+
 ---
 
-### 手順 ④：Robin コードを生成する
+### 手順 ④：PADコード(Robin)を生成する
 
 ```
 # Python が使える環境で変換する（ブラウザも WebDriver も不要）
@@ -413,12 +456,15 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
     --driver-exe "C:\temp\msedgedriver.exe" --pad-out-dir "C:\temp"
 ```
 
+
 **引数のパスは 2 種類あるので混ぜないこと。**
+
 
 | 引数 | どのマシンのパスか |
 | --- | --- |
 | `--batch` / `--robin` | **変換環境**（Python が使える PC）のパス。リポジトリ相対でよい |
-| `--details` / `--driver-exe` / `--pad-out-dir` | **実行環境**（PAD を動かす PC）のパス。生成された Robin に文字列として埋め込まれる |
+| `--details` / `--driver-exe` / `--pad-out-dir` | **実行環境**（PAD を動かす PC）のパス。生成されたPADコード(Robin)に文字列として埋め込まれる |
+
 
 | 引数 | 役割 |
 | --- | --- |
@@ -429,9 +475,11 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 | `--driver-exe` | `msedgedriver.exe` のパス。`SET DriverExe` になる |
 | `--pad-out-dir` | 出力フォルダ。`SET BaseDir` になる |
 
+
 `--details` と `--driver-exe` が `--pad-out-dir` の配下にある場合、生成される Robin は
 それらを `%BaseDir%` 相対で出力する。上の例なら次のようになり、**配布時に直すのは
 `BaseDir` の 1 行だけ**で済む。
+
 
 ```
 SET BaseDir TO $'''C:\\temp'''
@@ -442,11 +490,13 @@ SET LogFile TO $'''%BaseDir%\\pad_progress.log'''
 SET ShotDir TO $'''%BaseDir%'''
 ```
 
+
 配下でないパスを渡した場合は絶対パスのまま出力されるので、環境ごとに 3 行を直すことになる。
+
 
 #### 生成器が自動で行う変換
 
-| 録画 JSON | 生成される Robin |
+| 録画 JSON | 生成される PADコード(Robin) |
 | --- | --- |
 | `{{列名}}` | ループ先頭で `SET Col1 TO Row['列名']` として取り出し、以降は `%Col1%` で参照 |
 | `{{SECRET:…USER…}}` / `{{SECRET:…}}` | `%IdSafe%` / `%PwSafe%`（JSON 用にエスケープ済みの変数） |
@@ -628,7 +678,7 @@ PM9000000003,900000000003,1
 
 ### 4. 件数制限
 
-いきなり全件流さないための安全弁。本番初日は 1 件にして、画面と結果を目で確認してから上げる。
+いきなり全件流さないための安全弁。本番初回は 1 件にして、画面と結果を目で確認してから上げる。
 
 ```
 IF Attempted >= MaxItems THEN
@@ -690,13 +740,18 @@ END
 ブラウザーを開いたところで一旦止め、**人が手でログインする**方式。
 
 ```
-Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' Message: $'''開いたブラウザーでログインし、[OK]を押してください。''' Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn
+Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' Message: $'''いま開いたブラウザーでログインし、繰り返しの起点画面まで進んでから[OK]を押してください。ブラウザーは閉じないでください。''' Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn
 IF LoginBtn = $'''Cancel''' THEN
     SET Halt TO True
 END
 ```
 
-**PAD がパスワードを一度も受け取らない。** 変数ペイン・実行ログ・エラーメッセージのどこにも
+**ログインだけでなく、繰り返しの起点画面まで人が進める。** ログイン直後の画面構成（ナビゲータの
+展開順など）はサイト側の都合で変わることがあり、録画どおりに機械的に辿らせると起点に着けず
+セットアップ失敗で止まる。実サイトでまさにこれが起きた。人が起点まで進めばその差異に影響されず、
+録画のログイン以降の手順は `LoginMode` が `auto` のときだけ実行すればよい。
+
+**手動ログイン方式は PAD がパスワードを一度も受け取らない安全設計。** 変数ペイン・実行ログ・エラーメッセージのどこにも
 残りようがない。パスワードを扱うコードがフローに存在しないこと自体が、運用上の安全になる。
 有人実行で 10 件程度ならこれで足りる。
 
@@ -748,9 +803,10 @@ Text.Replace.ReplaceText Text: PwSafe TextToFind: $'''\"''' IgnoreCase: False Re
 | 比較の種類 | `ComparisonType:`（既定 `Text.TextComparisonType.CultureSensitive`） |
 | 生成された変数 | `Result=>`（既定名 `Replaced`） |
 
+
 ---
 
-## 📸 エビデンス（スクリーンショット）
+## 📸 スクリーンショット（エビデンスとして使用）
 
 ### PAD の標準アクションは全画面
 
@@ -795,6 +851,7 @@ File.ConvertFromBase64    … IfFileExists: File.IfExists.DoNothing / Overwrite
 **結果 CSV にパスが書かれていることは、ファイルが存在する証拠にならない。**
 検証時は実体を必ず目で確認すること。
 
+
 ### ウィンドウサイズ
 
 エビデンスに写る範囲はウィンドウサイズで決まる。**複数の PC に配布する場合は、一番小さい画面に
@@ -802,7 +859,23 @@ File.ConvertFromBase64    … IfFileExists: File.IfExists.DoNothing / Overwrite
 変わってしまう。解像度がまちまちなら `POST …/window/maximize` を使う手もあるが、
 その場合はエビデンスの画像サイズが PC ごとに変わる。
 
+一般的な画面サイズの例
+| サイズの名称 | 解像度(横×縦) |
+| --- | --- |
+| **HD** | **1440×1080** |
+| SXGA+ | 1400×1050 |
+| WSXGA (Wide-SXGA) | 1600×1024 |
+| WSXGA+ (Wide-SXGA+) | 1680×1050 |
+| UXGA (Ultra-XGA) | 1600×1200 |
+| **FHD/2K** | **1920×1080** |
+| WUXGA (Wide-UXGA) | 1920×1200 |
+| QWXGA (Quad-Wide-XGA) | 2048×1152 |
+| QXGA (Quad-XGA) | 2048×1536 |
+| WQHD (Wide-Quad-HD) | 2560×1440 |
+| **UHD/4K** | **3840×2160** |
+
 ---
+
 
 ## 🕒 日時とファイル名
 
@@ -938,6 +1011,7 @@ END
 これは「登録は成功したが確認段階で失敗と記録された」という、二重登録の危険が生まれる状況
 そのものなので、一度実際に発生させておく意味がある。
 
+
 ---
 
 ## 📦 サンプル
@@ -967,9 +1041,10 @@ END
 検索結果の行自体を生成しない。練習サイトで再現できない「検索 0 件」を、こちらでは
 意図的に作れるようにしている。
 
+
 ---
 
-## 📄 手順書の自動生成（変換環境で使う）
+## 📄 手順書の自動生成（Pythonが使える環境で使う）
 
 変換環境（Python が使える PC）向けに、**PAD が送るのと同じ HTTP 呼び出しを同じ順序で送る参照実装**を用意している。
 実際に練習サイトへ流して成功を確認しつつ、その呼び出し列を Markdown の表として書き出せる。
@@ -987,6 +1062,9 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 ---
 
 ## ❓ うまくいかないとき
+
+- **社外サイトが真っ白になる** … WebDriver のブラウザーはシステムのプロキシを引き継がない。
+  「社外サイトへ出る」の節を参照し、`UseProxy` を `True` にする。
 
 | 症状 | 原因 | 対処 |
 | --- | --- | --- |
