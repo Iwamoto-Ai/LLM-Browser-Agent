@@ -832,3 +832,6 @@ Released under the [Apache License 2.0](LICENSE). Copyright 2026  Tsuyoshi Iwamo
 - [OpenClaw](https://openclaw.ai/)
 - [Hermes Agent (NousResearch)](https://github.com/NousResearch/hermes-agent)
 - [Hermes Agent — MCP configuration reference](https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference)
+- [Microsoft Power Automate Desktop (PAD)](https://learn.microsoft.com/en-us/power-automate/desktop-flows/install)
+- [Microsoft Edge WebDriver](https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver?form=MA13LH&cs=3787589721)
+- [Google Chrome WebDriver](https://developer.chrome.com/docs/chromedriver)

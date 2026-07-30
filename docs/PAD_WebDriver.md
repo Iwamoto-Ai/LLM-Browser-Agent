@@ -1,4 +1,4 @@
-# Power Automate Desktop 無料版 (PAD) と WebDriver だけでバッチ実行する（ブラウザ拡張機能なし）
+# Power Automate Desktop 無料版 (PAD) と WebDriver だけでバッチ実行する（ブラウザ拡張機能は不要）
 
 Power Automate Desktop 無料版（PAD）の Web 自動化アクションは専用のブラウザ拡張機能を必要とするが、
 **WebDriver はブラウザ拡張機能が無くても動作する。（無関係）** `msedgedriver.exe` 自体がローカルの HTTP サーバーとして動く。
@@ -14,10 +14,10 @@ PAD の「Web サービスの呼び出し」がまさにそれに当たる。
 - Python / Node.js などの開発ツールがインストールできない
 - PowerShell スクリプトの実行が禁止されている
 - Proxy Server を使用している環境
-- 一方で Power Automate Desktop 無料版 (PAD) と WebDriver は使える場合
+- 一方で Power Automate Desktop 無料版 (PAD) と WebDriver は使える
 
-**実機（PAD 無料版 / Windows 11 / Edge）で完走を確認済み。** 以下の記述は原則として実機で
-確認できた内容で、未確認のものはその旨を明記している。
+**実機（Power Automate Desktop 無料版 (PAD) / Windows 11 / Edge）で完走を確認済み。** 以下の記述は原則として実機で
+確認できた内容を明記している。
 
 すぐ動かせるサンプルは [`examples/pad/`](../examples/pad/) にある。
 
@@ -28,7 +28,7 @@ PAD の「Web サービスの呼び出し」がまさにそれに当たる。
 ```
 ┌──────────────────────────┐
 │ Power Automate Desktop   │
-│  Web.InvokeWebService    │  ← 標準アクション。拡張機能不要
+│  Web.InvokeWebService    │  ← 標準アクション。拡張機能は不要
 └────────────┬─────────────┘
              │ HTTP + JSON (W3C WebDriver)
              │ http://127.0.0.1:9515
@@ -70,8 +70,7 @@ Python 版との対応:
 
 ## 🛠️ 事前準備
 
-1. **msedgedriver.exe** を用意する（Edge のバージョンと**必ず一致**させる。Edge が更新されたら
-   入れ替える）。
+1. [Microsoft Edge WebDriver](https://developer.microsoft.com/ja-jp/microsoft-edge/tools/webdriver?form=MA13LH&cs=3787589721) から **msedgedriver.exe** をダウンロードする（Edge のバージョンと**必ず一致**させる必要がある。Edge が更新されたら同じバージョンに入れ替える）。
 2. **プロキシ除外**: 社内プロキシがあると `localhost` 宛が失敗する。Windows のプロキシ設定で
    `localhost;127.0.0.1` を除外に入れる（Ollama で `NO_PROXY=localhost` を設定したのと同じ対策）。
 3. **フローの先頭で古いドライバーを終了させる。** 前回の実行が異常終了すると
@@ -89,7 +88,7 @@ WAIT 3
 
 ---
 
-## 🌐 プロキシ経由でインターネットへ出る環境（社内環境に多い）
+## 🌐 プロキシ経由でインターネットへ出る環境（会社環境に多い）
 
 **WebDriver が起動するブラウザーは素のプロファイル**で立ち上がり、Windows のプロキシ設定を
 引き継がない。そのため、手動のブラウザーでは見えるサイトが WebDriver 経由では真っ白になる。
@@ -372,7 +371,7 @@ PAD のフローは内部的に **Robin 言語**で表現されており、フ�
 │           │  python pad_webdriver_ref.py --robin …         │
 │           ▼                                               │
 │  ④ output/pad_flow.robin.txt   ← PAD に貼り付ける本体      │
-│     output/pad_flow.jsact.js   ← 長い行が貼れない時の保険  │
+│     output/pad_flow.jsact.js   ← 長い行が貼れない時に使う  │
 │                                                           │
 │     （任意）--trace で手順書 pad_trace.md も出せる         │
 └───────────────────────┬───────────────────────────────────┘
@@ -380,7 +379,7 @@ PAD のフローは内部的に **Robin 言語**で表現されており、フ�
                         │  生成した Robin を実行環境へ渡す
                         │  
 ┌───────────────────────▼───────────────────────────────────┐
-│        実行環境（PAD だけ使える PC。Python は不要）        │
+│ 実行環境（PAD と WebDriver だけ使える PC。 Python は不要）   │
 │                                                           │
 │  ⑤ C:\temp に置く                                         │
 │       msedgedriver.exe ／ 明細CSV ／ pad_flow.jsact.js     │
