@@ -70,18 +70,22 @@ Python 版との対応:
 
 ## 🛠️ 事前準備
 
-1. [Microsoft Edge を自動操作する場合の WebDriver](https://developer.microsoft.com/ja-jp/microsoft-edge/tools/webdriver?form=MA13LH&cs=3787589721) から **msedgedriver.exe** をダウンロードする。
- 　[Google Chrome を自動操作する場合の webDriver](https://developer.chrome.com/docs/chromedriver?hl=ja) から **chromedriver.exe** をダウンロードする。
- 　**⚠️ブラウザのバージョンとWebDriverは必ず一致させる必要がある。**　ブラウザのバージョンが更新されたら同じバージョンに入れ替える。
- 　**⚠️msedgedriver.exe と chromedriver.exe は技術的にはどちらも同じChromiumエンジンを基にしているため、コードの書き方やAPI（操作コマンド）はほぼ共通で対象ブラウザが Edge か Chrome かの違い。 
- 　WebDriver を入れ替える時は、実行中の WebDriver プロセスを止めてから行ってください。（例　taskkill /f /im msedgedriver.exe）
-   **Selenium Manager を使えばこの入れ替えを自動化できる**（後述）。
+1. **💡本ツールは自動でブラウザのバージョンをチェックして、同じバージョンの WebDriver を自動取得し入れ替える機能があります。（後述）**　　
+
+　　もし、WebDriverを自動取得できない環境の場合は手動で下記のURLからダウンロードする。
+　　[Microsoft Edge を自動操作する場合の WebDriver](https://developer.microsoft.com/ja-jp/microsoft-edge/tools/webdriver?form=MA13LH&cs=3787589721) から **msedgedriver.exe** をダウンロードする。　　
+ 　[Google Chrome を自動操作する場合の webDriver](https://developer.chrome.com/docs/chromedriver?hl=ja) から **chromedriver.exe** をダウンロードする。　　
+ 　**⚠️ブラウザのバージョンとWebDriverは必ず一致させる必要がある。**　ブラウザのバージョンが更新されたら同じバージョンに入れ替える。　　
+
+ 　msedgedriver.exe と chromedriver.exe は技術的にはどちらも同じChromiumエンジンを基にしているため、コードの書き方やAPI（操作コマンド）、DevTools は、ほぼ共通で対象ブラウザが Edge か Chrome かの違い。　　
+
 2. **プロキシ除外**: 社内プロキシがあると `localhost` 宛が失敗する。Windows のプロキシ設定で
    `localhost;127.0.0.1` を除外に入れる（Ollama で `NO_PROXY=localhost` を設定したのと同じ対策）。
+
 3. **フローの先頭で古いドライバーを終了させる。** 前回の実行が異常終了すると
    `msedgedriver.exe` がポート 9515 を掴んだまま残り、新しいドライバーが起動できない。
    その状態では**古い方が応答してしまい**、ブラウザーとバージョンが違えば `session not created` になる。
-   **Edge と Chrome のフローを続けて動かす場合も同じポートを奪い合う**ため、両方を終了させておく。
+   Edge と Chrome のフローを続けて動かす場合も同じポートを奪い合うため、両方を終了させておく。
 
 ```
 System.TerminateProcess.TerminateProcessByName ProcessName: $'''msedgedriver'''
@@ -93,15 +97,16 @@ WAIT 3
 
 `taskkill` を「アプリケーションの実行」で呼ぶ必要はない。`System.TerminateProcess` で足りる。
 
+
 ---
 
-## 🔄 ドライバーを自動で用意する（Selenium Manager）
+## 🔄 自動 WebDriver 取得更新機能
 
 **Edge は自動更新される。** そのたびに `msedgedriver.exe` を同じバージョンに入れ替えないと
-`session not created` で止まる。これを手作業で追いかけるのは現実的でない。
+`session not created` で止まる。　これを手作業で追いかけるのは現実的でない。
 
-**Selenium Manager** は Selenium 公式の単体実行ファイルで、**Python も Node.js も要らない**。
-インストール済みブラウザーを検出し、対応するドライバーを取得して、その場所を教えてくれる。
+**Selenium Manager**（Selenium 公式の単体実行ファイルで、Python も Node.js も要らない）
+を使用し、インストール済みブラウザーを検出し、対応するドライバーを取得し更新する。
 
 - 入手先: <https://github.com/SeleniumHQ/selenium_manager_artifacts/releases>
 - `selenium-manager-windows.exe` を実行環境の `BaseDir`（例 `C:\temp`）に置く
@@ -206,6 +211,8 @@ curl -x http://proxy.example.com:8080 https://example.com -I
 > **⚠️ 認証プロキシの場合**
 > ユーザー名・パスワードを要求するプロキシでは `proxyType: manual` だけでは通らないことがある。
 > まず認証なしで試し、通らなければネットワーク管理者に方式を確認する。
+
+
 
 ---
 
@@ -347,7 +354,7 @@ File: $'''ShotPath'''     ← 誤り（"ShotPath" という文字列になる）
 ---
 
 ## 📜 共通 JavaScript（変数 `%JsAct%` に入れておく）
-pythonで作ったプログラムのコア部分、DOMベース要素インデックスモジュールをJavaScriptで作り直したプログラムを埋め込むことで実現している。
+pythonで作ったコア部分、DOMベース要素インデックスモジュールをJavaScriptで作り直したプログラムを埋め込むことで実現している。
 
 ```javascript
 var cands = arguments[0], action = arguments[1], value = arguments[2];

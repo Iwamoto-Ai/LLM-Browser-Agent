@@ -302,7 +302,7 @@ python run_template.py --template templates/test_site.yaml --values data/test_va
 
 
 
-## 🎥 ブラウザ内蔵 DevTools の Recorder でブラウザ操作を録画 → 決定論リプレイ（拡張機能不要）
+## 🎥 ブラウザに内蔵されている DevTools の Recorder でブラウザ操作録画 → 決定論リプレイ（拡張機能不要）
 
 複雑なメニュー・項目数が多いサイトでは、LLM に毎回判断させるより、**人が一度操作して録画した手順を
 そのまま再生する**ほうが確実。Chrome 内の DevTools には **Recorder** が標準で内蔵されており、
@@ -631,6 +631,7 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 
 
 **生成されるのは録画手順そのままではなく、運用に必要な制御構造を足したフロー**。
+
 
 | 生成される機能 | 内容 |
 | --- | --- |
