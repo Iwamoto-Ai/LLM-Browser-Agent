@@ -72,14 +72,14 @@ Python 版との対応:
 
 1. **💡本ツールは自動でブラウザのバージョンをチェックして、同じバージョンの WebDriver を自動取得し入れ替える機能があります。（後述）**　　
 
-　　もし、WebDriverを自動取得できない環境の場合は手動で下記のURLからダウンロードする。 <br>
+　　もし、WebDriverを自動取得できない環境の場合は手動でダウンロードする。 <br>
 　　[Microsoft Edge を自動操作する場合の WebDriver](https://developer.microsoft.com/ja-jp/microsoft-edge/tools/webdriver?form=MA13LH&cs=3787589721) から **msedgedriver.exe** をダウンロードする。　<br>
- 　[Google Chrome を自動操作する場合の webDriver](https://developer.chrome.com/docs/chromedriver?hl=ja) から **chromedriver.exe** をダウンロードする。 <br>
+　　[Google Chrome を自動操作する場合の webDriver](https://developer.chrome.com/docs/chromedriver?hl=ja) から **chromedriver.exe** をダウンロードする。 <br>
 
  　**⚠️ブラウザのバージョンとWebDriverは必ず一致させる必要がある。**　ブラウザのバージョンが更新されたら同じバージョンに入れ替える。　<br>
 
- 　msedgedriver.exe と chromedriver.exe は技術的にはどちらも同じChromiumエンジンを基にしているため、 <br>
-  コードの書き方やAPI（操作コマンド）、DevTools は、ほぼ共通で対象ブラウザが Edge か Chrome かの違い。　<br>
+　　msedgedriver.exe と chromedriver.exe は技術的にはどちらもChromiumエンジンを基にしているため、 <br>
+　　コードの書き方やAPI（操作コマンド）、DevTools は、ほぼ共通で対象ブラウザが Edge か Chrome かの違い。　<br>
 
 2. **プロキシ除外**: 社内プロキシがあると `localhost` 宛が失敗する。Windows のプロキシ設定で
    `localhost;127.0.0.1` を除外に入れる（Ollama で `NO_PROXY=localhost` を設定したのと同じ対策）。
