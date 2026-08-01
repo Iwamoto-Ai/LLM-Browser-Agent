@@ -639,7 +639,9 @@ def _lint_robin(lines: list, log=print) -> list:
 
 def write_robin(batch: dict, details_path: str, id_col: str, path: str,
                 driver_exe: str = r"C:\temp\msedgedriver.exe",
-                out_dir: str = r"C:\temp", proxy: str = "") -> str:
+                out_dir: str = r"C:\temp", proxy: str = "",
+                auto_driver: bool = False,
+                browser: str = "edge") -> str:
     """PAD に貼り付けられる Robin コードを生成する。
 
     PAD のフローデザイナーはアクションのコピー＆ペーストにテキスト（Robin）を使うため、
@@ -698,6 +700,17 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
         A("SET UseProxy TO False")
         A("SET ProxyAddr TO $'''proxy.example.com:8080'''")
     A("")
+    A("# --- ブラウザー：edge か chrome。ここ 1 行だけ直せば切り替わる ---")
+    A("# 対象サイトがブラウザー判定で表示を変える場合や、片方で不具合が出たときに使う。")
+    A("# 下の BrowserName（WebDriver への指定）とドライバーのプロセス名も自動で追従する。")
+    A(f"SET Browser TO {_robin_str(browser)}")
+    A("SET BrowserName TO $'''MicrosoftEdge'''")
+    A("SET DriverProc TO $'''msedgedriver'''")
+    A("IF Browser = $'''chrome''' THEN")
+    A("    SET BrowserName TO $'''chrome'''")
+    A("    SET DriverProc TO $'''chromedriver'''")
+    A("END")
+    A("")
     A("# --- フォルダ・ファイル：配布時に触るのはこの BaseDir だけにする ---")
     A(f"SET BaseDir TO {_robin_str(out_dir)}")
     A("# ※ BaseDir の末尾に \\ を付けないこと（%BaseDir%\\file.png が二重になる）")
@@ -730,10 +743,46 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# ※ 継ぎ足しがうまくいかない場合は、同時生成した pad_flow.jsact.js の中身を")
     A("#   「変数の設定」アクション（変数名 JsAct）の値の欄に手で貼り付けてもよい。")
     A("")
+    A("# 途中で中止するかどうかの目印（ドライバー取得やログインの失敗で True になる）")
+    A("SET Halt TO False")
+    A("")
+    A("# --- ドライバーの自動取得（Selenium Manager）---")
+    A("# Edge が更新されるとドライバーも同じ版に入れ替える必要がある。selenium-manager が")
+    A("# 適切な版を取得し、その置き場所を JSON で教えてくれるので、それを DriverExe に入れる。")
+    A("# 置き場所はバージョン番号を含むフォルダなので、固定パスで書くと更新のたびに壊れる。")
+    A("# selenium-manager-windows.exe は BaseDir に置くこと。取得元:")
+    A("#   https://github.com/SeleniumHQ/selenium_manager_artifacts/releases")
+    A("# 使わない場合は AutoDriver を False にし、DriverExe に固定パスを書く。")
+    A(f"SET AutoDriver TO {'True' if auto_driver else 'False'}")
+    A("SET SmExe TO $'''selenium-manager-windows.exe'''")
+    A("IF AutoDriver THEN")
+    A("    SET SmArgs TO $'''%SmExe% --browser %Browser% --browser-version stable "
+      "--output json'''")
+    A("    IF UseProxy THEN")
+    A("        SET SmArgs TO $'''%SmArgs% --proxy %ProxyAddr%'''")
+    A("    END")
+    A("    Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout "
+      "DOSCommandOrApplication: SmArgs WorkingDirectory: BaseDir Timeout: 300 "
+      "StandardOutput=> SmOutput StandardError=> SmError ExitCode=> SmExit")
+    A("    Variables.ConvertJsonToCustomObject Json: SmOutput CustomObject=> SmObj")
+    A("    IF SmObj['result']['code'] = 0 THEN")
+    A("        SET DriverExe TO SmObj['result']['driver_path']")
+    A("    END")
+    A("    IF SmObj['result']['code'] <> 0 THEN")
+    A("        SET Halt TO True")
+    A("        Display.ShowMessageDialog.ShowMessage Title: $'''ドライバー取得に失敗''' "
+      "Message: SmOutput Icon: Display.Icon.Information Buttons: Display.Buttons.OK "
+      "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True "
+      "ButtonPressed=> SmBtn")
+    A("    END")
+    A("END")
+    A("")
     A("# --- 古いドライバーが残っていたら終了する ---")
-    A("# 前回の実行が異常終了すると msedgedriver がポート 9515 を掴んだまま残り、")
+    A("# 前回の実行が異常終了すると、ドライバーがポート 9515 を掴んだまま残り、")
     A("# 新しいドライバーが起動できない（古い方が応答してしまう）。")
+    A("# 別のブラウザーのフローを続けて動かす場合もポートを奪い合うため、両方を終了させる。")
     A("System.TerminateProcess.TerminateProcessByName ProcessName: $'''msedgedriver'''")
+    A("System.TerminateProcess.TerminateProcessByName ProcessName: $'''chromedriver'''")
     A("WAIT 1")
     A("")
     A("# --- WebDriver を起動 ---")
@@ -743,14 +792,15 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("WAIT 3")
     A("")
     A("# --- セッション開始（ブラウザ起動）---")
-    A("# プロキシの有無は冒頭の UseProxy で切り替える。")
+    A("# ブラウザーは冒頭の Browser、プロキシの有無は UseProxy で切り替わる。")
+    A("# 組み合わせが増えるので、本文は前から継ぎ足して組み立てる。")
     A("SET SessionBody TO $'''{\"capabilities\": {\"alwaysMatch\": "
-      "{\"browserName\": \"MicrosoftEdge\"}}}'''")
+      "{\"browserName\": \"%BrowserName%\"'''")
     A("IF UseProxy THEN")
-    A("    SET SessionBody TO $'''{\"capabilities\": {\"alwaysMatch\": "
-      "{\"browserName\": \"MicrosoftEdge\", \"proxy\": {\"proxyType\": \"manual\", "
-      "\"httpProxy\": \"%ProxyAddr%\", \"sslProxy\": \"%ProxyAddr%\"}}}}'''")
+    A("    SET SessionBody TO $'''%SessionBody%, \"proxy\": {\"proxyType\": \"manual\", "
+      "\"httpProxy\": \"%ProxyAddr%\", \"sslProxy\": \"%ProxyAddr%\"}'''")
     A("END")
+    A("SET SessionBody TO $'''%SessionBody%}}}'''")
     A("SET AppJson TO $'''application/json'''")
     A("SET NewUrl TO $'''%DriverUrl%/session'''")
     A(_web("NewUrl", "Post", "SessionBody", "SessionResp", "SessionStatus"))
@@ -772,7 +822,6 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     # ---- setup ----
     A("# ================= セットアップ（最初に 1 回）=================")
     A("SET RowError TO $''''''")
-    A("SET Halt TO False")
     n = 0
     emitted_dialog = False
     in_auto = False           # IF LoginMode = auto THEN … の中にいるか
@@ -889,6 +938,36 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
         A("SET EdiPassword TO $''''''")
         A("SET EdiPasswordEsc TO $''''''")
     A("")
+    # ---- 起点画面の確認 ----
+    # 手動ログイン運用では、人がどこまで進めて[OK]を押したかで結果が変わる。
+    # 1 つ手前の画面で[OK]を押すと「ステップ1で要素が見つかりません」が全件に出て
+    # 原因が分かりにくいので、ここで起点かどうかを判定して明示的に伝える。
+    # 判定にはループ最初の操作対象を使う（明細の値を含む場合は判定できないので省く）。
+    first_target = None
+    for st in loop_steps:
+        if st.get("type") in ("click", "doubleClick", "change"):
+            cands = _robin_filter_candidates(_candidates(st))
+            if cands and not any("{{" in c for c in cands):
+                first_target = cands
+            break
+    if first_target:
+        A("# ---------- 起点画面かどうかを確認する ----------")
+        A("# ループ最初の操作対象がこの画面にあるかを、クリックせずに調べる。")
+        body_args = json.dumps([first_target, "find", ""], ensure_ascii=False)
+        A(f"SET ActBody TO $'''{{\"script\": \"%JsAct%\", \"args\": {body_args}}}'''")
+        A(_web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus"))
+        A("Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj")
+        A("IF ActObj['value']['ok'] <> True THEN")
+        A("    SET Halt TO True")
+        A("    Display.ShowMessageDialog.ShowMessage Title: $'''起点画面ではありません''' "
+          "Message: $'''繰り返しの起点画面が表示されていません。ブラウザーで起点画面まで"
+          "進めてから、もう一度実行してください。''' "
+          "Icon: Display.Icon.Warning Buttons: Display.Buttons.OK "
+          "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True "
+          "ButtonPressed=> StartBtn")
+        A("END")
+        A("")
+
     A("# ---------- セットアップ失敗を検知して止める ----------")
     A("# ここで止めないと、ループ先頭で RowError がリセットされるため、")
     A("# 全件が「ステップ1で要素が見つかりません」という偽の失敗として記録される。")
@@ -1071,7 +1150,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
 
     A("# ================= 後片付け =================")
     A(_web("QuitUrl", "Delete", None, "QuitResp", "QuitStatus"))
-    A("System.TerminateProcess.TerminateProcessByName ProcessName: $'''msedgedriver'''")
+    A("System.TerminateProcess.TerminateProcessByName ProcessName: DriverProc")
     A("IF Halt = False THEN")
     A("    Display.ShowMessageDialog.ShowMessage Title: $'''完了''' "
       "Message: $'''成功 %OkCount% / 失敗 %NgCount% / スキップ %SkipCount%"
@@ -1081,7 +1160,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("END")
     A("IF Halt THEN")
     A("    Display.ShowMessageDialog.ShowMessage Title: $'''中止''' "
-      "Message: $'''ログインまたは起点への移動に失敗したため、明細を1件も処理せず"
+      "Message: $'''起点画面に到達できなかったため、明細を1件も処理せず"
       "中止しました。pad_progress.log を確認してください。''' "
       "Icon: Display.Icon.Warning Buttons: Display.Buttons.OK "
       "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn")
@@ -1126,6 +1205,12 @@ def main() -> None:
                    help="Robin 生成時に埋め込む msedgedriver のパス")
     p.add_argument("--pad-out-dir", default=r"C:\PAD\output",
                    help="Robin 生成時に埋め込む出力フォルダ")
+    p.add_argument("--pad-browser", choices=["edge", "chrome"], default="edge",
+                   help="生成する Robin が使うブラウザー（既定 edge）。"
+                        "生成後も Robin 冒頭の Browser を書き換えれば切り替えられる")
+    p.add_argument("--auto-driver", action="store_true",
+                   help="Selenium Manager でドライバーを自動取得する行を入れる"
+                        "（selenium-manager-windows.exe を実行環境の BaseDir に置くこと）")
     p.add_argument("--proxy", default="",
                    help="外部サイト用プロキシ host:port（例 proxy.example.com:8080）。"
                         "localhost/file:// は通さない。省略時はプロキシなし")
@@ -1150,7 +1235,8 @@ def main() -> None:
 
     if args.robin:
         out = write_robin(batch, args.details, id_col, args.robin,
-                          args.driver_exe, args.pad_out_dir, args.proxy)
+                          args.driver_exe, args.pad_out_dir, args.proxy,
+                          args.auto_driver, args.pad_browser)
         js_out = out[:-len(".robin.txt")] + ".jsact.js" if out.endswith(".robin.txt") \
             else os.path.splitext(out)[0] + ".jsact.js"
         print(f"📄 PAD 用 Robin コード: {out}")

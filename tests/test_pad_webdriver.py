@@ -300,3 +300,111 @@ def test_robin_js_chunks_roundtrip():
         assert "''''" not in line                  # 紛らわしい引用符の並びが無い
         restored += body
     assert restored == js
+
+
+def test_robin_auto_driver_block(tmp_path):
+    """--auto-driver で Selenium Manager からドライバーパスを受け取る行が入る。"""
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    batch = load_recording(os.path.join(here, "recordings", "edi2_practice_batch.json"))
+    out = pad.write_robin(batch, r"C:\t\d.csv", "プロジェクト番号",
+                          str(tmp_path / "f.robin.txt"), r"C:\t\drv.exe", r"C:\t",
+                          proxy="proxy.example.com:8080", auto_driver=True)
+    txt = open(out, encoding="utf-8").read()
+    assert "SET AutoDriver TO True" in txt
+    assert "Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout" in txt
+    assert "StandardOutput=> SmOutput" in txt
+    assert "Variables.ConvertJsonToCustomObject Json: SmOutput" in txt
+    assert "SET DriverExe TO SmObj['result']['driver_path']" in txt
+    # プロキシ指定時は取得もプロキシ経由にする
+    assert "--proxy %ProxyAddr%" in txt
+    # Halt の初期化はドライバー取得より前に 1 回だけ（後で消されない）
+    lines = txt.splitlines()
+    init = [i for i, ln in enumerate(lines) if ln.strip() == "SET Halt TO False"]
+    assert len(init) == 1
+    dos = next(i for i, ln in enumerate(lines) if "RunDOSCommand" in ln)
+    assert init[0] < dos
+
+
+def test_robin_auto_driver_off_by_default(tmp_path):
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    batch = load_recording(os.path.join(here, "recordings", "edi2_practice_batch.json"))
+    out = pad.write_robin(batch, r"C:\t\d.csv", "プロジェクト番号",
+                          str(tmp_path / "f.robin.txt"))
+    txt = open(out, encoding="utf-8").read()
+    assert "SET AutoDriver TO False" in txt
+
+
+def _session_body_variants(txt):
+    """生成 Robin の SessionBody 連結を模擬して、組み立て後の JSON を返す。"""
+    import re as _re
+    parts = [ln.strip() for ln in txt.splitlines()
+             if ln.strip().startswith("SET SessionBody TO")]
+    assert len(parts) == 3, parts
+    lit = [_re.match(r"SET SessionBody TO \$'''(.*)'''$", p).group(1) for p in parts]
+    head, proxy_part, tail = lit
+    out = {}
+    for name in ("MicrosoftEdge", "chrome"):
+        for use_proxy in (False, True):
+            body = head.replace("%BrowserName%", name)
+            if use_proxy:
+                body = proxy_part.replace("%SessionBody%", body) \
+                                 .replace("%ProxyAddr%", "p.example.com:8080")
+            body = tail.replace("%SessionBody%", body)
+            out[(name, use_proxy)] = json.loads(body)
+    return out
+
+
+def test_session_body_valid_for_every_browser_and_proxy_combo(tmp_path):
+    """ブラウザー × プロキシの 4 通りで、組み立てた本文が妥当な JSON になること。"""
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    batch = load_recording(os.path.join(here, "recordings", "edi2_practice_batch.json"))
+    out = pad.write_robin(batch, r"C:\t\d.csv", "プロジェクト番号",
+                          str(tmp_path / "f.robin.txt"), r"C:\t\drv.exe", r"C:\t",
+                          proxy="p.example.com:8080")
+    variants = _session_body_variants(open(out, encoding="utf-8").read())
+    for (name, use_proxy), obj in variants.items():
+        match = obj["capabilities"]["alwaysMatch"]
+        assert match["browserName"] == name
+        assert ("proxy" in match) is use_proxy
+
+
+def test_robin_browser_switch(tmp_path):
+    """Browser を 1 行変えれば BrowserName とドライバーのプロセス名も追従すること。"""
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    batch = load_recording(os.path.join(here, "recordings", "edi2_practice_batch.json"))
+    out = pad.write_robin(batch, r"C:\t\d.csv", "プロジェクト番号",
+                          str(tmp_path / "f.robin.txt"), browser="chrome")
+    txt = open(out, encoding="utf-8").read()
+    assert "SET Browser TO $'''chrome'''" in txt
+    assert "IF Browser = $'''chrome''' THEN" in txt
+    assert "SET DriverProc TO $'''chromedriver'''" in txt
+    # 起動前は両方のドライバーを終了させる（ブラウザーを跨いでもポートを奪い合わない）
+    assert "TerminateProcessByName ProcessName: $'''msedgedriver'''" in txt
+    assert "TerminateProcessByName ProcessName: $'''chromedriver'''" in txt
+    # ドライバー取得もブラウザーに追従
+    assert "--browser %Browser%" in txt
+
+
+def test_robin_checks_start_screen_before_loop(tmp_path):
+    """手動ログイン運用で 1 つ手前の画面から始めた場合に、全件失敗ではなく
+    「起点画面ではありません」と伝えて止まること。"""
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    batch = load_recording(os.path.join(here, "recordings", "edi2_practice_batch.json"))
+    out = pad.write_robin(batch, r"C:\t\d.csv", "プロジェクト番号",
+                          str(tmp_path / "f.robin.txt"))
+    txt = open(out, encoding="utf-8").read()
+    assert "起点画面かどうかを確認する" in txt
+    # クリックせずに存在だけ調べる（find は JsAct で操作を伴わない）
+    assert '"find", ""' in txt
+    body = next(ln for ln in txt.splitlines()
+                if "SET ActBody" in ln and '"find"' in ln)
+    payload = json.loads(re.search(r"\$'''(.*)'''$", body.strip()).group(1)
+                         .replace("%JsAct%", "JS"))
+    assert payload["args"][1] == "find"
+    # 判定はループ本体より前で、失敗時は Halt する
+    lines = txt.splitlines()
+    check = next(i for i, ln in enumerate(lines) if "起点画面かどうかを確認する" in ln)
+    loop_at = next(i for i, ln in enumerate(lines)
+                   if ln.strip().startswith("LOOP FOREACH"))
+    assert check < loop_at
+    assert "起点画面ではありません" in txt

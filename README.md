@@ -6,7 +6,7 @@
 [![MCP](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://modelcontextprotocol.io/)
 [![LLM](https://img.shields.io/badge/LLM-Claude_%7C_Ollama-orange.svg)](https://ollama.com/)
 
-ブラウザを操作する DOM（Document Object Model）ベースの自動化エージェント。ブラウザ操作を録画し再生可能（Google Chrome Recorder使用)　**ログイン・検索・スクショ保存**を
+ブラウザを操作する DOM（Document Object Model）ベースの自動化エージェント。ブラウザ操作を録画し再生可能（DevTools Recorder使用)　**ログイン・検索・スクショ保存**を
 自然言語の指示もできる。**Microsoft Edge（既定）/ Google Chrome 切替**、**WSL 不要のネイティブ Windows 11** 対応。
 LLM（頭脳）は **クラウド（Anthropic API）** でも **ローカル（Ollama・API キー不要）** でも動く。
 
@@ -23,7 +23,7 @@ LLM（頭脳）は **クラウド（Anthropic API）** でも **ローカル（O
 - **2 つの LLM バックエンド**: クラウド（Anthropic API）/ ローカル（Ollama・API キー不要・完全ローカル）。
 - **2 つのブラウザエンジン**: Selenium（既定）/ Playwright（auto-waiting で安定、フルページスクショ）。
 - **Excel/CSV の明細をバッチ実行**: 数十件の登録・確認を 1 コマンドで繰り返す（進捗表示・結果 CSV・失敗分だけ再実行）。
-- **Google Chrome Recorder の録画を決定論リプレイ**: ブラウザ拡張機能不要でブラウザの操作を記録したファイル（JSON）を LLM なしで確実に再生（複雑サイト向け）。
+- **ブラウザ内蔵 DevTools Recorder の録画を決定論リプレイ**: ブラウザ拡張機能不要でブラウザの操作を記録したファイル（JSON）を LLM なしで確実に再生（複雑サイト向け）。
 - **💡開発ツールが使えない環境で使用したい場合の方法**: 操作録画して Power Automate Desktop 無料版 (PAD) へコード変換することで実現。
   WebDriverでブラウザ拡張機能なしで同じバッチ運用ができる（💡 [手順書](docs/PAD_WebDriver.md)）。
 - **秘密情報をモデルに渡さない**: パスワードは `{{SECRET:NAME}}` で参照し、実値は実行時にローカルで補完。
@@ -302,14 +302,14 @@ python run_template.py --template templates/test_site.yaml --values data/test_va
 
 
 
-
-## 🎥 Google Chrome の Recorder でブラウザ操作を録画 → 決定論リプレイ（拡張機能不要）
+## 🎥 ブラウザ内蔵 DevTools の Recorder でブラウザ操作を録画 → 決定論リプレイ（拡張機能不要）
 
 複雑なメニュー・項目数が多いサイトでは、LLM に毎回判断させるより、**人が一度操作して録画した手順を
 そのまま再生する**ほうが確実。Chrome 内の DevTools には **Recorder** が標準で内蔵されており、
 記録した操作を **JSON でエクスポート**できる。このツールはその JSON を読み込み、**LLM なしで決定論的に再生**する。
 
 **⚠️ 注意**
+> Edge の DevToolsでも操作録画可能でほぼ同じことができますが、メニューなど少し異なるため、 Chrome の DevTools で説明します。
 > Chrome Recorder の「Playwright 形式エクスポート」を使う場合は Chrome 拡張機能が必要となる（社内では使えないことが多い）
 > 本ツールは標準エクスポート形式の**「JSON file」形式**を直接再生するので Chrome 拡張機能不要。（Chrome 101 以降）
 > 録画を Chrome で行い再生を Edge で行う場合でも基本は同じDOMなので動きますが、もし対象サイトがブラウザ判定で表示内容を変えるようなら、再生も Chrome ですること。
@@ -345,7 +345,7 @@ $env:MY_USERNAME="demo"; $env:MY_PASSWORD="password123"
 python run_recording.py --recording recordings/test_site.example.json --values data/test_values.json --browser chrome --no-headless
 ```
 
-- **決定論的**: 記録した手順をそのまま実行するので、複雑サイトでもブレない（LLM 不要）。
+- **決定論的**: 記録した手順をそのまま実行するので、複雑サイトでもブレない（LLM推論 不要）。
 - **データ差し替え**: `value` の `{{key}}` を `--values` の JSON で埋め込み、同じ録画を別データで繰り返せる。
 - **秘密情報**: `{{SECRET:NAME}}` は実行時に環境変数から補完（JSON にも画面にも実値は出ない）。
 - **エンジン**: 既定は `playwright`（Recorder の css/xpath/text/aria/pierce セレクタと相性が良い）。`--engine selenium` も可。
@@ -578,7 +578,7 @@ HTTP で指示すれば**拡張機能なしでブラウザを操作できる**�
 
 **この構成は実機で完走を確認済み**（PAD 無料版 / Windows 11 / Edge、練習サイト `test_site/edi2/` に対して
 成功 3 / スキップ 1）。**社内プロキシ経由の外部サイトにも接続でき、実業務システムでの処理も確認済み。**
-組み立て手順・実機で確定した PADコード(Robin) の書式・落とし穴の一覧は
+組み立て手順・実機で確定した PADコード(Robin) の書式・落とし穴は
 **💡[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)** にまとめてある。
 
 
@@ -589,18 +589,22 @@ HTTP で指示すれば**拡張機能なしでブラウザを操作できる**�
 待っている間にフローを作り込んでおける（録画①だけは対象システムにアクセスできる環境で行う）。
 
 ```
+業務環境でブラウザ操作録画（Pythonなど開発ツールが使えない業務PC）
+  ① ブラウザの DevTools Recorder で業務操作を録画 → JSONファイルでエクスポート
+                    │
+                    │　エクスポートしたJSONファイルを変換環境へ渡す
+                    ▼
 変換環境（Python が使える PC。ブラウザも WebDriver も不要）
-  ① Chrome Recorder で業務操作を録画 → JSON エクスポート
   ② setup / loop / recover / teardown に分割、値を {{列名}} / {{SECRET:…}} へ
   ③ python pad_webdriver_ref.py --robin output/pad_flow.robin.txt …
        └→ pad_flow.robin.txt（PAD に貼る本体）＋ pad_flow.jsact.js
                     │
                     │  生成した PADコード(Robin) を実行環境へ渡す
                     ▼
-実行環境（WebDriverとPAD だけ使える PC。　Python は不要）
+業務環境で実行（WebDriver と Power Automate Desktop 無料版 (PAD) が使える PC。　Python は不要）
   ④ C:\temp に置く: msedgedriver.exe / 明細CSV / pad_flow.jsact.js
   ⑤ PAD で新規フロー（Power Fx は無効）→ キャンバスに Ctrl+V
-  ⑥ MaxItems = 1 で試走 → 目で確認 → 10 に上げて本番
+  ⑥ MaxItems = 1 で試走 → 目で確認 → 正常動作が確認できたらデータ数に増やして本番実行
   ⑦ C:\temp に出力: エビデンスPNG / pad_result.csv / pad_progress.log
 ```
 
@@ -631,6 +635,8 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 | 生成される機能 | 内容 |
 | --- | --- |
 | 冒頭にまとまった設定 | **接続先 → プロキシ → フォルダ → 運用スイッチ**の順に並ぶ。環境の切り替えは `TargetUrl` の 1 行 |
+| ドライバーの自動取得 | `--auto-driver` で Selenium Manager から取得。**ブラウザーが更新されても入れ替え不要**（Python も Node.js も要らない） |
+| ブラウザーの切り替え | 生成物の `Browser` を `edge` / `chrome` で切り替え。ブラウザー名・プロセス名・取得するドライバーが同時に追従 |
 | 手動ログイン（既定） | 人が手でログインし、**繰り返しの起点画面まで進んでから**[OK]。PAD はパスワードを一度も受け取らない |
 | プロキシ切り替え | `UseProxy` の True / False で直結と社内プロキシ経由を行き来できる |
 | セットアップ失敗の検知 | ログインや起点への移動に失敗したら、明細を 1 件も流さず中止 |
@@ -650,6 +656,7 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 **手動ログインは「起点画面まで人が進む」方式。** ログイン後の画面構成（ナビゲータの展開順など）は
 サイト側の都合で変わることがあり、機械的に辿らせると起点に着けずに止まる。人が起点まで進めば
 その差異に影響されないので、録画のログイン以降の手順は `LoginMode` が `auto` のときだけ実行される。
+
 
 
 ### 🧪 手順書だけを出す / 練習する
@@ -681,6 +688,7 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 
 1. **DOM（Document Object Model）ベースで要素インデックス方式**: ページ上の操作可能な要素に連番 `[0] [1] [2] …` を振り、その一覧を LLM に渡す。
    LLM は番号で `click_element` / `input_text` を呼ぶ。座標やセレクタを推測させないので安定する。
+   Power AutoMate Desktop (PAD)版 は、そのpythonで作ったコア部分のDOMベース要素インデックスモジュールをJavaScriptで作り直したプログラムを埋め込んで生成する。
 2. **入力欄の現在値**: `get_page_state` には各入力欄の「現在値」も出る。入力後に値が入ったかを LLM が検証できる。
 3. **主なテキスト**: 見出し・`role=alert`・成功メッセージ等の「操作はできないが状況判断に重要なテキスト」も
    `state()` に出る（例:「登録が完了しました」）。これにより**完了確認**が確実になる。

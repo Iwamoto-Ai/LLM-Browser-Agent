@@ -684,6 +684,8 @@ What you get is not the raw recorded steps but **a flow with the control structu
 | Generated feature | What it does |
 | --- | --- |
 | Settings grouped at the top | Ordered **target URL → proxy → folders → operational switches**. Switching environments is a one-line change to `TargetUrl` |
+| Automatic driver setup | `--auto-driver` fetches the driver via Selenium Manager, so **no manual swap when the browser updates** (no Python or Node.js needed) |
+| Browser switch | Flip `Browser` between `edge` and `chrome` in the generated flow; the browser name, process name and fetched driver all follow |
 | Manual login (default) | A human logs in by hand **and navigates to the loop start screen** before pressing OK. PAD never receives the password |
 | Proxy switch | `UseProxy` (True / False) toggles between a direct connection and the corporate proxy |
 | Setup failure detection | If login or navigation to the start screen fails, no detail rows are processed at all |
@@ -832,6 +834,3 @@ Released under the [Apache License 2.0](LICENSE). Copyright 2026  Tsuyoshi Iwamo
 - [OpenClaw](https://openclaw.ai/)
 - [Hermes Agent (NousResearch)](https://github.com/NousResearch/hermes-agent)
 - [Hermes Agent — MCP configuration reference](https://hermes-agent.nousresearch.com/docs/reference/mcp-config-reference)
-- [Microsoft Power Automate Desktop (PAD)](https://learn.microsoft.com/en-us/power-automate/desktop-flows/install)
-- [Microsoft Edge WebDriver](https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver?form=MA13LH&cs=3787589721)
-- [Google Chrome WebDriver](https://developer.chrome.com/docs/chromedriver)

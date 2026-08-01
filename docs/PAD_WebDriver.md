@@ -6,7 +6,7 @@ Power Automate Desktop 無料版（PAD）の Web 自動化アクションは専�
 PAD の「Web サービスの呼び出し」がまさにそれに当たる。
 
 このドキュメントは、`run_batch.py`（Python 版バッチランナー）と同じことを、
-**Python を使わず PAD だけで**実現するため Python 版バッチランナーのコア部分を JavaScriptで作り直し PATコード(Robin)へ埋め込むことで実現した。
+**Python を使わず PAD だけで**実現するため Python 版のコア部分のDOMベース要素インデックスモジュールを JavaScript で作り直したプログラムを埋め込むことで実現した。
 
 企業環境では次のような制約が同時に成立することがある。この手法はそこを通り抜けるためのもの。
 
@@ -32,13 +32,13 @@ PAD の「Web サービスの呼び出し」がまさにそれに当たる。
 └────────────┬─────────────┘
              │ HTTP + JSON (W3C WebDriver)
              │ http://127.0.0.1:9515
-┌────────────▼─────────────┐
-│ msedgedriver.exe         │  ← System.RunApplication で起動
-└────────────┬─────────────┘
+┌────────────▼─────────────────────────────┐
+│ msedgedriver.exe または chromedriver.exe  │  ← System.RunApplication で起動
+└────────────┬─────────────────────────────┘
              │ DevTools Protocol
-┌────────────▼─────────────┐
-│ Microsoft Edge           │
-└──────────────────────────┘
+┌────────────▼────────────────────────┐
+│ Microsoft Edge または Google Chrome  │
+└─────────────────────────────────────┘
 ```
 
 | 役割 | 担当 |
@@ -70,15 +70,22 @@ Python 版との対応:
 
 ## 🛠️ 事前準備
 
-1. [Microsoft Edge WebDriver](https://developer.microsoft.com/ja-jp/microsoft-edge/tools/webdriver?form=MA13LH&cs=3787589721) から **msedgedriver.exe** をダウンロードする（Edge のバージョンと**必ず一致**させる必要がある。Edge が更新されたら同じバージョンに入れ替える）。
+1. [Microsoft Edge を自動操作する場合の WebDriver](https://developer.microsoft.com/ja-jp/microsoft-edge/tools/webdriver?form=MA13LH&cs=3787589721) から **msedgedriver.exe** をダウンロードする。
+ 　[Google Chrome を自動操作する場合の webDriver](https://developer.chrome.com/docs/chromedriver?hl=ja) から **chromedriver.exe** をダウンロードする。
+ 　**⚠️ブラウザのバージョンとWebDriverは必ず一致させる必要がある。**　ブラウザのバージョンが更新されたら同じバージョンに入れ替える。
+ 　**⚠️msedgedriver.exe と chromedriver.exe は技術的にはどちらも同じChromiumエンジンを基にしているため、コードの書き方やAPI（操作コマンド）はほぼ共通で対象ブラウザが Edge か Chrome かの違い。 
+ 　WebDriver を入れ替える時は、実行中の WebDriver プロセスを止めてから行ってください。（例　taskkill /f /im msedgedriver.exe）
+   **Selenium Manager を使えばこの入れ替えを自動化できる**（後述）。
 2. **プロキシ除外**: 社内プロキシがあると `localhost` 宛が失敗する。Windows のプロキシ設定で
    `localhost;127.0.0.1` を除外に入れる（Ollama で `NO_PROXY=localhost` を設定したのと同じ対策）。
 3. **フローの先頭で古いドライバーを終了させる。** 前回の実行が異常終了すると
    `msedgedriver.exe` がポート 9515 を掴んだまま残り、新しいドライバーが起動できない。
-   その状態では**古い方が応答してしまい**、Edge とバージョンが違えば `session not created` になる。
+   その状態では**古い方が応答してしまい**、ブラウザーとバージョンが違えば `session not created` になる。
+   **Edge と Chrome のフローを続けて動かす場合も同じポートを奪い合う**ため、両方を終了させておく。
 
 ```
 System.TerminateProcess.TerminateProcessByName ProcessName: $'''msedgedriver'''
+System.TerminateProcess.TerminateProcessByName ProcessName: $'''chromedriver'''
 WAIT 1
 System.RunApplication.RunApplication ApplicationPath: DriverExe CommandLineArguments: $'''--port=9515''' WindowStyle: System.ProcessWindowStyle.Hidden ProcessId=> DriverPid
 WAIT 3
@@ -88,7 +95,84 @@ WAIT 3
 
 ---
 
-## 🌐 プロキシ経由でインターネットへ出る環境（会社環境に多い）
+## 🔄 ドライバーを自動で用意する（Selenium Manager）
+
+**Edge は自動更新される。** そのたびに `msedgedriver.exe` を同じバージョンに入れ替えないと
+`session not created` で止まる。これを手作業で追いかけるのは現実的でない。
+
+**Selenium Manager** は Selenium 公式の単体実行ファイルで、**Python も Node.js も要らない**。
+インストール済みブラウザーを検出し、対応するドライバーを取得して、その場所を教えてくれる。
+
+- 入手先: <https://github.com/SeleniumHQ/selenium_manager_artifacts/releases>
+- `selenium-manager-windows.exe` を実行環境の `BaseDir`（例 `C:\temp`）に置く
+
+```
+selenium-manager-windows.exe --browser edge --browser-version stable --output json
+```
+
+```json
+{
+  "logs": [ … ],
+  "result": {
+    "code": 0,
+    "message": "",
+    "driver_path": "C:\\Users\\…\\.cache\\selenium\\msedgedriver\\win64\\150.0.4078.105\\msedgedriver.exe",
+    "browser_path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+  }
+}
+```
+
+**置き場所がバージョン番号を含むフォルダになる**点に注意。固定パスを `DriverExe` に書くと
+更新のたびに壊れるので、この `result.driver_path` をフローが読み取って使う。
+
+**Chrome でも同じ仕組みが使える。** 生成物の冒頭にある `Browser` を `chrome` に変えるだけで、
+WebDriver へ渡すブラウザー名（`MicrosoftEdge` → `chrome`）、終了させるプロセス名
+（`msedgedriver` → `chromedriver`）、Selenium Manager が取得するドライバーの 3 つが同時に切り替わる。
+
+```
+SET Browser TO $'''edge'''
+SET BrowserName TO $'''MicrosoftEdge'''
+SET DriverProc TO $'''msedgedriver'''
+IF Browser = $'''chrome''' THEN
+    SET BrowserName TO $'''chrome'''
+    SET DriverProc TO $'''chromedriver'''
+END
+```
+
+対象サイトがブラウザー判定で表示を変える場合や、片方で不具合が出たときの逃げ道になる。
+生成時に決めておくなら `--pad-browser chrome` を付ける。
+
+生成器に `--auto-driver` を付けると、次の行が入る（`AutoDriver` を `False` にすれば無効化できる）。
+
+```
+SET AutoDriver TO True
+SET SmExe TO $'''selenium-manager-windows.exe'''
+IF AutoDriver THEN
+    SET SmArgs TO $'''%SmExe% --browser %Browser% --browser-version stable --output json'''
+    IF UseProxy THEN
+        SET SmArgs TO $'''%SmArgs% --proxy %ProxyAddr%'''
+    END
+    Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: SmArgs WorkingDirectory: BaseDir Timeout: 300 StandardOutput=> SmOutput StandardError=> SmError ExitCode=> SmExit
+    Variables.ConvertJsonToCustomObject Json: SmOutput CustomObject=> SmObj
+    IF SmObj['result']['code'] = 0 THEN
+        SET DriverExe TO SmObj['result']['driver_path']
+    END
+END
+```
+
+- **標準出力を受け取るのは「DOS コマンドの実行」**（`Scripting.RunDOSCommand`）。これまで使ってきた
+  「アプリケーションの実行」では出力を受け取れない。
+- **社内プロキシ環境ではドライバーのダウンロードもプロキシ経由**になるため、`--proxy` が要る。
+  `UseProxy` が `True` のときだけ自動で付く。
+- 初回はダウンロードが走るので `Timeout` は長め（300 秒）にしておく。2 回目以降はキャッシュから返る。
+- `ELSE` を使わず `IF code = 0` と `IF code <> 0` の 2 つに分けている（未検証の構文を避けるため）。
+
+
+
+---
+
+
+## 🌐 プロキシ経由でインターネットへ出る環境（企業のネット環境に多い）
 
 **WebDriver が起動するブラウザーは素のプロファイル**で立ち上がり、Windows のプロキシ設定を
 引き継がない。そのため、手動のブラウザーでは見えるサイトが WebDriver 経由では真っ白になる。
@@ -263,6 +347,7 @@ File: $'''ShotPath'''     ← 誤り（"ShotPath" という文字列になる）
 ---
 
 ## 📜 共通 JavaScript（変数 `%JsAct%` に入れておく）
+pythonで作ったプログラムのコア部分、DOMベース要素インデックスモジュールをJavaScriptで作り直したプログラムを埋め込むことで実現している。
 
 ```javascript
 var cands = arguments[0], action = arguments[1], value = arguments[2];
@@ -358,7 +443,7 @@ PAD のフローは内部的に **Robin 言語**で表現されており、フ�
 
 ```
 ┌───────────────────────────────────────────────────────────┐
-│ 実環境　操作録画環境（ブラウザの DevTools 使用） 　　　　　　　│
+│ 業務環境　操作録画環境（ブラウザの DevTools 使用） 　　　　　　　│
 │                                                           │
 │  ① ブラウザ DevTools の Recorder で業務操作を録画            │
 │           │  「JSON file」形式でエクスポート                │
@@ -384,28 +469,28 @@ PAD のフローは内部的に **Robin 言語**で表現されており、フ�
 │     （任意）--trace で手順書 pad_trace.md も出せる          │
 └───────────┬───────────────────────────────────────────────┘
             │  
-            │  生成したPADコード(Robin) を実行環境へ渡す
+            │  生成したPADコード(Robin) を業務環境へ渡す
             │  
-┌───────────▼───────────────────────────────────────────────┐
-│ 実行環境（PAD と WebDriver だけ使える PC。 Python は不要）   │
-│                                                           │
-│  ⑤ C:\temp に置く                                          │
-│       msedgedriver.exe ／ 明細CSV ／ pad_flow.jsact.js     │
-│           ▼                                               │
-│  ⑥ PAD で新規フロー → キャンバスに Ctrl+V                   │
-│           ▼                                               │
-│  ⑦ MaxItems = 1 で試走 → 目で確認 → 10 に上げて本番         │
-│           ▼                                               │
-│  ⑧ C:\temp に出力                                         │
-│       <ID>__<業務キー>__日時.png（エビデンス）              │
-│       pad_result.csv（結果・再実行の入力にもなる）          │
-│       pad_progress.log（進捗）                            │
-└───────────────────────────────────────────────────────────┘
+┌───────────▼─────────────────────────────────────────────────┐
+│ 業務環境（PAD と WebDriver だけ使える PC。 Python は不要）     │
+│                                                             │
+│  ⑤ C:\temp に置く                                            │
+│       msedgedriver.exe ／ 明細CSV ／ pad_flow.jsact.js       │
+│           ▼                                                 │
+│  ⑥ PAD で新規フロー → キャンバスに Ctrl+V                     │
+│           ▼                                                 │
+│  ⑦ MaxItems = 1 で試走 → 目で確認 → データ件数に増やし本番実行 │
+│           ▼                                                 │
+│  ⑧ C:\temp に出力                                           │
+│       <ID>__<業務キー>__日時.png（エビデンス）                │
+│       pad_result.csv（結果・再実行の入力にもなる）            │
+│       pad_progress.log（進捗）                              │
+└────────────────────────────────────────────────────────────┘
 ```
 
 **実行環境に Python が無くてもよい**のがこの方式の要点。変換だけを Python が使える PC で行い、
-できあがった PADコード(Robin)を実行環境の PAD に貼り付けて使う。変換にはブラウザも WebDriver も
-必要ない。
+できあがった PADコード(Robin)を実行環境の PAD に貼り付けて使う。
+変換に使うPCは Python は必須だが、ブラウザも WebDriver も無くてよい。
 
 なお、録画（①）は**対象システムにアクセスできる環境**で行う必要がある。②③④の変換作業だけが
 Python を要求する部分で、ここは対象システムに触らない。
@@ -453,7 +538,7 @@ Python を要求する部分で、ここは対象システムに触らない。
 
 ---
 
-### 手順 ④：PADコード(Robin)を生成する
+### 手順 ④：Robin コードを生成する
 
 ```
 # Python が使える環境で変換する（ブラウザも WebDriver も不要）
@@ -463,15 +548,12 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
     --driver-exe "C:\temp\msedgedriver.exe" --pad-out-dir "C:\temp"
 ```
 
-
 **引数のパスは 2 種類あるので混ぜないこと。**
-
 
 | 引数 | どのマシンのパスか |
 | --- | --- |
 | `--batch` / `--robin` | **変換環境**（Python が使える PC）のパス。リポジトリ相対でよい |
-| `--details` / `--driver-exe` / `--pad-out-dir` | **実行環境**（PAD を動かす PC）のパス。生成されたPADコード(Robin)に文字列として埋め込まれる |
-
+| `--details` / `--driver-exe` / `--pad-out-dir` | **実行環境**（PAD を動かす PC）のパス。生成された Robin に文字列として埋め込まれる |
 
 | 引数 | 役割 |
 | --- | --- |
@@ -482,11 +564,9 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 | `--driver-exe` | `msedgedriver.exe` のパス。`SET DriverExe` になる |
 | `--pad-out-dir` | 出力フォルダ。`SET BaseDir` になる |
 
-
 `--details` と `--driver-exe` が `--pad-out-dir` の配下にある場合、生成される Robin は
 それらを `%BaseDir%` 相対で出力する。上の例なら次のようになり、**配布時に直すのは
 `BaseDir` の 1 行だけ**で済む。
-
 
 ```
 SET BaseDir TO $'''C:\\temp'''
@@ -497,8 +577,17 @@ SET LogFile TO $'''%BaseDir%\\pad_progress.log'''
 SET ShotDir TO $'''%BaseDir%'''
 ```
 
-
 配下でないパスを渡した場合は絶対パスのまま出力されるので、環境ごとに 3 行を直すことになる。
+
+
+
+#### PAD標準の録画機能との違い
+
+本ツールはブラウザ自動化ツールですので、ブラウザ自動化バッチ処理に特化し拡張機能なしで使え、バッチ運用フローや、はまり回避対策を追加したPADコード(Robin)に変換する設計になっています。
+ブラウザ操作録画部分はブラウザがあれば DevTools を使ってできます。
+
+PAD標準の録画機能は全般的な用途に使えるように操作をアクションとしてそのまま登録するだけになっている。
+
 
 
 #### 生成器が自動で行う変換
@@ -1096,12 +1185,10 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 
 ---
 
-## ⚠️ 制約と限界
+## ⚠️ 制約
 
-- **ブラウザー更新のたびにドライバーの入れ替えが必要。** 自動化されないメンテナンス作業が残る
 - **CAPTCHA やボット検知は回避できない**
 - **`iframe` 内の要素には届かない。** 別途 `/frame` への切り替えが必要
-- スクリーンショットは表示領域のみ。ページ全体の撮影は W3C の仕様外
 - Power Fx を有効にしたフローでは書式が変わる（1 起点のインデックス、厳格な型システム、
   データテーブルとカスタムオブジェクトが型なし扱いになりキャストが必要）。
   **既存フローの後付け有効化はできない**ため、移行するなら作り直しになる
