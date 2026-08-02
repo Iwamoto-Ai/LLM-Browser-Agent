@@ -1,73 +1,89 @@
 # ============================================================
-# pad_sample.robin.txt
-# Power Automate Desktop から WebDriver を直接叩くバッチ処理のサンプル
-#
-# 対象      : 同ディレクトリの sample.html（単一ファイルのデモページ）
-# 解説      : ../../docs/PAD_WebDriver.md
-# ライセンス: Apache-2.0
-#
-# 貼り付け方: PAD のフローデザイナーでキャンバスをクリックし Ctrl+V
-#   ※ Power Fx を有効にしていないフローに貼ってください
-#
-# 準備:
-#   1. sample.html と sample_batch.csv を C:\temp\ にコピー
-#   2. Edge と同じメジャーバージョンの msedgedriver.exe を C:\temp\ に置く
-#   3. 127.0.0.1 / localhost をプロキシ除外に入れる
-#
-# このサンプルが示すもの:
-#   - WebDriver セッションの開始と終了
-#   - 共通 JavaScript による click / fill / exists
-#   - 手動ログイン（PAD はパスワードを扱わない）
-#   - 明細 CSV のループ、skip 列、件数上限、失敗分の再実行
-#   - 失敗時のエビデンス取得と、次の件の前に起点へ戻す復帰処理
-#   - ブラウザーのページだけを撮るエビデンス（デスクトップは写らない）
-#
-# 付属の sample_batch.csv は、1回の実行で成功・失敗・復帰・スキップの
-# 4パターンすべてを通るように並べてあります。
-#   DEMO-001 / K-1001 → 成功
-#   DEMO-002 / K-9999 → 失敗（存在しないキーなので検索0件）
-#   DEMO-003 / K-1002 → 復帰して成功  ★ここが成功すれば復帰処理が効いている
-#   DEMO-004 / K-1003 → スキップ
+# 自動生成 PADコード(Robin)
+# ============================================================
+# 【メモ欄】自動で分かる範囲を初期値として入れてある。適宜書き換えて使う。
+# タイトル: PAD WebDriver サンプル — 検索→確認→ホームへ戻る
+# 処理内容：明細 1 件につき 6 操作を繰り返す（ID列: ID ／ 業務キー: KEY）
+#           開始URL: file:///C:/temp/sample.html
+#           明細CSV: sample_batch.csv
+# 備考：2026/08/02 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
+# ============================================================
+# LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
+# Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).
 # ============================================================
 
-# ---------- 設定：配布時に触るのはここだけ ----------
-SET BaseDir TO $'''C:\\temp'''
-# ※ 末尾に \ を付けないこと（%BaseDir%\file.png が二重になる）
-
-SET DriverExe TO $'''%BaseDir%\\msedgedriver.exe'''
-SET DriverUrl TO $'''http://127.0.0.1:9515'''
-SET DetailsFile TO $'''%BaseDir%\\sample_batch.csv'''
-SET ResultFile TO $'''%BaseDir%\\pad_sample_result.csv'''
-SET LogFile TO $'''%BaseDir%\\pad_sample.log'''
-SET ShotDir TO $'''%BaseDir%'''
-
-# file:// はスラッシュ表記なので BaseDir から組めない
+# --- 接続先：環境を切り替えるときはここを直す ---
+# 練習サイト  : file:///C:/temp/index.html
+# 本番サイト  : https://… （実環境の URL）
 SET TargetUrl TO $'''file:///C:/temp/sample.html'''
 
-# ---------- 運用スイッチ ----------
-# まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす
-SET MaxItems TO 10
+# --- プロキシ：社外サイトへ出るときだけ指定する ---
+# WebDriver が起動するブラウザーは素のプロファイルで、Windows のプロキシ設定を
+# 引き継がない。社内プロキシ経由でしか外部に出られない環境では下を有効にする。
+# localhost と file:// はプロキシを通らないので、練習サイトは影響を受けない。
+# 使う場合: UseProxy を True にし、ProxyAddr にプロキシの host:port を書く。
+SET UseProxy TO False
+SET ProxyAddr TO $'''proxy.example.com:8080'''
 
-# 失敗分だけを再実行するとき True。読み込み元と出力先が自動で切り替わる
-SET RetryMode TO False
-
-# 完了確認に使う画面上の文字列。空にすると確認をスキップする
-SET DoneText TO $'''has been confirmed'''
-
-IF RetryMode THEN
-    SET DetailsFile TO $'''%BaseDir%\\pad_sample_result.csv'''
-    SET ResultFile TO $'''%BaseDir%\\pad_sample_result_retry.csv'''
+# --- ブラウザー：edge か chrome。ここ 1 行だけ直せば切り替わる ---
+# 対象サイトがブラウザー判定で表示を変える場合や、片方で不具合が出たときに使う。
+# 下の BrowserName（WebDriver への指定）とドライバーのプロセス名も自動で追従する。
+SET Browser TO $'''edge'''
+SET BrowserName TO $'''MicrosoftEdge'''
+SET DriverProc TO $'''msedgedriver'''
+IF Browser = $'''chrome''' THEN
+    SET BrowserName TO $'''chrome'''
+    SET DriverProc TO $'''chromedriver'''
 END
 
-# ---------- 要素操作の共通 JavaScript ----------
+# --- フォルダ・ファイル：配布時に触るのはこの BaseDir だけにする ---
+SET BaseDir TO $'''C:\\temp'''
+# ※ BaseDir の末尾に \ を付けないこと（%BaseDir%\file.png が二重になる）
+
+# --- ドライバーの入手方法 ---
+# True  … Selenium Manager がブラウザーの版に合わせて自動取得する（推奨）。
+#         ブラウザーが更新されても入れ替えが要らない。取得先はバージョン番号を
+#         含むフォルダなので、固定パスでは書けない。
+#         selenium-manager-windows.exe は BaseDir に置くこと。取得元:
+#         https://github.com/SeleniumHQ/selenium_manager_artifacts/releases
+# False … 下の固定パスを使う。ブラウザー更新時は手動で入れ替える。
+SET AutoDriver TO True
+SET SmExe TO $'''selenium-manager-windows.exe'''
+
+# AutoDriver = False のときに使う固定パス。Browser に追従させるため、
+# edge / chrome それぞれの既定を持ち、下の IF で切り替える。
+# BaseDir 以外に置く場合は、次の 2 行を直接書き換えること。
+SET EdgeDriverExe TO $'''%BaseDir%\\msedgedriver.exe'''
+SET ChromeDriverExe TO $'''%BaseDir%\\chromedriver.exe'''
+SET DriverExe TO EdgeDriverExe
+IF Browser = $'''chrome''' THEN
+    SET DriverExe TO ChromeDriverExe
+END
+SET DriverUrl TO $'''http://127.0.0.1:9515'''
+SET DetailsFile TO $'''examples/pad/sample_batch.csv'''
+SET ResultFile TO $'''%BaseDir%\\pad_result.csv'''
+SET LogFile TO $'''%BaseDir%\\pad_progress.log'''
+SET ShotDir TO $'''%BaseDir%'''
+
+# --- 運用スイッチ ---
+# まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす
+SET MaxItems TO 1
+# 起動したブラウザーとドライバーの種類・バージョンをダイアログで出す
+# False にしてもログ（pad_progress.log）には必ず 1 行残る
+SET ShowDriverInfo TO True
+# 失敗分だけを再実行するとき True（読み込み元と出力先が自動で切り替わる）
+SET RetryMode TO False
+# manual = 人が手でログイン（PAD はパスワードを一切扱わない）★推奨
+# auto   = 録画されたログイン手順を実行する
+SET LoginMode TO $'''manual'''
+IF RetryMode THEN
+    SET DetailsFile TO $'''%BaseDir%\\pad_result.csv'''
+    SET ResultFile TO $'''%BaseDir%\\pad_result_retry.csv'''
+END
+
+# --- 要素操作の共通 JavaScript ---
 # PAD は長すぎる 1 行を貼り付けても黙って無視するため、短い行に分けて継ぎ足す。
-# 文字列の引用符にバックティックを使うのが要点。Robin リテラルの \' エスケープと
-# JSON 本文の " の衝突を同時に避けられる。'  と " の文字そのものが必要な箇所は
-# String.fromCharCode で作る。
-#
-# 引数  : [セレクタ候補の配列, action, value]
-# action: click / fill / exists
-# 戻り値: { ok: 真偽, used: 実際に一致したセレクタ }
+# （%JsAct% は直前までの内容。順番どおりに貼ること）
 SET JsAct TO $'''var cands = arguments[0], action = arguments[1], value = arguments[2]; var Q = String.fromCharCode(3'''
 SET JsAct TO $'''%JsAct%9), DQ = String.fromCharCode(34); function lit(s) { if (s.indexOf(Q) < 0) { return Q + s + Q; } retu'''
 SET JsAct TO $'''%JsAct%rn DQ + s + DQ; } function byXPath(xp) { try { return document.evaluate(xp, document, null, 9, null)'''
@@ -86,84 +102,256 @@ SET JsAct TO $'''%JsAct%tion === `click`) { try { el.scrollIntoView({ block: `ce
 SET JsAct TO $'''%JsAct%if (action === `fill`) { el.focus(); el.value = value; el.dispatchEvent(new Event(`input`, { bubbles'''
 SET JsAct TO $'''%JsAct%: true })); el.dispatchEvent(new Event(`change`, { bubbles: true })); } return { ok: true, used: can'''
 SET JsAct TO $'''%JsAct%ds[i] }; } return { ok: false, used: null };'''
+# ※ 継ぎ足しがうまくいかない場合は、同時生成した pad_flow.jsact.js の中身を
+#   「変数の設定」アクション（変数名 JsAct）の値の欄に手で貼り付けてもよい。
 
-# ---------- 古いドライバーが残っていたら終了する ----------
-# 前回の実行が異常終了すると msedgedriver がポート 9515 を掴んだまま残り、
+
+# --- バージョン比較用の JavaScript ---
+# ブラウザーとドライバーのメジャーバージョン（最初のドット手前）を取り出して比べる。
+# Chrome/Edge はビルド番号まで一致するとは限らず、合わせるのはメジャーだけでよい。
+# 文字列リテラルはバッククォートを使う（JSON にも Robin にもそのまま置ける）。
+SET JsVer TO $'''var b = String(arguments[0]).split(`.`)[0]; var d = String(arguments[1]).split(`.`)[0]; return { ok: true, bMajor: b, dMajor: d, match: (b === d) };'''
+# 途中で中止するかどうかの目印（ドライバー取得やログインの失敗で True になる）
+SET Halt TO False
+# 中止した理由。最後のダイアログとログにそのまま出すので、
+# Halt を立てる箇所では必ずこれも設定すること。
+SET HaltReason TO $''''''
+# セッションを張れたか。後片付けで DELETE を投げてよいかの判定に使う。
+SET SessionOk TO False
+
+# --- 実行開始をログに残す ---
+# ここは中止しても必ず通る。ループの中だけで書くと、起点に着けずに
+# 中止したとき「ログを確認してください」と案内しながらログが空になる。
+File.WriteText File: LogFile TextToWrite: $'''===== 実行開始 上限%MaxItems%件 RetryMode=%RetryMode% Browser=%Browser% =====''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+
+# ドライバーをどう用意したか。ログとダイアログに出す。
+SET DriverSrc TO $'''固定パス（AutoDriver=False のためブラウザー更新時は手動で入れ替え）'''
+SET SmMsg TO $''''''
+# --- ドライバーの自動取得（Selenium Manager）---
+# 設定は冒頭の AutoDriver / SmExe。ここは取得を実行する部分で、
+# 取得できたらそのパスで DriverExe を上書きする。
+IF AutoDriver THEN
+    SET SmArgs TO $'''%SmExe% --browser %Browser% --browser-version stable --output json'''
+    IF UseProxy THEN
+        SET SmArgs TO $'''%SmArgs% --proxy %ProxyAddr%'''
+    END
+    Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: SmArgs WorkingDirectory: BaseDir Timeout: 300 StandardOutput=> SmOutput StandardError=> SmError ExitCode=> SmExit
+    Variables.ConvertJsonToCustomObject Json: SmOutput CustomObject=> SmObj
+    IF SmObj['result']['code'] = 0 THEN
+        SET DriverExe TO SmObj['result']['driver_path']
+        SET DriverSrc TO $'''Selenium Manager（ブラウザーのバージョンに合わせて自動取得）'''
+        SET SmMsg TO SmObj['result']['message']
+    END
+    IF SmObj['result']['code'] <> 0 THEN
+        SET Halt TO True
+        SET HaltReason TO $'''ドライバーの取得に失敗しました（Selenium Manager）'''
+        Display.ShowMessageDialog.ShowMessage Title: $'''ドライバー取得に失敗''' Message: SmOutput Icon: Display.Icon.Information Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> SmBtn
+    END
+END
+
+# ここから先はドライバーが要る。取得に失敗していたら入らない。
+# 入ってしまうと更新前の古いドライバーで起動し、
+#「sessionId がありません」という無関係なエラーに化ける。
+IF Halt = False THEN
+# --- 古いドライバーが残っていたら終了する ---
+# 前回の実行が異常終了すると、ドライバーがポート 9515 を掴んだまま残り、
 # 新しいドライバーが起動できない（古い方が応答してしまう）。
+# 別のブラウザーのフローを続けて動かす場合もポートを奪い合うため、両方を終了させる。
 System.TerminateProcess.TerminateProcessByName ProcessName: $'''msedgedriver'''
+System.TerminateProcess.TerminateProcessByName ProcessName: $'''chromedriver'''
 WAIT 1
 
-# ---------- ドライバーを起動 ----------
+# --- WebDriver を起動 ---
 System.RunApplication.RunApplication ApplicationPath: DriverExe CommandLineArguments: $'''--port=9515''' WindowStyle: System.ProcessWindowStyle.Hidden ProcessId=> DriverPid
 WAIT 3
 
-# ---------- セッション開始（ブラウザーが立ち上がる）----------
-# EncodeRequestBody: False が必須。既定だと本文が URL エンコードされ、
-# WebDriver が invalid argument: missing command parameters を返す。
-SET SessionBody TO $'''{"capabilities": {"alwaysMatch": {"browserName": "MicrosoftEdge"}}}'''
+# --- セッション開始（ブラウザ起動）---
+# ブラウザーは冒頭の Browser、プロキシの有無は UseProxy で切り替わる。
+# 組み合わせが増えるので、本文は前から継ぎ足して組み立てる。
+SET SessionBody TO $'''{"capabilities": {"alwaysMatch": {"browserName": "%BrowserName%"'''
+IF UseProxy THEN
+    SET SessionBody TO $'''%SessionBody%, "proxy": {"proxyType": "manual", "httpProxy": "%ProxyAddr%", "sslProxy": "%ProxyAddr%"}'''
+END
+SET SessionBody TO $'''%SessionBody%}}}'''
 SET AppJson TO $'''application/json'''
 SET NewUrl TO $'''%DriverUrl%/session'''
 Web.InvokeWebService.InvokeWebService Url: NewUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: SessionBody EncodeRequestBody: False FailOnErrorStatus: False Response=> SessionResp StatusCode=> SessionStatus
-# ↓ sessionId が取れないときはこの行を有効にして生の応答を確認する
+# ↓ 「sessionId がありません」と出たらこの行を有効にして生の応答を確認する
 # Display.ShowMessageDialog.ShowMessage Title: $'''WebDriver 応答''' Message: SessionResp Icon: Display.Icon.Information Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> BtnDbg
+# セッションが作れたかを応答コードで判定する。ここを見ないと、失敗応答
+#（value の中身が error/message に入れ替わる）をそのまま読みに行って
+#「sessionId がありません」という、原因の分からないエラーになる。
+IF SessionStatus <> 200 THEN
+    SET Halt TO True
+    SET HaltReason TO $'''WebDriver のセッションを作成できませんでした（ブラウザーとドライバーの不一致など）'''
+    Display.ShowMessageDialog.ShowMessage Title: $'''セッション作成に失敗''' Message: SessionResp Icon: Display.Icon.Warning Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> SessBtn
+END
+END
+
+IF Halt = False THEN
 Variables.ConvertJsonToCustomObject Json: SessionResp CustomObject=> SessionObj
 # カスタムオブジェクトはブラケット記法で参照する。ドット記法は使えない。
 SET SessionId TO SessionObj['value']['sessionId']
+SET SessionOk TO True
+# 以降で使い回す URL を組み立てておく（1 行を短く保つため）
 SET ExecUrl TO $'''%DriverUrl%/session/%SessionId%/execute/sync'''
 SET GoUrl TO $'''%DriverUrl%/session/%SessionId%/url'''
 SET RectUrl TO $'''%DriverUrl%/session/%SessionId%/window/rect'''
 SET ShotUrl TO $'''%DriverUrl%/session/%SessionId%/screenshot'''
 SET QuitUrl TO $'''%DriverUrl%/session/%SessionId%'''
 
+# --- 起動したブラウザーとドライバーを確認する ---
+# 値はセッションの応答（capabilities）から取る。実際に動いているものが出る。
+SET BrowserVer TO SessionObj['value']['capabilities']['browserVersion']
+# 起動したのが要求どおりのブラウザーかを先に確かめる。ドライバーは取り違えても
+# セッションを張ってしまうことがあり、そのときは空白のウィンドウが出るだけで
+# 気づけない。ここで止めないと、続く capabilities の参照キーも食い違う。
+SET RealBrowser TO SessionObj['value']['capabilities']['browserName']
+IF RealBrowser <> BrowserName THEN
+    SET Halt TO True
+    SET HaltReason TO $'''要求したブラウザー(%BrowserName%)と実際に起動したブラウザー(%RealBrowser%)が違います。ドライバーの取り違えです'''
+    Display.ShowMessageDialog.ShowMessage Title: $'''ブラウザーの取り違え''' Message: HaltReason Icon: Display.Icon.Warning Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> MixBtn
+END
+
+IF Halt = False THEN
+SET DriverVer TO $'''(不明)'''
+IF Browser = $'''chrome''' THEN
+    SET DriverVer TO SessionObj['value']['capabilities']['chrome']['chromedriverVersion']
+END
+IF Browser = $'''edge''' THEN
+    SET DriverVer TO SessionObj['value']['capabilities']['msedge']['msedgedriverVersion']
+END
+# メジャーバージョンの比較はページ側の JavaScript にやらせる。
+# PAD のテキスト分割アクションを増やさずに済み、貼り付け事故の余地が減る。
+SET VerBody TO $'''{"script": "%JsVer%", "args": ["%BrowserVer%", "%DriverVer%"]}'''
+Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: VerBody EncodeRequestBody: False FailOnErrorStatus: False Response=> VerResp StatusCode=> VerStatus
+Variables.ConvertJsonToCustomObject Json: VerResp CustomObject=> VerObj
+SET VerJudge TO $'''不一致（ブラウザー更新の可能性あり）'''
+IF VerObj['value']['match'] = True THEN
+    SET VerJudge TO $'''一致'''
+END
+SET DriverInfo TO $'''ブラウザー=%Browser% %BrowserVer% / WebDriver=%DriverProc% %DriverVer% / メジャー判定=%VerJudge% / 取得方法=%DriverSrc% / パス=%DriverExe%'''
+File.WriteText File: LogFile TextToWrite: $'''[ドライバー] %DriverInfo%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+# ダイアログにだけ補足を足す。ここはページを開く前なのでブラウザーは白紙で、
+# 初めて見た人が異常だと思いやすい。ログ側は 1 行を短く保つため足さない。
+SET DriverInfoMsg TO $'''%DriverInfo%  ※この時点ではまだページを開いていません（白紙で正常）。OK を押すとページを開きます。'''
+IF ShowDriverInfo THEN
+    Display.ShowMessageDialog.ShowMessage Title: $'''ドライバー確認''' Message: DriverInfoMsg Icon: Display.Icon.Information Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> DrvBtn
+END
+END
+
+END
 # ================= セットアップ（最初に 1 回）=================
+# セッションが張れていなければ、以降の URL 変数が存在しないので入らない。
+IF Halt = False THEN
 SET RowError TO $''''''
-SET Halt TO False
-
-# ウィンドウサイズ。エビデンスに写る範囲がこれで決まる。
-# 複数の PC に配布する場合は、一番小さい画面に収まるサイズにそろえること。
-SET RectBody TO $'''{"width": 1600, "height": 1000}'''
+# [1] ウィンドウサイズ 1366x900
+# エビデンスに写る範囲はこのサイズで決まる。複数の PC に配布する場合は
+# 一番小さい画面に収まる値にそろえること。
+SET RectBody TO $'''{"width": 1366, "height": 900}'''
 Web.InvokeWebService.InvokeWebService Url: RectUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: RectBody EncodeRequestBody: False FailOnErrorStatus: False Response=> RectResp StatusCode=> RectStatus
-
-# ページを開く
+# [2] ページを開く（URL は冒頭の TargetUrl で設定）
 SET UrlBody TO $'''{"url": "%TargetUrl%"}'''
 Web.InvokeWebService.InvokeWebService Url: GoUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: UrlBody EncodeRequestBody: False FailOnErrorStatus: False Response=> UrlResp StatusCode=> UrlStatus
 WAIT 2
 
-# ---------- 手動ログイン ----------
+# ---------- 手動ログイン（既定）----------
 # フローを止めて人がログインする。PAD はパスワードを一度も受け取らないので、
 # 変数ペイン・実行ログ・エラーメッセージのどこにも残らない。
-#
+# ★ ログインだけでなく、繰り返しの起点画面まで人が進めてから[OK]を押す。
+#   ログイン後の画面構成はサイト側の都合で変わることがあり、機械的に
+#   辿らせるより確実で、修正も要らない。
 # WebDriver は自分が起動したブラウザーしか操作できない。別に開いてある
 # 普段のブラウザーでログインしても、フローはそのタブを見られない。
-Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' Message: $'''いま開いたブラウザーでログインし、ホーム画面が出てから[OK]を押してください。ブラウザーは閉じないでください。''' Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn
-IF LoginBtn = $'''Cancel''' THEN
-    SET Halt TO True
+IF LoginMode = $'''manual''' THEN
+    Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' Message: $'''いま開いたブラウザーでログインし、繰り返しの起点画面まで進んでから[OK]を押してください。ブラウザーは閉じないでください。''' Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn
+    IF LoginBtn = $'''Cancel''' THEN
+        SET Halt TO True
+        SET HaltReason TO $'''手動ログインがキャンセルされました'''
+    END
 END
 
-# ---------- ループの起点へ移動 ----------
-# ループの始点と終点を同じ画面にそろえるための一手。
-SET ActBody TO $'''{"script": "%JsAct%", "args": [["#menu-orders", "aria/Orders"], "click", ""]}'''
+# ---------- 自動ログイン（LoginMode = auto のときだけ）----------
+# ★ 資格情報はフローに直書きしない。下の 2 行は、デザイナーから
+#   ［入力ダイアログを表示］を 2 つ置き（パスワード側は入力の種類を
+#   「パスワード」にする）、生成変数を EdiUser / EdiPassword に
+#   リネームしたものに置き換えること。
+# ★ ログイン部分の範囲は SECRET プレースホルダの位置から機械的に判定している。
+#   録画の形によっては境界がずれるので、貼り付け後に目で確認すること。
+IF LoginMode = $'''auto''' THEN
+    SET EdiUser TO $''''''
+    SET EdiPassword TO $''''''
+    # JSON 本文を壊さないよう \ → \\ 、" → \" の順でエスケープする。
+    # 順序を守ること（逆にすると 1 段目で入れた \\ を 2 段目が書き換える）。
+    # ActivateEscapeSequences: False が重要（True だと \\ が 1 個に戻る）。
+    Text.Replace.ReplaceText Text: EdiUser TextToFind: $'''\\''' IgnoreCase: False ReplaceWith: $'''\\\\''' ActivateEscapeSequences: False ComparisonType: Text.TextComparisonType.CultureSensitive Result=> EdiUserEsc
+    Text.Replace.ReplaceText Text: EdiUserEsc TextToFind: $'''"''' IgnoreCase: False ReplaceWith: $'''\\"''' ActivateEscapeSequences: False ComparisonType: Text.TextComparisonType.CultureSensitive Result=> EdiUser
+    Text.Replace.ReplaceText Text: EdiPassword TextToFind: $'''\\''' IgnoreCase: False ReplaceWith: $'''\\\\''' ActivateEscapeSequences: False ComparisonType: Text.TextComparisonType.CultureSensitive Result=> EdiPasswordEsc
+    Text.Replace.ReplaceText Text: EdiPasswordEsc TextToFind: $'''"''' IgnoreCase: False ReplaceWith: $'''\\"''' ActivateEscapeSequences: False ComparisonType: Text.TextComparisonType.CultureSensitive Result=> EdiPassword
+    # [3] fill #login-user
+    SET ActBody TO $'''{"script": "%JsAct%", "args": [["#login-user", "aria/User"], "fill", "%EdiUser%"]}'''
+    Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+    IF ActObj['value']['ok'] <> True THEN
+        SET RowError TO $'''ステップ3（fill #login-user）で要素が見つかりません'''
+    END
+    WAIT 1
+    # [4] fill #login-pass
+    SET ActBody TO $'''{"script": "%JsAct%", "args": [["#login-pass", "aria/Password"], "fill", "%EdiPassword%"]}'''
+    Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+    IF ActObj['value']['ok'] <> True THEN
+        SET RowError TO $'''ステップ4（fill #login-pass）で要素が見つかりません'''
+    END
+    WAIT 1
+    # [5] click #btn-signin
+    SET ActBody TO $'''{"script": "%JsAct%", "args": [["#btn-signin", "aria/Sign in"], "click", ""]}'''
+    Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+    IF ActObj['value']['ok'] <> True THEN
+        SET RowError TO $'''ステップ5（click #btn-signin）で要素が見つかりません'''
+    END
+    WAIT 1
+    # [6] click #menu-orders
+    SET ActBody TO $'''{"script": "%JsAct%", "args": [["#menu-orders", "aria/Orders"], "click", ""]}'''
+    Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+    IF ActObj['value']['ok'] <> True THEN
+        SET RowError TO $'''ステップ6（click #menu-orders）で要素が見つかりません'''
+    END
+    WAIT 1
+END
+
+# ---------- 使い終わったパスワードは即座に消す ----------
+SET EdiPassword TO $''''''
+SET EdiPasswordEsc TO $''''''
+
+# ---------- 起点画面かどうかを確認する ----------
+# ループ最初の操作対象がこの画面にあるかを、クリックせずに調べる。
+SET ActBody TO $'''{"script": "%JsAct%", "args": [["#search-key", "aria/Order key"], "find", ""]}'''
 Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
 Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
 IF ActObj['value']['ok'] <> True THEN
-    SET RowError TO $'''セットアップ（click Orders）で要素が見つかりません'''
+    SET Halt TO True
+    SET HaltReason TO $'''繰り返しの起点画面に到達できませんでした'''
+    Display.ShowMessageDialog.ShowMessage Title: $'''起点画面ではありません''' Message: $'''繰り返しの起点画面が表示されていません。ブラウザーで起点画面まで進めてから、もう一度実行してください。''' Icon: Display.Icon.Warning Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> StartBtn
 END
-WAIT 1
 
-# セットアップに失敗したら明細を 1 件も流さない。
-# ここで止めないと、ループ先頭で RowError がリセットされるため
-# 全件が「ステップ1で要素が見つかりません」という偽の失敗になる。
+# ---------- セットアップ失敗を検知して止める ----------
+# ここで止めないと、ループ先頭で RowError がリセットされるため、
+# 全件が「ステップ1で要素が見つかりません」という偽の失敗として記録される。
 IF RowError <> $'''''' THEN
     SET Halt TO True
+    SET HaltReason TO RowError
+END
 END
 
-# ================= 明細を読み込む =================
+# ================= 明細（CSV）を読み込む =================
 IF Halt = False THEN
     File.ReadFromCSVFile.ReadCSV CSVFile: DetailsFile Encoding: File.CSVEncoding.UTF8 TrimFields: True FirstLineContainsColumnNames: True ColumnsSeparator: File.CSVColumnsSeparator.Comma CSVTable=> Rows
     # 結果 CSV は、そのまま明細として読み直せる列構成にする。
-    # ID だけでなく業務キーも入れておかないと再実行で対象を特定できない。
+    # ID だけでなく業務キーも入れないと、再実行で対象を特定できない。
     File.WriteText File: ResultFile TextToWrite: $'''ID,KEY,結果,理由,エビデンス,実行日時''' AppendNewLine: True IfFileExists: File.IfFileExists.Overwrite
-    File.WriteText File: LogFile TextToWrite: $'''===== 実行開始 上限%MaxItems%件 RetryMode=%RetryMode% =====''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
     SET OkCount TO 0
     SET NgCount TO 0
     SET SkipCount TO 0
@@ -172,14 +360,25 @@ IF Halt = False THEN
 
     # ================= 明細ごとの繰り返し =================
     LOOP FOREACH Row IN Rows
-        # 列は変数に取り出す（リテラル内に単引用符を書かないため）
-        SET RowId TO Row['ID']
-        SET RowKey TO Row['KEY']
+        # 明細の列を変数に取り出す（リテラル内に単引用符を入れないため）
+        SET Col1 TO Row['ID']
+        SET Col2 TO Row['KEY']
+        SET RowId TO Col1
+        SET RowKey TO Col2
         SET RowError TO $''''''
 
         # 再実行モードでは「失敗」行だけを対象にする
         IF RetryMode THEN
-            IF Row['結果'] <> $'''失敗''' THEN
+            # 対象は「失敗」と「未実行」。未実行は件数上限で打ち切った行で、
+            # これを外すと上限を刻んで回したとき続きが流せない。
+            SET DoRow TO False
+            IF Row['結果'] = $'''失敗''' THEN
+                SET DoRow TO True
+            END
+            IF Row['結果'] = $'''未実行''' THEN
+                SET DoRow TO True
+            END
+            IF DoRow = False THEN
                 NEXT LOOP
             END
         END
@@ -203,30 +402,30 @@ IF Halt = False THEN
         # 直前の件が失敗していたら、起点に復帰してから始める。
         # 失敗した画面のまま次の件を始めると 1 件の失敗が全件に連鎖する。
         IF PrevFailed THEN
+            # 復帰: click #home-link
             SET ActBody TO $'''{"script": "%JsAct%", "args": [["#home-link", "aria/Home"], "click", ""]}'''
             Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
             WAIT 1
+            # 復帰: click #menu-orders
             SET ActBody TO $'''{"script": "%JsAct%", "args": [["#menu-orders", "aria/Orders"], "click", ""]}'''
             Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
             WAIT 1
             SET PrevFailed TO False
         END
-        # 悲観的に置く。最後まで通れば False に戻る。
-        # こうするとフラグを立てる箇所が 1 行で済む。
+        # 悲観的に置く。最後まで通れば False に戻る（フラグを立てる箇所が 1 行で済む）
         SET PrevFailed TO True
 
-        # 日時つきのファイル名を作る。
-        # MM は月、mm は分。yyyymmdd と書くと月の位置に分が入る。
+        # 日時つきのファイル名を作る。MM は月、mm は分。
         DateTime.GetCurrentDateTime.Local DateTimeFormat: DateTime.DateTimeFormat.DateAndTime CurrentDateTime=> NowDt
         Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt CustomFormat: $'''yyyyMMdd_HHmmss''' Result=> Stamp
         Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt CustomFormat: $'''yyyy/MM/dd HH:mm:ss''' Result=> RecStamp
         SET ShotPath TO $'''%ShotDir%\\%RowId%__%RowKey%__%Stamp%.png'''
         SET FailShot TO $'''%ShotDir%\\fail__%RowId%__%RowKey%__%Stamp%.png'''
-
         File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 開始''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
 
-        # ---------- [1] 検索キーを入力 ----------
-        SET ActBody TO $'''{"script": "%JsAct%", "args": [["#search-key", "aria/Order key"], "fill", "%RowKey%"]}'''
+        # 💬 注文 %Col2%（%Col1%）の確認を開始
+        # [1] fill #search-key
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["#search-key", "aria/Order key"], "fill", "%Col2%"]}'''
         Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
         Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
         IF ActObj['value']['ok'] <> True THEN
@@ -244,7 +443,7 @@ IF Halt = False THEN
         END
         WAIT 1
 
-        # ---------- [2] 検索実行 ----------
+        # [2] click #btn-search
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#btn-search", "aria/Search"], "click", ""]}'''
         Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
         Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
@@ -263,14 +462,12 @@ IF Halt = False THEN
         END
         WAIT 1
 
-        # ---------- [3] 検索結果のリンクを開く ----------
-        # セレクタに明細の値を埋める。存在しないキーだと行が生成されないため、
-        # ここで ok: false になる（= 検索 0 件の検出）。
-        SET ActBody TO $'''{"script": "%JsAct%", "args": [["aria/%RowKey%", "#result-link"], "click", ""]}'''
+        # [3] click aria/%Col2%
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["aria/%Col2%", "#result-link"], "click", ""]}'''
         Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
         Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
         IF ActObj['value']['ok'] <> True THEN
-            SET RowError TO $'''ステップ3（click aria/%RowKey%）該当データが見つかりません'''
+            SET RowError TO $'''ステップ3（click aria/%Col2%）で要素が見つかりません'''
         END
         IF RowError <> $'''''' THEN
             SET NgCount TO NgCount + 1
@@ -284,7 +481,7 @@ IF Halt = False THEN
         END
         WAIT 1
 
-        # ---------- [4] 確認を実行 ----------
+        # [4] click #btn-confirm
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#btn-confirm", "aria/Confirm", "text/Confirm"], "click", ""]}'''
         Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
         Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
@@ -303,16 +500,13 @@ IF Halt = False THEN
         END
         WAIT 1
 
-        # ---------- [5] 完了確認 ----------
-        # 「ボタンは押せたが実際には処理されていない」を検知する。
-        # DoneText が空なら何もしない。
-        IF DoneText <> $'''''' THEN
-            SET ActBody TO $'''{"script": "%JsAct%", "args": [[], "exists", "%DoneText%"]}'''
-            Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
-            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
-            IF ActObj['value']['ok'] <> True THEN
-                SET RowError TO $'''ステップ5（完了確認）画面に「%DoneText%」が見つかりません'''
-            END
+        # 💬 確認済み画面をエビデンス保存
+        # [5] click #home-link
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["#home-link", "aria/Home"], "click", ""]}'''
+        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+        IF ActObj['value']['ok'] <> True THEN
+            SET RowError TO $'''ステップ5（click #home-link）で要素が見つかりません'''
         END
         IF RowError <> $'''''' THEN
             SET NgCount TO NgCount + 1
@@ -324,47 +518,28 @@ IF Halt = False THEN
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             NEXT LOOP
         END
-
-        # ---------- エビデンス保存 ----------
-        # WebDriver に撮らせるとページの表示領域だけが写る。
-        # フォーカスに依存しないので、実行中に通知が前面に出ても影響しない。
-        # 逆にスクロールしないと見えない範囲は写らない点に注意。
-        Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
-        Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
-        SET ShotB64 TO ShotObj['value']
-        # 列挙型の名前空間がアクションごとに違う。File.WriteText は
-        # File.IfFileExists.* だが、こちらは File.IfExists.* になる。
-        File.ConvertFromBase64 Base64Text: ShotB64 File: ShotPath IfFileExists: File.IfExists.DoNothing
-
-        # ---------- [6] 起点へ戻る ----------
-        SET ActBody TO $'''{"script": "%JsAct%", "args": [["#home-link", "aria/Home"], "click", ""]}'''
-        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
-        Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
-        IF ActObj['value']['ok'] <> True THEN
-            SET RowError TO $'''ステップ6（click Home）で要素が見つかりません'''
-        END
-        IF RowError <> $'''''' THEN
-            SET NgCount TO NgCount + 1
-            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%ShotPath%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
-            NEXT LOOP
-        END
         WAIT 1
 
-        # ---------- [7] 次の件の起点へ ----------
+        # [6] click #menu-orders
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#menu-orders", "aria/Orders"], "click", ""]}'''
         Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
         Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
         IF ActObj['value']['ok'] <> True THEN
-            SET RowError TO $'''ステップ7（click Orders）で要素が見つかりません'''
+            SET RowError TO $'''ステップ6（click #menu-orders）で要素が見つかりません'''
         END
         IF RowError <> $'''''' THEN
             SET NgCount TO NgCount + 1
-            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%ShotPath%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+            Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+            Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+            SET ShotB64 TO ShotObj['value']
+            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.DoNothing
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             NEXT LOOP
         END
         WAIT 1
 
-        # ---------- ここまで来たら成功 ----------
+        # ここまで来たら成功
         SET PrevFailed TO False
         SET OkCount TO OkCount + 1
         File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,成功,,"%ShotPath%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
@@ -373,12 +548,17 @@ IF Halt = False THEN
 END
 
 # ================= 後片付け =================
+# セッションを張れなかったときは QuitUrl が無いので投げない。
+IF SessionOk THEN
 Web.InvokeWebService.InvokeWebService Url: QuitUrl Method: Web.Method.Delete Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> QuitResp StatusCode=> QuitStatus
-System.TerminateProcess.TerminateProcessByName ProcessName: $'''msedgedriver'''
-
+END
+System.TerminateProcess.TerminateProcessByName ProcessName: DriverProc
 IF Halt = False THEN
     Display.ShowMessageDialog.ShowMessage Title: $'''完了''' Message: $'''成功 %OkCount% / 失敗 %NgCount% / スキップ %SkipCount%（上限 %MaxItems% 件）  結果CSV: %ResultFile%''' Icon: Display.Icon.Information Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn
 END
 IF Halt THEN
-    Display.ShowMessageDialog.ShowMessage Title: $'''中止''' Message: $'''ログインまたは起点への移動に失敗したため、明細を1件も処理せず中止しました。''' Icon: Display.Icon.Warning Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn
+    DateTime.GetCurrentDateTime.Local DateTimeFormat: DateTime.DateTimeFormat.DateAndTime CurrentDateTime=> HaltDt
+    Text.ConvertDateTimeToText.FromCustomDateTime DateTime: HaltDt CustomFormat: $'''yyyy/MM/dd HH:mm:ss''' Result=> HaltStamp
+    File.WriteText File: LogFile TextToWrite: $'''[%HaltStamp%] 中止 %HaltReason%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+    Display.ShowMessageDialog.ShowMessage Title: $'''中止''' Message: $'''%HaltReason%のため、明細を1件も処理せず中止しました。詳細は pad_progress.log を確認してください。''' Icon: Display.Icon.Warning Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn
 END
