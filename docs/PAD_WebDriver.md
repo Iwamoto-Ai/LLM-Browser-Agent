@@ -10,11 +10,12 @@ PAD の「Web サービスの呼び出し」がまさにそれに当たる。
 
 企業環境では次のような制約が同時に成立することがある。この手法はそこを通り抜けるためのもの。
 
-- ブラウザー拡張機能のインストールが禁止されている
-- Python / Node.js などの開発ツールがインストールできない
-- PowerShell スクリプトの実行が禁止されている
-- Proxy Server を使用している環境
-- 一方で Power Automate Desktop 無料版 (PAD) と WebDriver は使える
+- ブラウザー拡張機能のインストールが禁止されている。
+- Python / Node.js などの開発ツールがインストールできない。
+- PowerShell スクリプトの実行が禁止されている。
+- Proxy Server を使用している環境。
+- 一方で Power Automate Desktop 無料版 (PAD) と WebDriver は使える。
+
 
 **実機（Power Automate Desktop 無料版 (PAD) / Windows 11 / Edge）で完走を確認済み。** 以下の記述は原則として実機で
 確認できた内容を明記している。
@@ -27,12 +28,14 @@ PAD の「Web サービスの呼び出し」がまさにそれに当たる。
 
 #### Power Automate Desktop 無料版 (PAD) 標準の録画機能との違い
 
-- 本ツールはブラウザ自動化ツールですので、ブラウザ自動化バッチ処理に特化し、 <br>
-　　バッチ運用フローの設定が自動で追加され、はまり回避対策をしたPADコード(Robin)に変換する設計になっている。 <br>
-　　ブラウザ操作録画部分はブラウザあれば DevTools を使ってできる。
-- フロー制御はPADを使うが、主なブラウザのコントロールやDOMベース要素インデックス方式はJavaScriptで作ったプログラムをRobinに埋め込んで行っている。
-- 直接WebDriverを操作するので拡張機能なしで使える。
-- Power Automate Desktop 無料版 (PAD)標準の録画機能は全般的な用途に使えるように操作をアクションとしてそのまま登録するだけになっている。
+本ツール
+- ブラウザ自動化ツールなので、ブラウザ自動化バッチ処理に特化し、バッチ運用フロー設定を自動追加し、はまり回避対策をしたPADコード(Robin)に変換する設計。
+- DevTools Recorder機能があるブラウザさえあれば操作録画できる。
+- 全体のフロー制御はPADを使うが、主なブラウザのコントロールやDOMベース要素インデックス方式はJavaScriptで作ったプログラムをRobinに埋め込み実現。
+- 直接WebDriverを操作するのでブラウザ拡張機能なしで使える。
+
+Power Automate Desktop 無料版 (PAD)
+- PAD標準の操作録画機能は全般的な用途に使えるように操作をアクションとしてそのまま登録するだけになっている。
 
 
 
@@ -127,7 +130,7 @@ WAIT 3
 自動にするため **Selenium Manager**（Selenium 公式の単体実行ファイルで、Python も Node.js も要らない）
 を使用し、インストール済みブラウザーに対応するバージョンのWebDriverを自動で取得し更新する。
 
--⚠️ `selenium-manager-windows.exe` をダウンロードし実行環境の `BaseDir`（例 `C:\temp`）に置いおく必要があります。 <br>
+-⚠️`selenium-manager-windows.exe` をダウンロードし実行環境の `BaseDir`（例 `C:\temp`）に置いおく必要があります。 <br>
 　　入手先: <https://github.com/SeleniumHQ/selenium_manager_artifacts/releases>
 
 ```
@@ -163,7 +166,7 @@ IF Browser = $'''chrome''' THEN
 END
 ```
 
-対象サイトがブラウザー判定で表示を変える場合や、片方で不具合が出たときの逃げ道としても使える。
+💡対象サイトがブラウザー判定で表示を変える場合や、片方で不具合が出たときの逃げ道としても使える。
 生成時に決めておくなら `--pad-browser chrome` を付ける。
 
 生成器に `--auto-driver` を付けると、次の行が入る（`AutoDriver` を `False` にすれば無効化できる）。
@@ -695,7 +698,7 @@ SET ShotDir TO $'''%BaseDir%'''
 
 ### 手順 ⑦：試走から本番へ
 
-**⚠️ いきなり全件流さない。** 生成時の既定は `MaxItems = 1` になっている。
+**⚠️いきなり全件流さない。** 生成時の既定は `MaxItems = 1` になっている。
 
 | 回 | 設定 | 確認すること |
 | --- | --- | --- |
