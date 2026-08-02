@@ -21,6 +21,22 @@ PAD の「Web サービスの呼び出し」がまさにそれに当たる。
 
 すぐ動かせるサンプルは [`examples/pad/`](../examples/pad/) にある。
 
+
+
+---
+
+#### Power Automate Desktop 無料版 (PAD) 標準の録画機能との違い
+
+- 本ツールはブラウザ自動化ツールですので、ブラウザ自動化バッチ処理に特化し、 <br>
+　　バッチ運用フローの設定が自動で追加され、はまり回避対策をしたPADコード(Robin)に変換する設計になっている。 <br>
+　　ブラウザ操作録画部分はブラウザあれば DevTools を使ってできる。
+- フロー制御はPADを使うが、主なブラウザのコントロールやDOMベース要素インデックス方式はJavaScriptで作ったプログラムをRobinに埋め込んで行っている。
+- 直接WebDriverを操作するので拡張機能なしで使える。
+- Power Automate Desktop 無料版 (PAD)標準の録画機能は全般的な用途に使えるように操作をアクションとしてそのまま登録するだけになっている。
+
+
+
+
 ---
 
 ## 🧭 全体像
@@ -70,13 +86,14 @@ Python 版との対応:
 
 ## 🛠️ 事前準備
 
-1. **💡本ツールは自動でブラウザのバージョンをチェックして、同じバージョンの WebDriver を自動取得し入れ替える機能があります。（後述）**　　
+1. **💡本ツールは自動でブラウザのバージョンをチェックして、同じバージョンの WebDriver を自動取得し入れ替える機能がある。（後述）**　　
 
 　　もし、WebDriverを自動取得できない環境の場合は手動でダウンロードする。 <br>
 　　[Microsoft Edge を自動操作する場合の WebDriver](https://developer.microsoft.com/ja-jp/microsoft-edge/tools/webdriver?form=MA13LH&cs=3787589721) から **msedgedriver.exe** をダウンロードする。　<br>
 　　[Google Chrome を自動操作する場合の webDriver](https://developer.chrome.com/docs/chromedriver?hl=ja) から **chromedriver.exe** をダウンロードする。 <br>
 
- 　**⚠️ブラウザのバージョンとWebDriverは必ず一致させる必要がある。**　ブラウザのバージョンが更新されたら同じバージョンに入れ替える。　<br>
+ 　　**⚠️ブラウザのバージョンとWebDriverのバージョンは一致させる必要がある。** <br>
+ 　　ブラウザのバージョンが更新されたら同じバージョンに入れ替える。　<br>
 
 　　msedgedriver.exe と chromedriver.exe は技術的にはどちらもChromiumエンジンを基にしているため、 <br>
 　　コードの書き方やAPI（操作コマンド）、DevTools は、ほぼ共通で対象ブラウザが Edge か Chrome かの違い。　<br>
@@ -102,16 +119,16 @@ WAIT 3
 
 ---
 
-## 🔄 自動 WebDriver 取得更新機能
+## 🔄 自動 WebDriver 取得更新機能　(`selenium-manager-windows.exe` 必要)
 
-**Edge は自動更新される。** そのたびに `msedgedriver.exe` を同じバージョンに入れ替えないと
+**Edge と Chromeブラウザ は自動更新される。** そのたびに `msedgedriver.exe` を同じバージョンに入れ替えないと
 `session not created` で止まる。　これを手作業で追いかけるのは現実的でない。
 
-**Selenium Manager**（Selenium 公式の単体実行ファイルで、Python も Node.js も要らない）
-を使用し、インストール済みブラウザーを検出し、対応するドライバーを取得し更新する。
+自動にするため **Selenium Manager**（Selenium 公式の単体実行ファイルで、Python も Node.js も要らない）
+を使用し、インストール済みブラウザーに対応するバージョンのWebDriverを自動で取得し更新する。
 
-- 入手先: <https://github.com/SeleniumHQ/selenium_manager_artifacts/releases>
-- `selenium-manager-windows.exe` を実行環境の `BaseDir`（例 `C:\temp`）に置く
+-⚠️ `selenium-manager-windows.exe` をダウンロードし実行環境の `BaseDir`（例 `C:\temp`）に置いおく必要があります。 <br>
+　　入手先: <https://github.com/SeleniumHQ/selenium_manager_artifacts/releases>
 
 ```
 selenium-manager-windows.exe --browser edge --browser-version stable --output json
@@ -129,8 +146,8 @@ selenium-manager-windows.exe --browser edge --browser-version stable --output js
 }
 ```
 
-**置き場所がバージョン番号を含むフォルダになる**点に注意。固定パスを `DriverExe` に書くと
-更新のたびに壊れるので、この `result.driver_path` をフローが読み取って使う。
+⚠️**置き場所がバージョン番号を含むフォルダになる**点に注意。固定パスを `DriverExe` に書くと
+更新のたびに壊れるので、この  `result.driver_path` をフローが読み取って使う。
 
 **Chrome でも同じ仕組みが使える。** 生成物の冒頭にある `Browser` を `chrome` に変えるだけで、
 WebDriver へ渡すブラウザー名（`MicrosoftEdge` → `chrome`）、終了させるプロセス名
@@ -146,7 +163,7 @@ IF Browser = $'''chrome''' THEN
 END
 ```
 
-対象サイトがブラウザー判定で表示を変える場合や、片方で不具合が出たときの逃げ道になる。
+対象サイトがブラウザー判定で表示を変える場合や、片方で不具合が出たときの逃げ道としても使える。
 生成時に決めておくなら `--pad-browser chrome` を付ける。
 
 生成器に `--auto-driver` を付けると、次の行が入る（`AutoDriver` を `False` にすれば無効化できる）。
@@ -356,7 +373,7 @@ File: $'''ShotPath'''     ← 誤り（"ShotPath" という文字列になる）
 ---
 
 ## 📜 共通 JavaScript（変数 `%JsAct%` に入れておく）
-pythonで作ったコア部分、DOMベース要素インデックスモジュールをJavaScriptで作り直したプログラムを埋め込むことで実現している。
+Pythonで作ったコア部分、DOMベース要素インデックスモジュールをJavaScriptで作り直したプログラムをRobinに埋め込むことで実現している。
 
 ```javascript
 var cands = arguments[0], action = arguments[1], value = arguments[2];
@@ -434,9 +451,13 @@ END
 > 対象の画面がヒット時だけ行を生成する作りなら問題ないが、`hidden` クラスで隠すだけの作りなら
 > `find()` に可視判定を足すか、`exists` で件数表示を確認する。
 
+
+
+
+
 ---
 
-## 🤖 録画JSONファイルをPADコード(Robin)へ pad_webdriver_ref.py で変換（推奨）
+## 🤖 録画JSONファイルをPADコード(Robin)へ pad_webdriver_ref.py で変換
 
 PAD のフローは内部的に **Robin 言語**で表現されており、フローデザイナーのキャンバスに
 **Robin のテキストを貼り付ける（Ctrl+V）とアクションが並ぶ**。この性質を使い、
@@ -448,20 +469,22 @@ PAD のフローは内部的に **Robin 言語**で表現されており、フ�
 `SET` の右辺の `%` 誤用のような、貼り付けが黙って無視される類のミスを踏まなくなる。
 
 
+
+
 ### 🗺️ 全体の流れ
 
 ```
 ┌───────────────────────────────────────────────────────────┐
-│ 業務環境　操作録画環境（ブラウザの DevTools 使用） 　　　　　　　│
+│ 業務環境　操作録画環境（ブラウザの DevTools 使用） 　　　　　　│
 │                                                           │
-│  ① ブラウザ DevTools の Recorder で業務操作を録画            │
+│  ① ブラウザ DevTools の Recorder で業務操作を録画           │
 │           │  「JSON file」形式でエクスポート                │
 │           ▼                                               │
 │  ② recordings/<name>.json                                 │
 │           │  setup / loop / recover / teardown に分割      │
 │           │  値を {{列名}} / {{SECRET:…}} に置き換え        │
 │           ▼                                               │
-│  ③ バッチ定義 JSON                                         │
+│  ③ バッチ定義 JSON 編集                                    │
 │           │                                               │
 └───────────▼───────────────────────────────────────────────┘
             │  
@@ -480,21 +503,21 @@ PAD のフローは内部的に **Robin 言語**で表現されており、フ�
             │  
             │  生成したPADコード(Robin) を業務環境へ渡す
             │  
-┌───────────▼─────────────────────────────────────────────────┐
-│ 業務環境（PAD と WebDriver だけ使える PC。 Python は不要）     │
-│                                                             │
-│  ⑤ C:\temp に置く                                            │
-│       msedgedriver.exe ／ 明細CSV ／ pad_flow.jsact.js       │
-│           ▼                                                 │
-│  ⑥ PAD で新規フロー → キャンバスに Ctrl+V                     │
-│           ▼                                                 │
-│  ⑦ MaxItems = 1 で試走 → 目で確認 → データ件数に増やし本番実行 │
-│           ▼                                                 │
-│  ⑧ C:\temp に出力                                           │
-│       <ID>__<業務キー>__日時.png（エビデンス）                │
-│       pad_result.csv（結果・再実行の入力にもなる）            │
-│       pad_progress.log（進捗）                              │
-└────────────────────────────────────────────────────────────┘
+┌───────────▼───────────────────────────────────────────────────────────────────────────┐
+│ 業務環境（PAD と WebDriver だけ使える PC。 Python は不要）                               │
+│                                                                                       │
+│  ⑤ C:\temp に置く                                                                      │
+│       msedgedriver.exe と selenium-manager-windows.exe ／ 明細CSV ／ pad_flow.jsact.js │
+│           ▼                                                                           │
+│  ⑥ PAD で新規フロー → キャンバスに Ctrl+V                                               │
+│           ▼                                                                           │
+│  ⑦ MaxItems = 1 で試走 → 目で確認 → データ件数に増やし本番実行                            │
+│           ▼                                                                           │
+│  ⑧ C:\temp に出力                                                                     │
+│       <ID>__<業務キー>__日時.png（エビデンス）                                          │
+│       pad_result.csv（結果・再実行の入力にもなる）                                      │
+│       pad_progress.log（進捗）                                                        │
+└──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **実行環境に Python が無くてもよい**のがこの方式の要点。変換だけを Python が使える PC で行い、
@@ -545,12 +568,14 @@ Python を要求する部分で、ここは対象システムに触らない。
 > 必ず置き換えること。
 
 
+
+
 ---
 
-### 手順 ④：Robin コードを生成する
+### 手順 ④：PADコード(Robin)を生成する (pad_webdriver_ref.py)
 
 ```
-# Python が使える環境で変換する（ブラウザも WebDriver も不要）
+# Python が使えるPCで変換する（ブラウザも WebDriver も不要）
 python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
     --details "C:\temp\edi2_batch.csv" --id-column "プロジェクト番号" `
     --robin output/pad_flow.robin.txt `
@@ -587,15 +612,6 @@ SET ShotDir TO $'''%BaseDir%'''
 ```
 
 配下でないパスを渡した場合は絶対パスのまま出力されるので、環境ごとに 3 行を直すことになる。
-
-
-
-#### PAD標準の録画機能との違い
-
-本ツールはブラウザ自動化ツールですので、ブラウザ自動化バッチ処理に特化し拡張機能なしで使え、バッチ運用フローや、はまり回避対策を追加したPADコード(Robin)に変換する設計になっています。
-ブラウザ操作録画部分はブラウザがあれば DevTools を使ってできます。
-
-PAD標準の録画機能は全般的な用途に使えるように操作をアクションとしてそのまま登録するだけになっている。
 
 
 
@@ -657,11 +673,11 @@ PAD標準の録画機能は全般的な用途に使えるように操作をア�
 
 ---
 
-### 手順 ⑥：PAD に貼り付ける
+### 手順 ⑥：Power Automate Desktop 無料版(PAD) に貼り付ける
 
-1. PAD で新しいデスクトップフローを作る（**Power Fx は有効にしない**）
+1. PAD で新しいデスクトップフローを作る（⚠️**Power Fx は有効にしない**）
 2. `pad_flow.robin.txt` をテキストエディタで開き、**全選択してコピー**
-3. フローデザイナーのキャンバスをクリックして **Ctrl+V**
+3. フローデザイナーのキャンバスをクリックしてから **Ctrl+V** で貼り付ける
 
 **アクションが並べば成功。** 何も起きない、または一部しか並ばない場合は、
 「Robin リテラルのエスケープ」の節の切り分け手順を使う。要点は 2 つ。
@@ -679,7 +695,7 @@ PAD標準の録画機能は全般的な用途に使えるように操作をア�
 
 ### 手順 ⑦：試走から本番へ
 
-**いきなり全件流さない。** 生成時の既定は `MaxItems = 1` になっている。
+**⚠️ いきなり全件流さない。** 生成時の既定は `MaxItems = 1` になっている。
 
 | 回 | 設定 | 確認すること |
 | --- | --- | --- |
@@ -750,12 +766,12 @@ recover … 失敗した件のあと、次の件の前に起点へ戻す
 2. `%JsAct%` を用意（継ぎ足しまたはファイル読み込み）
 3. ① セッション開始 → `%SessionId%` と各 URL を組み立て
 4. ② ウィンドウサイズ、③ 対象ページを開く
-5. **ログイン**（→ 次節）
+5. **手動ログイン**（→ 次節）
 6. **ループの起点へ移動**（ループ不変条件をそろえるための一手）
 
 ### 2. セットアップ失敗を検知して止める ★重要
 
-ログインや起点への移動に失敗したまま明細ループに入ると、**全件が「ステップ 1 で要素が
+手動ログインや起点への移動に失敗したまま明細ループに入ると、**全件が「ステップ 1 で要素が
 見つかりません」という偽の失敗になる。** 本当の原因が結果 CSV から読み取れなくなり、
 再実行時に「本当に未処理か」を 1 件ずつ確認する手間が発生する。
 
@@ -843,7 +859,7 @@ END
 ### 推奨：手動ログイン
 
 **Key Vault 連携の資格情報機能はプレミアム機能である。** 無料版で最も安全なのは、フローが
-ブラウザーを開いたところで一旦止め、**人が手でログインする**方式。
+ブラウザーを開いたところで一旦止め、**人が手でログインする 手動ログイン方式。**
 
 ```
 Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' Message: $'''いま開いたブラウザーでログインし、繰り返しの起点画面まで進んでから[OK]を押してください。ブラウザーは閉じないでください。''' Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn
@@ -859,14 +875,14 @@ END
 
 **手動ログイン方式は PAD がパスワードを一度も受け取らない安全設計。** 変数ペイン・実行ログ・エラーメッセージのどこにも
 残りようがない。パスワードを扱うコードがフローに存在しないこと自体が、運用上の安全になる。
-有人実行で 10 件程度ならこれで足りる。
+数十件程度ならこれで足りる。
 
 > WebDriver は**自分が起動したブラウザーしか操作できない。** 別に開いてある普段のブラウザーで
 > ログインしても、フローはそのタブを見られない。
 
 ### 後で自動ログインに設計変更したくなった時の注意点
 
-やむを得ず自動化する場合は、
+やむを得ず自動化を考える場合は・・・
 
 - フローに直書きしない（`SET Pw TO $'''abc123'''` は作らない）
 - 入力ダイアログの［入力の種類］を「パスワード」にする
@@ -1153,7 +1169,7 @@ END
 ## 📄 手順書の自動生成（Pythonが使える環境で使う）
 
 変換環境（Python が使える PC）向けに、**PAD が送るのと同じ HTTP 呼び出しを同じ順序で送る参照実装**を用意している。
-実際に練習サイトへ流して成功を確認しつつ、その呼び出し列を Markdown の表として書き出せる。
+実際に練習サイトへ流して成功を確認しつつ、その呼び出し列を**Markdown の表として書き出せるので、資料作成に使える。**
 
 ```
 # 別ターミナルで: msedgedriver.exe --port=9515
