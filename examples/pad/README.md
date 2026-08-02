@@ -10,6 +10,19 @@
 | `pad_sample.robin.txt` | PAD に貼り付けるフロー（生成物・手で直さない） |
 | `pad_sample.jsact.js` | 共通 JavaScript。`%JsAct%` の継ぎ足しが失敗したとき手で貼る用 |
 
+## 改行コード
+
+`examples/pad/` の配布物は `.gitattributes` で **CRLF に固定**してある。PAD も
+`File.ReadFromCSVFile.ReadCSV` も Windows 向けで、LF のまま渡すと取り込みに失敗する
+ことがあるため。ZIP ダウンロードやコピー＆ペーストで持ってきた場合は、`sample_batch.csv`
+の改行が CRLF になっているか確認する。
+
+```powershell
+$p = "C:\temp\sample_batch.csv"
+$t = [IO.File]::ReadAllText($p) -replace "`r`n", "`n" -replace "`n", "`r`n"
+[IO.File]::WriteAllText($p, $t, (New-Object Text.UTF8Encoding $false))
+```
+
 ## 実行の準備
 
 1. `sample.html` / `sample_batch.csv` / `pad_sample.jsact.js` を `C:\temp\` にコピー
@@ -43,10 +56,15 @@
 ```
 python pad_webdriver_ref.py \
   --batch examples/pad/pad_sample_batch.json \
-  --details examples/pad/sample_batch.csv --id-column ID \
+  --details "C:\temp\sample_batch.csv" --id-column ID \
   --robin examples/pad/pad_sample.robin.txt \
   --driver-exe "C:\temp\msedgedriver.exe" \
   --pad-out-dir "C:\temp" --pad-browser edge --auto-driver
 ```
+
+**`--details` は実行環境（PAD を動かす PC）のパスを渡すこと。** ここに変換環境の
+リポジトリ相対パスを書くと、生成物に `SET DetailsFile TO $'''examples/pad/sample_batch.csv'''`
+がそのまま埋め込まれ、実行時に「CSVファイルから読み取る」で失敗する。
+`--batch` と `--robin` は変換環境のパス。
 
 詳しい解説は [`../../docs/PAD_WebDriver.md`](../../docs/PAD_WebDriver.md)。

@@ -1374,6 +1374,29 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     return os.path.abspath(path)
 
 
+def _warn_exec_paths(args) -> None:
+    """実行環境のパスを渡すべき引数に、変換環境のパスが来ていないか警告する。
+
+    --details / --driver-exe / --pad-out-dir は生成物に文字列として埋め込まれ、
+    PAD を動かす PC 側で解決される。ここにリポジトリ相対のパスを渡すと生成は
+    成功してしまい、実行時に「CSVファイルから読み取る」などが失敗する。
+    生成時点で気づけるように、Windows の絶対パスに見えないものを指摘する。"""
+    def looks_windows_abs(s: str) -> bool:
+        return len(s) > 2 and s[1] == ":" and s[2] in "\\/" or s.startswith("\\\\")
+
+    checks = [("--details", args.details),
+              ("--driver-exe", args.driver_exe),
+              ("--pad-out-dir", args.pad_out_dir)]
+    bad = [(name, val) for name, val in checks if val and not looks_windows_abs(val)]
+    if not bad:
+        return
+    print("  ⚠ 実行環境（PAD を動かす PC）のパスに見えない引数があります。")
+    print("    生成物にそのまま埋め込まれるため、実行時に読み取りが失敗します。")
+    for name, val in bad:
+        print(f"      {name} = {val}")
+    print('    例: --details "C:\\temp\\sample_batch.csv"')
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         description="PAD 版バッチの参照実装（WebDriver を HTTP 直叩き・拡張機能不要）")
@@ -1428,6 +1451,7 @@ def main() -> None:
             else os.path.splitext(out)[0] + ".jsact.js"
         print(f"📄 PAD 用 Robin コード: {out}")
         print(f"📄 共通 JavaScript   : {js_out}")
+        _warn_exec_paths(args)
         print(f"   → .js は PAD 実行 PC の {args.pad_out_dir} に置くこと")
         if not args.trace:
             return

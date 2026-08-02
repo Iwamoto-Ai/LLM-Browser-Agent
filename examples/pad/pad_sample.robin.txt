@@ -60,7 +60,7 @@ IF Browser = $'''chrome''' THEN
     SET DriverExe TO ChromeDriverExe
 END
 SET DriverUrl TO $'''http://127.0.0.1:9515'''
-SET DetailsFile TO $'''examples/pad/sample_batch.csv'''
+SET DetailsFile TO $'''%BaseDir%\\sample_batch.csv'''
 SET ResultFile TO $'''%BaseDir%\\pad_result.csv'''
 SET LogFile TO $'''%BaseDir%\\pad_progress.log'''
 SET ShotDir TO $'''%BaseDir%'''
