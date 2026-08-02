@@ -169,7 +169,15 @@ END
 💡対象サイトがブラウザー判定で表示を変える場合や、片方で不具合が出たときの逃げ道としても使える。
 生成時に決めておくなら `--pad-browser chrome` を付ける。
 
-生成器に `--auto-driver` を付けると、次の行が入る（`AutoDriver` を `False` にすれば無効化できる）。
+生成器に `--auto-driver` を付けると次の仕組みが入る。**スイッチは冒頭の設定にまとめてあり、
+実際に取得を走らせる処理だけがドライバー起動の直前に置かれる。**
+
+```
+# --- ドライバーの入手方法 ---（冒頭の設定）
+SET AutoDriver TO True
+SET SmExe TO $'''selenium-manager-windows.exe'''
+```
+
 
 ```
 SET AutoDriver TO True
@@ -193,6 +201,80 @@ END
   `UseProxy` が `True` のときだけ自動で付く。
 - 初回はダウンロードが走るので `Timeout` は長め（300 秒）にしておく。2 回目以降はキャッシュから返る。
 - `ELSE` を使わず `IF code = 0` と `IF code <> 0` の 2 つに分けている（未検証の構文を避けるため）。
+- 取得に失敗したときは `Halt` を立てて**ドライバー起動そのものに入らない**。ここで止めないと、
+  更新前の古い固定パスで起動してしまい、症状が「セッション作成の失敗」に化けて原因が読めなくなる。
+
+### ドライバーとブラウザーの照合を目に見える形にする
+
+`AutoDriver` は「合っているはず」を前提にしていて、実際に何が起動したのかは出てこなかった。
+セッションを張った直後に、応答の `capabilities` から**実際に動いているもの**を取り出して
+ログとダイアログに出す。
+
+```
+SET BrowserVer TO SessionObj['value']['capabilities']['browserVersion']
+SET DriverVer TO $'''(不明)'''
+IF Browser = $'''chrome''' THEN
+    SET DriverVer TO SessionObj['value']['capabilities']['chrome']['chromedriverVersion']
+END
+IF Browser = $'''edge''' THEN
+    SET DriverVer TO SessionObj['value']['capabilities']['msedge']['msedgedriverVersion']
+END
+```
+
+出力はこの 1 行。`ShowDriverInfo` を `False` にするとダイアログは出ないが、ログには必ず残る。
+
+```
+[ドライバー] ブラウザー=chrome 151.0.7922.72 / WebDriver=chromedriver 151.0.7922.72 (…) /
+メジャー判定=一致 / 取得方法=Selenium Manager（ブラウザーのバージョンに合わせて自動取得）/ パス=…
+```
+
+- **比較するのはメジャーバージョンだけ。** Chrome とドライバーはビルド番号まで一致するとは
+  限らない（ブラウザー 115.0.5790.110 に対しドライバー 115.0.5790.102 など）。完全一致で
+  判定すると、正常な組み合わせを不一致と報告してしまう。
+- **メジャーの取り出しはページ側の JavaScript にやらせている。** PAD のテキスト分割アクションを
+  増やさずに済み、貼り付け時に黙って落ちる行を作らない。`/session/…/execute/sync` は
+  すでに使っている呼び出しなので、新しい仕組みは何も増えない。
+- `取得方法` は `AutoDriver` の結果で切り替わる。自動取得なら「ブラウザーのバージョンに
+  合わせて自動取得」、`False` なら「固定パス（ブラウザー更新時は手動で入れ替え）」と出る。
+  **ブラウザーだけ更新されて止まったときに、どちらの経路で動いていたかが後から分かる。**
+
+### 起動したブラウザーが要求どおりか確かめる ★重要
+
+**ドライバーは `browserName` の不一致を拒否する。** chromedriver に `MicrosoftEdge` を、
+msedgedriver に `chrome` を渡すと、どちらも `session not created: No matching capabilities
+found` を返した（実機確認）。ただし**バージョンの不一致は拒否しない** — msedgedriver 150 で
+Edge 151 のセッションは作れた。
+
+危ないのはフロー側の食い違いのほうである。`Browser` は capabilities のどのキーを読むかを
+決め、`BrowserName` は WebDriver へ送る値で、片方だけ書き換えると**セッションは正常に
+張れるのに版の取得だけが空振りする**。実機ではこれで「プロパティがありません」という、
+原因とは無関係な行で止まった。応答の `browserName` を見て、`BrowserName` と違えば
+そこで止める。
+
+```
+SET RealBrowser TO SessionObj['value']['capabilities']['browserName']
+IF RealBrowser <> BrowserName THEN
+    SET Halt TO True
+    SET HaltReason TO $'''要求したブラウザー(%BrowserName%)と実際に起動したブラウザー(%RealBrowser%)が違います。ドライバーの取り違えです'''
+END
+```
+
+**この判定を version の取得より前に置くこと。** `capabilities` の中でドライバーの版が入る
+キーはブラウザーごとに違う（Chrome は `chrome.chromedriverVersion`、Edge は
+`msedge.msedgedriverVersion`）ため、取り違えたまま先に進むと、こちらが想定したキーが
+存在せず「プロパティがありません」で落ちる。原因（取り違え）とは無関係な行で止まるので、
+切り分けが遠回りになる。
+
+### 中止した理由を記録する
+
+`Halt` は「ドライバー取得の失敗」「手動ログインのキャンセル」「起点画面に着けない」
+「セットアップ中のエラー」のどれでも立つ。理由を持たせないと、最後のダイアログが常に
+同じ文面になり、実際の原因と食い違う。`HaltReason` を必ずセットし、ダイアログと
+ログの両方に出す。
+
+```
+[2026/08/02 16:20:11] 中止 繰り返しの起点画面に到達できませんでした
+```
 
 
 
@@ -718,10 +800,14 @@ SET ShotDir TO $'''%BaseDir%'''
 | `<ID>__<業務キー>__yyyyMMdd_HHmmss.png` | 成功時のエビデンス |
 | `fail__<ID>__<業務キー>__yyyyMMdd_HHmmss.png` | 失敗時の画面 |
 | `pad_result.csv` | ID・業務キー・結果・理由・エビデンス・実行日時 |
-| `pad_progress.log` | 実行開始の区切り行と 1 件ごとの開始・成功・失敗 |
+| `pad_progress.log` | 実行開始の区切り行、ドライバー確認の 1 行、1 件ごとの開始・成功・失敗、中止理由 |
 
-`pad_result.csv` は**そのまま明細として読み直せる列構成**にしてある。失敗分だけ流し直すには
-`RetryMode` を `True` にするだけ。
+`pad_result.csv` は**そのまま明細として読み直せる列構成**にしてある。失敗分と、件数上限で
+打ち切った未実行分を流し直すには `RetryMode` を `True` にするだけ。
+
+進捗ログは**中止したときも必ず 1 行以上残る**。実行開始のヘッダーはドライバーを触る前に
+書いており、中止時は理由も書く。ログ書き込みをループの中だけに置くと、起点画面に着けずに
+中止したとき「ログを確認してください」と案内しながらログが空、という状態になる。
 
 > **⚠️ 登録系の再実行は二重登録に注意。** 再実行の前に `fail__` の画像で実際の画面を
 > 確認すること。
@@ -1049,11 +1135,22 @@ END
 
 ```
 IF RetryMode THEN
-    IF Row['結果'] <> $'''失敗''' THEN
+    SET DoRow TO False
+    IF Row['結果'] = $'''失敗''' THEN
+        SET DoRow TO True
+    END
+    IF Row['結果'] = $'''未実行''' THEN
+        SET DoRow TO True
+    END
+    IF DoRow = False THEN
         NEXT LOOP
     END
 END
 ```
+
+**対象は「失敗」だけでなく「未実行」も含める。** `MaxItems` で打ち切った行は「未実行」で
+記録されるため、失敗だけを拾う条件にすると、上限を小刻みにして回す運用で続きが流せない。
+`AND` を使わず IF を並べているのは、複合条件の書式が実機で未検証のため。
 
 **出力先は必ず別名にする。** 同じファイルを読みながら書くと壊れる。再実行 CSV には `skip` 列が
 無いので、`skip` の判定は `IF RetryMode = False THEN` で囲む。
@@ -1089,7 +1186,18 @@ END
 > 初版では CSV 読み込みを `File.ReadCsvFile.ReadCsvFile` と記載していたが、**これは誤り**。
 > 正しくは `File.ReadFromCSVFile.ReadCSV` である。
 
+**`IF StatusCode <> 200 THEN`** … `Web.InvokeWebService` の `StatusCode=>` は数値として
+比較できる（実機確認: `BrowserName` を存在しない値にしてセッション作成を失敗させ、
+`session not created: No matching capabilities found` を含む生の応答をダイアログに表示できた）。
+文字列リテラルとの比較にする必要はない。
+
 ### 🚫 無効だった引数・構文
+
+**`Display.Icon.Error`** … PAD の画面には「エラー」のアイコンがあるが、この綴りで書いた行は
+貼り付け時に黙って落ちた（2026/08/02、PAD 無料版 / Windows 11）。確認済みは
+`Information` / `Warning` / `Question` / `None`。**UI に選択肢があっても Robin の綴りが
+同じとは限らない。** 生成器の lint に既知の列挙値の表を持たせて、外れた値を警告するようにした。
+
 
 - `AfterCompletion`
 - `Encoding: Web.Encoding.Utf8`（`Web.InvokeWebService` にエンコード引数は無い）
@@ -1147,10 +1255,24 @@ END
 | --- | --- |
 | `sample.html` | ログイン → 検索 → 明細 → 確認 の 4 画面を持つデモページ（単一ファイル） |
 | `sample_batch.csv` | 明細（`ID,KEY,skip` の 3 列） |
-| `pad_sample.robin.txt` | PAD に貼り付けるフロー |
+| `pad_sample_batch.json` | バッチ定義（このファイルから Robin を生成する） |
+| `pad_sample.robin.txt` | PAD に貼り付けるフロー（生成物） |
+| `pad_sample.jsact.js` | 共通 JavaScript（`%JsAct%` の継ぎ足しが失敗したとき手で貼る用） |
 
-3 ファイルを `C:\temp\` に置き、`msedgedriver.exe` を同じ場所に用意してから
-`pad_sample.robin.txt` を PAD のキャンバスに貼り付けて実行する。
+`sample.html` / `sample_batch.csv` / `pad_sample.jsact.js` を `C:\temp\` に置き、
+`msedgedriver.exe`（と `--auto-driver` を使うなら `selenium-manager-windows.exe`）を
+同じ場所に用意してから、`pad_sample.robin.txt` を PAD のキャンバスに貼り付けて実行する。
+
+`pad_sample.robin.txt` は手で保守せず、生成器から作り直す。
+
+```
+python pad_webdriver_ref.py \
+  --batch examples/pad/pad_sample_batch.json \
+  --details examples/pad/sample_batch.csv --id-column ID \
+  --robin examples/pad/pad_sample.robin.txt \
+  --driver-exe "C:\temp\msedgedriver.exe" \
+  --pad-out-dir "C:\temp" --pad-browser edge --auto-driver
+```
 
 付属の `sample_batch.csv` は、**1 回の実行で成功・失敗・復帰・スキップの 4 経路すべてを通る**
 並びになっている。

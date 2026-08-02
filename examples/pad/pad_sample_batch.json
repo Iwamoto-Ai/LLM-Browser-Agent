@@ -1,0 +1,41 @@
+// ============================================================
+// PAD サンプル バッチ定義（examples/pad/sample.html 用）
+//  ・行の先頭が // または # の行はコメント（読み飛ばされる）
+//  ・{{列名}} は明細 CSV（sample_batch.csv）の列に置き換わる
+//  ・{{SECRET:...}} は資格情報の位置を示す目印。値は生成物に入らない
+//  ・このファイルから pad_sample.robin.txt を生成する:
+//      python pad_webdriver_ref.py \
+//        --batch examples/pad/pad_sample_batch.json \
+//        --details examples/pad/sample_batch.csv --id-column ID \
+//        --robin examples/pad/pad_sample.robin.txt \
+//        --driver-exe "C:\temp\msedgedriver.exe" \
+//        --pad-out-dir "C:\temp" --pad-browser edge --auto-driver
+// ============================================================
+{
+  "title": "PAD WebDriver サンプル — 検索→確認→ホームへ戻る",
+  "setup": [
+    {"type": "setViewport", "width": 1366, "height": 900},
+    {"type": "navigate", "url": "file:///C:/temp/sample.html"},
+    {"type": "change", "value": "{{SECRET:MY_USERNAME}}",
+     "selectors": [["#login-user"], ["aria/User"]]},
+    {"type": "change", "value": "{{SECRET:MY_PASSWORD}}",
+     "selectors": [["#login-pass"], ["aria/Password"]]},
+    {"type": "click", "selectors": [["#btn-signin"], ["aria/Sign in"]]},
+    {"type": "click", "selectors": [["#menu-orders"], ["aria/Orders"]]}
+  ],
+  "loop": [
+    {"type": "comment", "text": "注文 {{KEY}}（{{ID}}）の確認を開始"},
+    {"type": "change", "value": "{{KEY}}",
+     "selectors": [["#search-key"], ["aria/Order key"]]},
+    {"type": "click", "selectors": [["#btn-search"], ["aria/Search"]]},
+    {"type": "click", "selectors": [["aria/{{KEY}}"], ["#result-link"]]},
+    {"type": "click", "selectors": [["#btn-confirm"], ["aria/Confirm"], ["text/Confirm"]]},
+    {"type": "comment", "text": "確認済み画面をエビデンス保存"},
+    {"type": "click", "selectors": [["#home-link"], ["aria/Home"]]},
+    {"type": "click", "selectors": [["#menu-orders"], ["aria/Orders"]]}
+  ],
+  "recover": [
+    {"type": "click", "selectors": [["#home-link"], ["aria/Home"]]},
+    {"type": "click", "selectors": [["#menu-orders"], ["aria/Orders"]]}
+  ]
+}

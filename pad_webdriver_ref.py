@@ -608,7 +608,18 @@ def _lint_robin(lines: list, log=print) -> list:
       * `SET x TO %y%` — 変数を変数に代入するとき % で囲んではいけない
       * Web サービス呼び出しに EncodeRequestBody: False が無い
       * $'''…''' の中のエスケープされていない単引用符
+      * 実機で貼り付けを確認していない列挙値（Display.Icon.Error で貼り付けが落ちた）
     """
+    # 実機で貼り付けを確認済みの列挙値だけを許す。PAD は解釈できない値の行を
+    # 黙って捨てるため、UI に選択肢があっても Robin の綴りが同じとは限らない。
+    known_enums = {
+        "Display.Icon": {"None", "Information", "Warning", "Question"},
+        "Display.Buttons": {"OK", "OKCancel"},
+        "Display.DefaultButton": {"Button1", "Button2"},
+        "Web.Method": {"Get", "Post", "Delete"},
+        "File.IfFileExists": {"Append", "Overwrite"},
+        "File.IfExists": {"DoNothing"},
+    }
     warns = []
     for i, ln in enumerate(lines, 1):
         s = ln.strip()
@@ -628,6 +639,12 @@ def _lint_robin(lines: list, log=print) -> list:
                 f"変数の代入は `TO {m.group(1)}` と裸で書きます: {s}")
         if "InvokeWebService" in s and "EncodeRequestBody: False" not in s:
             warns.append(f"{i}行: EncodeRequestBody: False がありません（本文がURLエンコードされます）")
+        for ns, ok in known_enums.items():
+            for val in re.findall(re.escape(ns) + r"\.(\w+)", s):
+                if val not in ok:
+                    warns.append(
+                        f"{i}行: {ns}.{val} は実機で未確認の列挙値です。"
+                        f"確認済み: {'/'.join(sorted(ok))}")
         for lit in re.findall(r"\$'''(.*?)'''", s):
             body = lit.replace("\\'", "")
             if "'" in body:
@@ -636,6 +653,8 @@ def _lint_robin(lines: list, log=print) -> list:
         log(f"  ⚠ {w}")
     return warns
 
+
+Q_ = "'''"   # Robin のリテラル区切り
 
 def write_robin(batch: dict, details_path: str, id_col: str, path: str,
                 driver_exe: str = r"C:\temp\msedgedriver.exe",
@@ -676,10 +695,26 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             break
 
     A("# ============================================================")
-    A(f"# 自動生成: {batch.get('title', '')}")
-    A("# 貼り付け方: PAD のフローデザイナーでキャンバスをクリックし Ctrl+V")
-    A("# 前提: msedgedriver.exe（Edge と同じバージョン）／localhost をプロキシ除外")
-    A("# 解説: docs/PAD_WebDriver.md")
+    A("# 自動生成 PADコード(Robin)")
+    A("# ============================================================")
+    A("# 【メモ欄】自動で分かる範囲を初期値として入れてある。適宜書き換えて使う。")
+    _mtitle = _safe_comment(str(batch.get("title", "")).strip(), cols)
+    _mloop = len([s for s in loop_steps if s.get("type") != "comment"])
+    _mkeys = " ／ ".join(cols[1:]) if len(cols) > 1 else "なし"
+    A(f"# タイトル: {_mtitle}")
+    A(f"# 処理内容：明細 1 件につき {_mloop} 操作を繰り返す"
+      f"（ID列: {id_col} ／ 業務キー: {_mkeys}）")
+    if start_url:
+        A(f"#           開始URL: {start_url}")
+    # 変換環境が Linux/macOS でも Windows パスの末尾を取り出せるようにする
+    _mcsv = details_path.replace("\\", "/").rstrip("/").split("/")[-1]
+    A(f"#           明細CSV: {_mcsv}")
+    A(f"# 備考：{datetime.now():%Y/%m/%d} 生成 ／ ブラウザー={browser}"
+      f" ／ ドライバー自動取得={'有効' if auto_driver else '無効'}"
+      f" ／ プロキシ={proxy or '未使用'}")
+    A("# ============================================================")
+    A("# LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai")
+    A("# Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).")
     A("# ============================================================")
     A("")
     A("# --- 接続先：環境を切り替えるときはここを直す ---")
@@ -714,7 +749,29 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# --- フォルダ・ファイル：配布時に触るのはこの BaseDir だけにする ---")
     A(f"SET BaseDir TO {_robin_str(out_dir)}")
     A("# ※ BaseDir の末尾に \\ を付けないこと（%BaseDir%\\file.png が二重になる）")
-    A(f"SET DriverExe TO {_robin_under_base(driver_exe, out_dir)}")
+    A("")
+    A("# --- ドライバーの入手方法 ---")
+    A("# True  … Selenium Manager がブラウザーの版に合わせて自動取得する（推奨）。")
+    A("#         ブラウザーが更新されても入れ替えが要らない。取得先はバージョン番号を")
+    A("#         含むフォルダなので、固定パスでは書けない。")
+    A("#         selenium-manager-windows.exe は BaseDir に置くこと。取得元:")
+    A("#         https://github.com/SeleniumHQ/selenium_manager_artifacts/releases")
+    A("# False … 下の固定パスを使う。ブラウザー更新時は手動で入れ替える。")
+    A(f"SET AutoDriver TO {'True' if auto_driver else 'False'}")
+    A("SET SmExe TO $'''selenium-manager-windows.exe'''")
+    A("")
+    A("# AutoDriver = False のときに使う固定パス。Browser に追従させるため、")
+    A("# edge / chrome それぞれの既定を持ち、下の IF で切り替える。")
+    A("# BaseDir 以外に置く場合は、次の 2 行を直接書き換えること。")
+    _arg = _robin_under_base(driver_exe, out_dir)
+    _edge = _arg if browser == "edge" else "$" + Q_ + "%BaseDir%\\\\msedgedriver.exe" + Q_
+    _chrome = _arg if browser == "chrome" else "$" + Q_ + "%BaseDir%\\\\chromedriver.exe" + Q_
+    A(f"SET EdgeDriverExe TO {_edge}")
+    A(f"SET ChromeDriverExe TO {_chrome}")
+    A("SET DriverExe TO EdgeDriverExe")
+    A(f"IF Browser = {_robin_str('chrome')} THEN")
+    A("    SET DriverExe TO ChromeDriverExe")
+    A("END")
     A("SET DriverUrl TO $'''http://127.0.0.1:9515'''")
     A(f"SET DetailsFile TO {_robin_under_base(details_path, out_dir)}")
     A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''")
@@ -724,6 +781,9 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# --- 運用スイッチ ---")
     A("# まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす")
     A("SET MaxItems TO 1")
+    A("# 起動したブラウザーとドライバーの種類・バージョンをダイアログで出す")
+    A("# False にしてもログ（pad_progress.log）には必ず 1 行残る")
+    A("SET ShowDriverInfo TO True")
     A("# 失敗分だけを再実行するとき True（読み込み元と出力先が自動で切り替わる）")
     A("SET RetryMode TO False")
     if has_login:
@@ -743,18 +803,38 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# ※ 継ぎ足しがうまくいかない場合は、同時生成した pad_flow.jsact.js の中身を")
     A("#   「変数の設定」アクション（変数名 JsAct）の値の欄に手で貼り付けてもよい。")
     A("")
+    A("")
+    A("# --- バージョン比較用の JavaScript ---")
+    A("# ブラウザーとドライバーのメジャーバージョン（最初のドット手前）を取り出して比べる。")
+    A("# Chrome/Edge はビルド番号まで一致するとは限らず、合わせるのはメジャーだけでよい。")
+    A("# 文字列リテラルはバッククォートを使う（JSON にも Robin にもそのまま置ける）。")
+    _jsver = ("var b = String(arguments[0]).split(`.`)[0]; "
+              "var d = String(arguments[1]).split(`.`)[0]; "
+              "return { ok: true, bMajor: b, dMajor: d, match: (b === d) };")
+    A(f"SET JsVer TO {_robin_str(_jsver)}")
     A("# 途中で中止するかどうかの目印（ドライバー取得やログインの失敗で True になる）")
     A("SET Halt TO False")
+    A("# 中止した理由。最後のダイアログとログにそのまま出すので、")
+    A("# Halt を立てる箇所では必ずこれも設定すること。")
+    A(f"SET HaltReason TO {_robin_str('')}")
+    A("# セッションを張れたか。後片付けで DELETE を投げてよいかの判定に使う。")
+    A("SET SessionOk TO False")
     A("")
+    A("# --- 実行開始をログに残す ---")
+    A("# ここは中止しても必ず通る。ループの中だけで書くと、起点に着けずに")
+    A("# 中止したとき「ログを確認してください」と案内しながらログが空になる。")
+    _hdr = _robin_str("===== 実行開始 上限%MaxItems%件 RetryMode=%RetryMode% "
+                      "Browser=%Browser% =====")
+    A(f"File.WriteText File: LogFile TextToWrite: {_hdr} "
+      f"AppendNewLine: True IfFileExists: File.IfFileExists.Append")
+    A("")
+    A("# ドライバーをどう用意したか。ログとダイアログに出す。")
+    _fx = _robin_str("固定パス（AutoDriver=False のためブラウザー更新時は手動で入れ替え）")
+    A(f"SET DriverSrc TO {_fx}")
+    A(f"SET SmMsg TO {_robin_str('')}")
     A("# --- ドライバーの自動取得（Selenium Manager）---")
-    A("# Edge が更新されるとドライバーも同じ版に入れ替える必要がある。selenium-manager が")
-    A("# 適切な版を取得し、その置き場所を JSON で教えてくれるので、それを DriverExe に入れる。")
-    A("# 置き場所はバージョン番号を含むフォルダなので、固定パスで書くと更新のたびに壊れる。")
-    A("# selenium-manager-windows.exe は BaseDir に置くこと。取得元:")
-    A("#   https://github.com/SeleniumHQ/selenium_manager_artifacts/releases")
-    A("# 使わない場合は AutoDriver を False にし、DriverExe に固定パスを書く。")
-    A(f"SET AutoDriver TO {'True' if auto_driver else 'False'}")
-    A("SET SmExe TO $'''selenium-manager-windows.exe'''")
+    A("# 設定は冒頭の AutoDriver / SmExe。ここは取得を実行する部分で、")
+    A("# 取得できたらそのパスで DriverExe を上書きする。")
     A("IF AutoDriver THEN")
     A("    SET SmArgs TO $'''%SmExe% --browser %Browser% --browser-version stable "
       "--output json'''")
@@ -767,9 +847,14 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("    Variables.ConvertJsonToCustomObject Json: SmOutput CustomObject=> SmObj")
     A("    IF SmObj['result']['code'] = 0 THEN")
     A("        SET DriverExe TO SmObj['result']['driver_path']")
+    _sm = _robin_str("Selenium Manager（ブラウザーのバージョンに合わせて自動取得）")
+    A(f"        SET DriverSrc TO {_sm}")
+    A("        SET SmMsg TO SmObj['result']['message']")
     A("    END")
     A("    IF SmObj['result']['code'] <> 0 THEN")
     A("        SET Halt TO True")
+    A(f"        SET HaltReason TO "
+      f"{_robin_str('ドライバーの取得に失敗しました（Selenium Manager）')}")
     A("        Display.ShowMessageDialog.ShowMessage Title: $'''ドライバー取得に失敗''' "
       "Message: SmOutput Icon: Display.Icon.Information Buttons: Display.Buttons.OK "
       "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True "
@@ -777,6 +862,10 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("    END")
     A("END")
     A("")
+    A("# ここから先はドライバーが要る。取得に失敗していたら入らない。")
+    A("# 入ってしまうと更新前の古いドライバーで起動し、")
+    A("#「sessionId がありません」という無関係なエラーに化ける。")
+    A("IF Halt = False THEN")
     A("# --- 古いドライバーが残っていたら終了する ---")
     A("# 前回の実行が異常終了すると、ドライバーがポート 9515 を掴んだまま残り、")
     A("# 新しいドライバーが起動できない（古い方が応答してしまう）。")
@@ -808,9 +897,25 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# Display.ShowMessageDialog.ShowMessage Title: $\'\'\'WebDriver 応答\'\'\' "
       "Message: SessionResp Icon: Display.Icon.Information Buttons: Display.Buttons.OK "
       "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> BtnDbg")
+    A("# セッションが作れたかを応答コードで判定する。ここを見ないと、失敗応答")
+    A("#（value の中身が error/message に入れ替わる）をそのまま読みに行って")
+    A("#「sessionId がありません」という、原因の分からないエラーになる。")
+    A("IF SessionStatus <> 200 THEN")
+    A("    SET Halt TO True")
+    _sr = _robin_str("WebDriver のセッションを作成できませんでした"
+                     "（ブラウザーとドライバーの不一致など）")
+    A(f"    SET HaltReason TO {_sr}")
+    A(f"    Display.ShowMessageDialog.ShowMessage Title: {_robin_str('セッション作成に失敗')} "
+      "Message: SessionResp Icon: Display.Icon.Warning Buttons: Display.Buttons.OK "
+      "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> SessBtn")
+    A("END")
+    A("END")
+    A("")
+    A("IF Halt = False THEN")
     A("Variables.ConvertJsonToCustomObject Json: SessionResp CustomObject=> SessionObj")
     A("# カスタムオブジェクトはブラケット記法で参照する。ドット記法は使えない。")
     A("SET SessionId TO SessionObj['value']['sessionId']")
+    A("SET SessionOk TO True")
     A("# 以降で使い回す URL を組み立てておく（1 行を短く保つため）")
     A("SET ExecUrl TO $'''%DriverUrl%/session/%SessionId%/execute/sync'''")
     A("SET GoUrl TO $'''%DriverUrl%/session/%SessionId%/url'''")
@@ -818,9 +923,69 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("SET ShotUrl TO $'''%DriverUrl%/session/%SessionId%/screenshot'''")
     A("SET QuitUrl TO $'''%DriverUrl%/session/%SessionId%'''")
     A("")
+    A("# --- 起動したブラウザーとドライバーを確認する ---")
+    A("# 値はセッションの応答（capabilities）から取る。実際に動いているものが出る。")
+    A("SET BrowserVer TO SessionObj['value']['capabilities']['browserVersion']")
+    A("# 起動したのが要求どおりのブラウザーかを先に確かめる。ドライバーは取り違えても")
+    A("# セッションを張ってしまうことがあり、そのときは空白のウィンドウが出るだけで")
+    A("# 気づけない。ここで止めないと、続く capabilities の参照キーも食い違う。")
+    A("SET RealBrowser TO SessionObj['value']['capabilities']['browserName']")
+    A("IF RealBrowser <> BrowserName THEN")
+    A("    SET Halt TO True")
+    _bm = _robin_str("要求したブラウザー(%BrowserName%)と実際に起動したブラウザー"
+                     "(%RealBrowser%)が違います。ドライバーの取り違えです")
+    A(f"    SET HaltReason TO {_bm}")
+    A(f"    Display.ShowMessageDialog.ShowMessage Title: "
+      f"{_robin_str('ブラウザーの取り違え')} Message: HaltReason "
+      "Icon: Display.Icon.Warning Buttons: Display.Buttons.OK "
+      "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> MixBtn")
+    A("END")
+    A("")
+    A("IF Halt = False THEN")
+    A(f"SET DriverVer TO {_robin_str('(不明)')}")
+    A(f"IF Browser = {_robin_str('chrome')} THEN")
+    A("    SET DriverVer TO "
+      "SessionObj['value']['capabilities']['chrome']['chromedriverVersion']")
+    A("END")
+    A(f"IF Browser = {_robin_str('edge')} THEN")
+    A("    SET DriverVer TO "
+      "SessionObj['value']['capabilities']['msedge']['msedgedriverVersion']")
+    A("END")
+    A("# メジャーバージョンの比較はページ側の JavaScript にやらせる。")
+    A("# PAD のテキスト分割アクションを増やさずに済み、貼り付け事故の余地が減る。")
+    A("SET VerBody TO $'''{\"script\": \"%JsVer%\", "
+      "\"args\": [\"%BrowserVer%\", \"%DriverVer%\"]}'''")
+    A(_web("ExecUrl", "Post", "VerBody", "VerResp", "VerStatus"))
+    A("Variables.ConvertJsonToCustomObject Json: VerResp CustomObject=> VerObj")
+    A(f"SET VerJudge TO {_robin_str('不一致（ブラウザー更新の可能性あり）')}")
+    A("IF VerObj['value']['match'] = True THEN")
+    A(f"    SET VerJudge TO {_robin_str('一致')}")
+    A("END")
+    _di = _robin_str("ブラウザー=%Browser% %BrowserVer% / WebDriver=%DriverProc% "
+                     "%DriverVer% / メジャー判定=%VerJudge% / 取得方法=%DriverSrc% / "
+                     "パス=%DriverExe%")
+    A(f"SET DriverInfo TO {_di}")
+    A(f"File.WriteText File: LogFile "
+      f"TextToWrite: {_robin_str('[ドライバー] %DriverInfo%')} "
+      f"AppendNewLine: True IfFileExists: File.IfFileExists.Append")
+    A("# ダイアログにだけ補足を足す。ここはページを開く前なのでブラウザーは白紙で、")
+    A("# 初めて見た人が異常だと思いやすい。ログ側は 1 行を短く保つため足さない。")
+    _note = _robin_str("%DriverInfo%  ※この時点ではまだページを開いていません"
+                       "（白紙で正常）。OK を押すとページを開きます。")
+    A(f"SET DriverInfoMsg TO {_note}")
+    A("IF ShowDriverInfo THEN")
+    A(f"    Display.ShowMessageDialog.ShowMessage Title: {_robin_str('ドライバー確認')} "
+      "Message: DriverInfoMsg Icon: Display.Icon.Information Buttons: Display.Buttons.OK "
+      "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> DrvBtn")
+    A("END")
+    A("END")
+    A("")
 
+    A("END")
     # ---- setup ----
     A("# ================= セットアップ（最初に 1 回）=================")
+    A("# セッションが張れていなければ、以降の URL 変数が存在しないので入らない。")
+    A("IF Halt = False THEN")
     A("SET RowError TO $''''''")
     n = 0
     emitted_dialog = False
@@ -850,6 +1015,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
               "ButtonPressed=> LoginBtn")
             A("    IF LoginBtn = $'''Cancel''' THEN")
             A("        SET Halt TO True")
+            A(f"        SET HaltReason TO "
+              f"{_robin_str('手動ログインがキャンセルされました')}")
             A("    END")
             A("END")
             A("")
@@ -959,6 +1126,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
         A("Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj")
         A("IF ActObj['value']['ok'] <> True THEN")
         A("    SET Halt TO True")
+        A(f"    SET HaltReason TO "
+          f"{_robin_str('繰り返しの起点画面に到達できませんでした')}")
         A("    Display.ShowMessageDialog.ShowMessage Title: $'''起点画面ではありません''' "
           "Message: $'''繰り返しの起点画面が表示されていません。ブラウザーで起点画面まで"
           "進めてから、もう一度実行してください。''' "
@@ -973,6 +1142,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# 全件が「ステップ1で要素が見つかりません」という偽の失敗として記録される。")
     A("IF RowError <> $'''''' THEN")
     A("    SET Halt TO True")
+    A("    SET HaltReason TO RowError")
+    A("END")
     A("END")
     A("")
 
@@ -991,9 +1162,6 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"    File.WriteText File: ResultFile "
       f"TextToWrite: $'''{id_col},{key_head},結果,理由,エビデンス,実行日時''' "
       f"AppendNewLine: True IfFileExists: File.IfFileExists.Overwrite")
-    A("    File.WriteText File: LogFile "
-      "TextToWrite: $'''===== 実行開始 上限%MaxItems%件 RetryMode=%RetryMode% =====''' "
-      "AppendNewLine: True IfFileExists: File.IfFileExists.Append")
     A("    SET OkCount TO 0")
     A("    SET NgCount TO 0")
     A("    SET SkipCount TO 0")
@@ -1014,7 +1182,16 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("")
     A(f"{inner}# 再実行モードでは「失敗」行だけを対象にする")
     A(f"{inner}IF RetryMode THEN")
-    A(f"{inner}    IF Row['結果'] <> $'''失敗''' THEN")
+    A(f"{inner}    # 対象は「失敗」と「未実行」。未実行は件数上限で打ち切った行で、")
+    A(f"{inner}    # これを外すと上限を刻んで回したとき続きが流せない。")
+    A(f"{inner}    SET DoRow TO False")
+    A(f"{inner}    IF Row['結果'] = {_robin_str('失敗')} THEN")
+    A(f"{inner}        SET DoRow TO True")
+    A(f"{inner}    END")
+    A(f"{inner}    IF Row['結果'] = {_robin_str('未実行')} THEN")
+    A(f"{inner}        SET DoRow TO True")
+    A(f"{inner}    END")
+    A(f"{inner}    IF DoRow = False THEN")
     A(f"{inner}        NEXT LOOP")
     A(f"{inner}    END")
     A(f"{inner}END")
@@ -1149,7 +1326,10 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
         A("")
 
     A("# ================= 後片付け =================")
+    A("# セッションを張れなかったときは QuitUrl が無いので投げない。")
+    A("IF SessionOk THEN")
     A(_web("QuitUrl", "Delete", None, "QuitResp", "QuitStatus"))
+    A("END")
     A("System.TerminateProcess.TerminateProcessByName ProcessName: DriverProc")
     A("IF Halt = False THEN")
     A("    Display.ShowMessageDialog.ShowMessage Title: $'''完了''' "
@@ -1159,9 +1339,16 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
       "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn")
     A("END")
     A("IF Halt THEN")
+    A("    DateTime.GetCurrentDateTime.Local "
+      "DateTimeFormat: DateTime.DateTimeFormat.DateAndTime CurrentDateTime=> HaltDt")
+    A(f"    Text.ConvertDateTimeToText.FromCustomDateTime DateTime: HaltDt "
+      f"CustomFormat: {_robin_str('yyyy/MM/dd HH:mm:ss')} Result=> HaltStamp")
+    A(f"    File.WriteText File: LogFile "
+      f"TextToWrite: {_robin_str('[%HaltStamp%] 中止 %HaltReason%')} "
+      f"AppendNewLine: True IfFileExists: File.IfFileExists.Append")
     A("    Display.ShowMessageDialog.ShowMessage Title: $'''中止''' "
-      "Message: $'''起点画面に到達できなかったため、明細を1件も処理せず"
-      "中止しました。pad_progress.log を確認してください。''' "
+      "Message: $'''%HaltReason%のため、明細を1件も処理せず中止しました。"
+      "詳細は pad_progress.log を確認してください。''' "
       "Icon: Display.Icon.Warning Buttons: Display.Buttons.OK "
       "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn")
     A("END")

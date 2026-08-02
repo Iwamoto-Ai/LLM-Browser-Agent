@@ -654,6 +654,7 @@ Conversion environment (a PC with Python; no browser, no WebDriver needed)
                     ▼
 Execution environment (only WebDriver and PAD; no Python needed)
   4. Put in C:\temp: msedgedriver.exe / details CSV / pad_flow.jsact.js
+     (plus selenium-manager-windows.exe if you use --auto-driver)
   5. Create a new desktop flow in PAD (Power Fx disabled) → Ctrl+V on the canvas
   6. Trial run with MaxItems = 1 → inspect → raise to 10 for production
   7. Outputs in C:\temp: evidence PNGs / pad_result.csv / pad_progress.log
@@ -685,14 +686,15 @@ What you get is not the raw recorded steps but **a flow with the control structu
 | --- | --- |
 | Settings grouped at the top | Ordered **target URL → proxy → folders → operational switches**. Switching environments is a one-line change to `TargetUrl` |
 | Automatic driver setup | `--auto-driver` fetches the driver via Selenium Manager, so **no manual swap when the browser updates** (no Python or Node.js needed) |
+| Driver check display | Shows the **name and version of the browser and WebDriver that actually started**, whether their major versions match, and how the driver was obtained — in one line |
 | Browser switch | Flip `Browser` between `edge` and `chrome` in the generated flow; the browser name, process name and fetched driver all follow |
 | Manual login (default) | A human logs in by hand **and navigates to the loop start screen** before pressing OK. PAD never receives the password |
 | Proxy switch | `UseProxy` (True / False) toggles between a direct connection and the corporate proxy |
-| Setup failure detection | If login or navigation to the start screen fails, no detail rows are processed at all |
+| Setup failure detection | If login or navigation to the start screen fails, no detail rows are processed at all. **The reason for stopping** is shown in the dialog and written to the log |
 | Item limit / skip column | `MaxItems` for trial runs; rows with a value in `skip` are skipped; rows cut off are recorded as "not run" |
 | Recovery after failure | `recover` runs before the next item, so **one failure does not cascade to every row** |
 | Failure evidence | Saves `fail__<ID>__<key>__timestamp.png` |
-| Result CSV / progress log | The result CSV **can be read back as the details file**, so failures can be re-run directly |
+| Result CSV / progress log | The result CSV **can be read back as the details file**, so failed rows and rows cut off by the item limit can be re-run directly. The progress log **always keeps a line even when the run is aborted** |
 | Generation-time lint | Warns about unresolved placeholders, lines over 700 chars, misuse of `%` on the right side of `SET`, a missing `EncodeRequestBody: False`, and unescaped single quotes in literals |
 
 That last one matters. **PAD silently ignores lines it cannot parse**, so anything not caught at generation
