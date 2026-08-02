@@ -1268,7 +1268,7 @@ END
 ```
 python pad_webdriver_ref.py \
   --batch examples/pad/pad_sample_batch.json \
-  --details examples/pad/sample_batch.csv --id-column ID \
+  --details "C:\temp\sample_batch.csv" --id-column ID \
   --robin examples/pad/pad_sample.robin.txt \
   --driver-exe "C:\temp\msedgedriver.exe" \
   --pad-out-dir "C:\temp" --pad-browser edge --auto-driver

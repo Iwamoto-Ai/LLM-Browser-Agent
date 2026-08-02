@@ -1,0 +1,7 @@
+# PAD（Windows）で使う配布物は、チェックアウト時に必ず CRLF で取り出す。
+# 変換環境が Linux / macOS でも、実行環境で開くのは Windows の PAD なので、
+# LF のまま渡すと取り込みや CSV の読み取りで失敗することがある。
+examples/pad/*.robin.txt  text eol=crlf
+examples/pad/*.jsact.js   text eol=crlf
+examples/pad/*.csv        text eol=crlf
+examples/pad/*.html       text eol=crlf
