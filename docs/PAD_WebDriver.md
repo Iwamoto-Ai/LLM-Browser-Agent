@@ -20,13 +20,10 @@ PAD の「Web サービスの呼び出し」がまさにそれに当たる。
 **実機（Power Automate Desktop 無料版 (PAD) / Windows 11 / Edge）で完走を確認済み。** 以下の記述は原則として実機で
 確認できた内容を明記している。
 
-すぐ動かせるサンプルは [`examples/pad/`](../examples/pad/) にある。
-
-
 
 ---
 
-#### Power Automate Desktop 無料版 (PAD) 標準の録画機能との違い
+#### 💡Power Automate Desktop 無料版 (PAD) 標準の録画機能との違い
 
 本ツール
 - ブラウザ自動化ツールなので、ブラウザ自動化バッチ処理に特化し、バッチ運用フロー設定を自動追加し、はまり回避対策をしたPADコード(Robin)に変換する設計。
@@ -39,7 +36,6 @@ Power Automate Desktop 無料版 (PAD)
 
 
 
-
 ---
 
 ## 🧭 全体像
@@ -47,12 +43,12 @@ Power Automate Desktop 無料版 (PAD)
 ```
 ┌──────────────────────────┐
 │ Power Automate Desktop   │
-│  Web.InvokeWebService    │  ← 標準アクション。拡張機能は不要
+│  Web.InvokeWebService    │  ← 標準アクション。ブラウザ拡張機能は不要。
 └────────────┬─────────────┘
              │ HTTP + JSON (W3C WebDriver)
              │ http://127.0.0.1:9515
 ┌────────────▼─────────────────────────────┐
-│ msedgedriver.exe または chromedriver.exe  │  ← System.RunApplication で起動
+│ msedgedriver.exe または chromedriver.exe  │  ← System.RunApplication で起動。
 └────────────┬─────────────────────────────┘
              │ DevTools Protocol
 ┌────────────▼────────────────────────┐
@@ -130,7 +126,7 @@ WAIT 3
 自動にするため **Selenium Manager**（Selenium 公式の単体実行ファイルで、Python も Node.js も要らない）
 を使用し、インストール済みブラウザーに対応するバージョンのWebDriverを自動で取得し更新する。
 
--⚠️`selenium-manager-windows.exe` をダウンロードし実行環境の `BaseDir`（例 `C:\temp`）に置いおく必要があります。 <br>
+-⚠️`selenium-manager-windows.exe` をダウンロードし実行環境の `BaseDir`（例 `C:\temp`）に置いておく必要がある。 <br>
 　　入手先: <https://github.com/SeleniumHQ/selenium_manager_artifacts/releases>
 
 ```
@@ -1249,7 +1245,7 @@ END
 
 ## 📦 サンプル
 
-[`examples/pad/`](../examples/pad/) に、社内固有の情報を含まない**公開用の動くサンプル**がある。
+[`examples/pad/`](../examples/pad/) に、社内固有の情報を含まない**公開用の動くサンプル**を用意した。
 
 | ファイル | 内容 |
 | --- | --- |
@@ -1337,7 +1333,6 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 
 ## ⚠️ 制約
 
-- **CAPTCHA やボット検知は回避できない**
 - **`iframe` 内の要素には届かない。** 別途 `/frame` への切り替えが必要
 - Power Fx を有効にしたフローでは書式が変わる（1 起点のインデックス、厳格な型システム、
   データテーブルとカスタムオブジェクトが型なし扱いになりキャストが必要）。
