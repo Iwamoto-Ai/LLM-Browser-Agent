@@ -42,3 +42,8 @@ data/edi_values.json
 # 実環境（EDI2/Oracle）向けの値・明細（発注番号等を含むため手元のみ）
 data/edi2_*
 !data/edi2_practice_batch.csv
+
+# PyInstaller の生成物
+build/
+dist/
+*.spec

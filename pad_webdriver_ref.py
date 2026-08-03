@@ -54,7 +54,7 @@ from datetime import datetime
 
 from engine_common import mask_secrets, resolve_secrets
 from recorder_import import fill_value, load_recording
-from run_batch import load_details
+from details_io import load_details
 
 # ---------------------------------------------------------------------------
 # 要素の特定と操作をまとめて行う JavaScript。
