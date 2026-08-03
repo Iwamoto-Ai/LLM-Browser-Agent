@@ -5,3 +5,7 @@ examples/pad/*.robin.txt  text eol=crlf
 examples/pad/*.jsact.js   text eol=crlf
 examples/pad/*.csv        text eol=crlf
 examples/pad/*.html       text eol=crlf
+
+# PowerShell スクリプトは UTF-8 BOM 付きで保存する
+# （Windows PowerShell 5.1 は BOM が無いと ANSI として読み、日本語が化ける）
+*.ps1 text eol=crlf working-tree-encoding=UTF-8
