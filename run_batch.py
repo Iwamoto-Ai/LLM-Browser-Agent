@@ -55,7 +55,7 @@ import os
 import sys
 
 from browser_factory import make_browser
-from details_io import load_details, _cell_to_str
+from details_io import load_details
 from recorder_import import missing_placeholders, load_recording
 from run_recording import exec_step
 
