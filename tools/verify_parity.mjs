@@ -38,13 +38,16 @@ for (const c of cases) {
       proxy: "", autoDriver: true, browser: c.browser,
       today: { y: t.getFullYear(), m: t.getMonth() + 1, d: t.getDate() } });
 
-  const expected = fs.readFileSync(py, "utf8");
-  if (out.robin === expected) {
+  // Windows の Python は書き出し時に \n を \r\n に変換する。改行コードの違いは
+  // 内容の違いではないので、比較の前にそろえる（CI は Linux なので LF のまま）。
+  const nl = (s) => s.split("\r\n").join("\n");
+  const expected = nl(fs.readFileSync(py, "utf8"));
+  if (nl(out.robin) === expected) {
     console.log("OK  一致:", c.batch);
   } else {
     ng++;
     console.log("NG  不一致:", c.batch);
-    const a = expected.split("\n"), b = out.robin.split("\n");
+    const a = expected.split("\n"), b = nl(out.robin).split("\n");
     let shown = 0;
     for (let i = 0; i < Math.max(a.length, b.length) && shown < 8; i++) {
       if (a[i] !== b[i]) {
@@ -54,7 +57,7 @@ for (const c of cases) {
     }
     console.log(`  行数 py=${a.length} js=${b.length}`);
   }
-  const jsactPy = fs.readFileSync(py.replace(/\.robin\.txt$/, ".jsact.js"), "utf8");
-  if (jsactPy !== out.jsact) { ng++; console.log("NG  共通JavaScriptが不一致:", c.batch); }
+  const jsactPy = nl(fs.readFileSync(py.replace(/\.robin\.txt$/, ".jsact.js"), "utf8"));
+  if (jsactPy !== nl(out.jsact)) { ng++; console.log("NG  共通JavaScriptが不一致:", c.batch); }
 }
 process.exit(ng ? 1 : 0);
