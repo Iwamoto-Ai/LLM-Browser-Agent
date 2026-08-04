@@ -1397,7 +1397,24 @@ def _warn_exec_paths(args) -> None:
     print('    例: --details "C:\\temp\\sample_batch.csv"')
 
 
+def _use_utf8_stdout() -> None:
+    """標準出力を UTF-8 にする。
+
+    完了メッセージに 📄 や ⚠ を使っているため、コンソールのコードページが
+    cp1252（英語版 Windows など）だと UnicodeEncodeError で落ちる。日本語版の
+    Windows では起きないので気づきにくいが、EXE を配ったときに相手側の
+    ロケール次第で壊れる。errors="replace" も付けて、万一表示できない文字が
+    あっても処理そのものは止めない。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def main() -> None:
+    _use_utf8_stdout()
     p = argparse.ArgumentParser(
         description="PAD 版バッチの参照実装（WebDriver を HTTP 直叩き・拡張機能不要）")
     p.add_argument("--batch", required=True, help="バッチ定義 JSON")
