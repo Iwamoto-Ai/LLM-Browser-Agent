@@ -3,7 +3,20 @@
 // 検証しているのは実際に配布されるコードそのもの。
 import fs from "node:fs";
 import vm from "node:vm";
+import os from "node:os";
+import path from "node:path";
 import { execFileSync } from "node:child_process";
+
+// Python の呼び名は環境で違う（Windows は python、Linux/macOS は python3 が多い）。
+// 環境変数 PYTHON があればそれを優先し、無ければ動くほうを探す。
+const PY = (() => {
+  if (process.env.PYTHON) { return process.env.PYTHON; }
+  for (const cmd of ["python3", "python", "py"]) {
+    try { execFileSync(cmd, ["--version"], { stdio: "pipe" }); return cmd; } catch (e) { /* 次を試す */ }
+  }
+  console.error("Python が見つかりません。環境変数 PYTHON で指定してください。");
+  process.exit(1);
+})();
 
 const html = fs.readFileSync("tools/pad_converter.html", "utf8");
 const m = html.match(/<script id="pad-core">([\s\S]*?)<\/script>/);
@@ -23,8 +36,8 @@ const cases = [
 
 let ng = 0;
 for (const c of cases) {
-  const py = "/tmp/py.robin.txt";
-  execFileSync("python3", ["pad_webdriver_ref.py",
+  const py = path.join(os.tmpdir(), "py.robin.txt");
+  execFileSync(PY, ["pad_webdriver_ref.py",
     "--batch", c.batch, "--details", c.details, "--id-column", c.idCol,
     "--robin", py, "--driver-exe", "C:\\temp\\msedgedriver.exe",
     "--pad-out-dir", "C:\\temp", "--pad-browser", c.browser, "--auto-driver"],
