@@ -636,6 +636,35 @@ corporate proxy, and has been used on a real business system.** The build guide,
 confirmed on a real machine, and the full list of pitfalls are in
 **💡[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)** (written in Japanese).
 
+### 📦 Converting without Python (EXE build)
+
+Conversion alone can be done with a **single standalone executable**. No Python and no
+dependencies are required, so teammates who cannot set up a development environment
+can still convert recordings.
+
+Download `pad_webdriver_ref.exe` from [Releases](../../releases) and run it directly.
+
+```
+pad_webdriver_ref.exe --batch recordings\edi2_practice_batch.json ^
+    --details "C:\temp\edi2_batch.csv" --id-column "<ID column>" ^
+    --robin output\pad_flow.robin.txt ^
+    --driver-exe "C:\temp\msedgedriver.exe" --pad-out-dir "C:\temp" ^
+    --pad-browser edge --auto-driver
+```
+
+The arguments are identical to the Python version, and so is the output — CI compares
+the two on every release build.
+
+- **A single file of around 8 MB.** No installation
+- **It is not code-signed.** SmartScreen will warn on first run. Check the value in
+  `SHA256SUMS.txt` against `Get-FileHash` before using it
+- Some environments block unsigned executables outright. In that case, run the
+  conversion on another PC and carry over the resulting `.robin.txt`, which is
+  plain text
+
+To build it yourself, run `.\build_exe.ps1` on Windows
+(`-Mode onedir` produces a folder instead of a single file).
+
 ### 🗺️ From a recording JSON to a PAD flow
 
 **The execution environment does not need Python.** Only the conversion runs on a machine that has Python;
