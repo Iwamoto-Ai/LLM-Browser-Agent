@@ -582,6 +582,33 @@ HTTP で指示すれば**拡張機能なしでブラウザを操作できる**�
 **💡[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)** にまとめてある。
 
 
+### 📦 Python なしで変換する（EXE 版）
+
+変換だけなら**単体の実行ファイル**でもできる。Python も依存ライブラリも要らないので、
+開発環境を用意できないメンバーでも変換に参加できる。
+
+[Releases](../../releases) から `pad_webdriver_ref.exe` をダウンロードして、そのまま実行する。
+
+```
+pad_webdriver_ref.exe --batch recordings\edi2_practice_batch.json ^
+    --details "C:\temp\edi2_batch.csv" --id-column "プロジェクト番号" ^
+    --robin output\pad_flow.robin.txt ^
+    --driver-exe "C:\temp\msedgedriver.exe" --pad-out-dir "C:\temp" ^
+    --pad-browser edge --auto-driver
+```
+
+引数は Python 版とまったく同じで、出力も一致する（CI で毎回突き合わせている）。
+
+- **8MB 程度の 1 ファイル。** インストール不要
+- **署名は付いていない。** 初回は SmartScreen が警告を出す。Release の
+  `SHA256SUMS.txt` と `Get-FileHash` の結果を照合してから使うこと
+- 環境によっては、署名の無い実行ファイルの持ち込み自体が制限されていることがある。
+  その場合は変換を別の PC で行い、できあがった `.robin.txt`（ただのテキスト）を
+  持ち込めばよい
+
+自分でビルドする場合は Windows 上で `.\build_exe.ps1` を実行する
+（`-Mode onedir` でフォルダ形式にもできる）。
+
 ### 🗺️ 録画 JSON から PAD フローを作る流れ
 
 **実行環境に Python は不要。** 変換だけを Python が使える PC で行い、できあがった PADコード(Robin) を
