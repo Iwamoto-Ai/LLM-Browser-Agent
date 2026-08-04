@@ -26,6 +26,21 @@ jobs:
       - name: Unit tests (no browser, no LLM)
         run: pytest -q
 
+  # 2) ブラウザ版変換器が Python 版と同じ Robin を出すかを検証する。
+  #    実装が 2 本あるので、片方だけ直したまま気づかない事故をここで止める。
+  browser-converter-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Verify browser converter matches Python
+        run: node tools/verify_parity.mjs
+
   # 2) 配管テスト: 実ブラウザ(Edge)でローカルテストサイトを操作（LLM 不要）
   selftest-windows:
     runs-on: windows-latest   # Edge / msedgedriver 対応の Selenium Manager が使える

@@ -1,0 +1,1223 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>PAD コード変換器（ブラウザ版）— LLM-Browser-Agent</title>
+<style>
+ :root { color-scheme: light dark; }
+ body { font-family: "Segoe UI", "Meiryo", sans-serif; margin: 24px auto; max-width: 980px;
+        line-height: 1.7; padding: 0 16px; }
+ h1 { font-size: 20px; margin-bottom: 4px; }
+ .lead { color: #666; margin-top: 0; }
+ fieldset { border: 1px solid #bbb; border-radius: 6px; margin: 16px 0; padding: 12px 16px; }
+ legend { font-weight: bold; padding: 0 6px; }
+ label { display: inline-block; min-width: 12em; }
+ input[type=text] { width: 26em; padding: 3px 6px; }
+ .drop { border: 2px dashed #999; border-radius: 6px; padding: 18px; text-align: center;
+         color: #666; margin-bottom: 8px; }
+ .drop.on { border-color: #06c; color: #06c; }
+ button { padding: 7px 18px; margin-right: 8px; }
+ #out { width: 100%; height: 340px; font-family: Consolas, monospace; font-size: 12px;
+        white-space: pre; }
+ .warn { background: #fff6e0; border-left: 4px solid #e8a300; padding: 8px 12px;
+         margin: 8px 0; white-space: pre-wrap; font-size: 13px; }
+ .err  { background: #ffecec; border-left: 4px solid #d33; padding: 8px 12px; margin: 8px 0; }
+ .ok   { background: #eef7ee; border-left: 4px solid #2a2; padding: 8px 12px; margin: 8px 0; }
+ .hint { color: #666; font-size: 13px; }
+ footer { color: #777; font-size: 12px; margin-top: 32px; border-top: 1px solid #ddd;
+          padding-top: 10px; }
+</style>
+</head>
+<body>
+
+<h1>PAD コード変換器（ブラウザ版）</h1>
+<p class="lead">録画 JSON を Power Automate Desktop の Robin コードに変換します。
+インストール不要で、このページ 1 つで完結します。通信は一切しません。</p>
+
+<fieldset>
+  <legend>1. 録画 JSON</legend>
+  <div class="drop" id="drop">ここにドラッグ＆ドロップ、またはファイルを選択</div>
+  <input type="file" id="batchFile" accept=".json,.txt">
+  <div class="hint" id="batchInfo"></div>
+</fieldset>
+
+<fieldset>
+  <legend>2. 実行環境（PAD を動かす PC）のパス</legend>
+  <p class="hint">ここに書いた値は生成物にそのまま埋め込まれます。変換した PC のパスではなく、
+     <strong>PAD を動かす PC のパス</strong>を入れてください。</p>
+  <div><label for="details">明細ファイル (--details)</label>
+    <input type="text" id="details" value="C:\temp\edi2_batch.csv"></div>
+  <div><label for="idcol">ID 列 (--id-column)</label>
+    <input type="text" id="idcol" value=""> <span class="hint">空なら明細の先頭列</span></div>
+  <div><label for="driver">ドライバー (--driver-exe)</label>
+    <input type="text" id="driver" value="C:\temp\msedgedriver.exe"></div>
+  <div><label for="outdir">BaseDir (--pad-out-dir)</label>
+    <input type="text" id="outdir" value="C:\temp"></div>
+</fieldset>
+
+<fieldset>
+  <legend>3. オプション</legend>
+  <div><label for="browser">ブラウザー (--pad-browser)</label>
+    <select id="browser"><option value="edge">edge</option><option value="chrome">chrome</option></select></div>
+  <div><label for="proxy">プロキシ (--proxy)</label>
+    <input type="text" id="proxy" value="" placeholder="proxy.example.com:8080"></div>
+  <div><label for="autodrv">ドライバー自動取得</label>
+    <input type="checkbox" id="autodrv" checked> --auto-driver</div>
+  <div><label for="detailsFile">明細ファイル（列名の確認用・任意）</label>
+    <input type="file" id="detailsFile" accept=".csv,.txt"></div>
+  <div class="hint" id="detailsInfo"></div>
+</fieldset>
+
+<div>
+  <button id="run">変換する</button>
+  <button id="copy" disabled>Robin をコピー</button>
+  <button id="save" disabled>Robin を保存</button>
+  <button id="copyJs" disabled>共通 JavaScript をコピー</button>
+  <button id="saveJs" disabled>共通 JavaScript を保存</button>
+</div>
+
+<div id="msg"></div>
+<textarea id="out" readonly spellcheck="false"></textarea>
+
+<footer>
+LLM-Browser-Agent　PAD版　<a href="https://github.com/Iwamoto-Ai/LLM-Browser-Agent">GitHub</a>　/
+Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).<br>
+出力は Python 版 <code>pad_webdriver_ref.py</code> と一致します（CI で毎回突き合わせています）。
+</footer>
+
+<!-- ============================================================
+     変換の中身。Node からもこの script を取り出して実行し、
+     Python 版との出力一致を CI で検証している。
+     ここを直したら必ず tools/verify_parity.mjs を通すこと。
+     ============================================================ -->
+<script id="pad-core">
+(function (root) {
+"use strict";
+
+// ---------------------------------------------------------------- 共通 JS
+var JS_ACT = [
+"var cands = arguments[0], action = arguments[1], value = arguments[2];",
+"var Q = String.fromCharCode(39), DQ = String.fromCharCode(34);",
+"function lit(s) { if (s.indexOf(Q) < 0) { return Q + s + Q; } return DQ + s + DQ; }",
+"function byXPath(xp) {",
+"  try { return document.evaluate(xp, document, null, 9, null).singleNodeValue; }",
+"  catch (e) { return null; }",
+"}",
+"function find(sel) {",
+"  try {",
+"    if (sel.indexOf(`id/`) === 0) { return document.getElementById(sel.slice(3)); }",
+"    if (sel.indexOf(`xpath/`) === 0) { return byXPath(sel.slice(6)); }",
+"    if (sel.indexOf(`text/`) === 0) {",
+"      var t = sel.slice(5).trim();",
+"      return byXPath(`//*[not(self::script) and normalize-space(text())=` + lit(t) + `]`);",
+"    }",
+"    if (sel.indexOf(`aria/`) === 0) {",
+"      var n = sel.slice(5).split(`[`)[0].trim();",
+"      var el = document.querySelector(`[aria-label=` + lit(n) + `]`);",
+"      if (el) { return el; }",
+"      return byXPath(`//*[not(self::script) and (@aria-label=` + lit(n)",
+"                     + ` or @title=` + lit(n) + ` or normalize-space(text())=` + lit(n) + `)]`);",
+"    }",
+"    if (sel.indexOf(`pierce/`) === 0) { sel = sel.slice(7); }",
+"    return document.querySelector(sel);",
+"  } catch (e) { return null; }",
+"}",
+"if (action === `exists`) {",
+"  var body = document.body || document.documentElement;",
+"  var txt = (body && (body.innerText || body.textContent)) || ``;",
+"  return { ok: txt.indexOf(value) >= 0, used: null };",
+"}",
+"for (var i = 0; i < cands.length; i++) {",
+"  var el = find(cands[i]);",
+"  if (!el) { continue; }",
+"  if (action === `click`) {",
+"    try { el.scrollIntoView({ block: `center` }); } catch (e) {}",
+"    el.click();",
+"  } else if (action === `fill`) {",
+"    el.focus();",
+"    el.value = value;",
+"    el.dispatchEvent(new Event(`input`, { bubbles: true }));",
+"    el.dispatchEvent(new Event(`change`, { bubbles: true }));",
+"  }",
+"  return { ok: true, used: cands[i] };",
+"}",
+"return { ok: false, used: null };"
+];
+
+function jsActOneline() {
+  // Python 版と同じ: 空行を除き、各行を strip して空白 1 つで連結する
+  var out = [];
+  for (var i = 0; i < JS_ACT.length; i++) {
+    var s = JS_ACT[i].trim();
+    if (s) { out.push(s); }
+  }
+  return out.join(" ");
+}
+
+// ---------------------------------------------------------------- 小道具
+// Python の json.dumps(ensure_ascii=False) と同じ区切り（", " / ": "）にする。
+// JSON.stringify は区切りに空白を入れないため、そのままでは出力が一致しない。
+function pyJson(v) {
+  if (Array.isArray(v)) {
+    var parts = [];
+    for (var i = 0; i < v.length; i++) { parts.push(pyJson(v[i])); }
+    return "[" + parts.join(", ") + "]";
+  }
+  if (v === null || v === undefined) { return "null"; }
+  return JSON.stringify(v);
+}
+
+// Python の \w は Unicode 対応（日本語の列名にも当たる）。JS の \w は ASCII のみ
+// なので、同じ範囲になるよう明示する。
+var WORD = "[\\p{L}\\p{N}\\p{M}_]";
+
+var Q_ = "'''";
+
+function robinStr(s) {
+  return "$'''" + String(s).split("\\").join("\\\\").split("'").join("\\'") + "'''";
+}
+
+function robinJsChunks(js, width) {
+  width = width || 100;
+  var chunks = [], i = 0;
+  while (i < js.length) {
+    var end = Math.min(i + width, js.length);
+    while (end < js.length && (js[end - 1] === "'" || js[end] === "'")) { end += 1; }
+    chunks.push(js.slice(i, end));
+    i = end;
+  }
+  var lines = [];
+  for (var n = 0; n < chunks.length; n++) {
+    var head = n === 0 ? "" : "%JsAct%";
+    lines.push("SET JsAct TO $'''" + head + chunks[n] + "'''");
+  }
+  return lines;
+}
+
+function robinSafeSelector(sel) {
+  var m = /^xpath\/\/\*\[@id=['"]([^'"]+)['"]\]$/.exec(sel);
+  if (m) { return "id/" + m[1]; }
+  m = /^xpath\/\/\/\*\[@id=['"]([^'"]+)['"]\]$/.exec(sel);
+  if (m) { return "id/" + m[1]; }
+  return sel;
+}
+
+function robinFilterCandidates(cands) {
+  var out = [];
+  for (var i = 0; i < cands.length; i++) {
+    var c = robinSafeSelector(cands[i]);
+    if (c.indexOf("'") < 0) { out.push(c); }
+  }
+  return out;
+}
+
+function robinColVar(col, cols) {
+  if (cols.indexOf(col) < 0) { cols.push(col); }
+  return "%Col" + (cols.indexOf(col) + 1) + "%";
+}
+
+function toRobinVar(text, cols) {
+  var re = new RegExp("\\{\\{(?!SECRET:)(" + WORD + "+)\\}\\}", "gu");
+  return String(text).replace(re, function (_m, name) { return robinColVar(name, cols); });
+}
+
+function robinUnderBase(pathStr, outDir) {
+  var base = outDir.replace(/[\\\/]+$/, "");
+  var sep = "\\";
+  if (pathStr.toLowerCase().indexOf((base + sep).toLowerCase()) === 0) {
+    var rest = pathStr.slice(base.length + 1);
+    var esc = rest.split("\\").join("\\\\").split("'").join("\\'");
+    return "$'''%BaseDir%" + "\\\\" + esc + "'''";
+  }
+  return robinStr(pathStr);
+}
+
+function safeComment(text, cols) {
+  var t = toRobinVar(text, cols);
+  t = t.replace(/\{\{SECRET:([^}]*)\}\}/g, "[SECRET:$1]");
+  t = t.split("{{").join("[").split("}}").join("]");
+  return t;
+}
+
+var WEB_FLAGS = "EncodeRequestBody: False FailOnErrorStatus: False";
+
+function web(url, method, body, resp, status, indent) {
+  indent = indent || "";
+  var b = body ? "RequestBody: " + body + " " : "";
+  return indent + "Web.InvokeWebService.InvokeWebService Url: " + url + " " +
+         "Method: Web.Method." + method + " Accept: AppJson ContentType: AppJson " +
+         b + WEB_FLAGS + " Response=> " + resp + " StatusCode=> " + status;
+}
+
+function robinShot(indent, fileVar) {
+  return [
+    web("ShotUrl", "Get", null, "ShotResp", "ShotStatus", indent),
+    indent + "Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj",
+    indent + "SET ShotB64 TO ShotObj['value']",
+    indent + "File.ConvertFromBase64 Base64Text: ShotB64 File: " + fileVar +
+             " IfFileExists: File.IfExists.DoNothing"
+  ];
+}
+
+function robinFail(indent) {
+  var ind2 = indent + "    ";
+  var out = [indent + "IF RowError <> $'''''' THEN",
+             ind2 + "SET NgCount TO NgCount + 1"];
+  out = out.concat(robinShot(ind2, "FailShot"));
+  out.push(ind2 + "File.WriteText File: ResultFile " +
+    "TextToWrite: $'''%RowId%,%RowKey%,失敗,\"%RowError%\",\"%FailShot%\",%RecStamp%''' " +
+    "AppendNewLine: True IfFileExists: File.IfFileExists.Append");
+  out.push(ind2 + "File.WriteText File: LogFile " +
+    "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' " +
+    "AppendNewLine: True IfFileExists: File.IfFileExists.Append");
+  out.push(ind2 + "NEXT LOOP");
+  out.push(indent + "END");
+  return out;
+}
+
+function cleanNote(note, cols) {
+  return toRobinVar(note, cols).split("'").join("").split("[").join("").split("]").join("");
+}
+
+function robinAct(cands, action, value, indent, note, stepNo, cols) {
+  var cs = robinFilterCandidates(cands).map(function (c) { return toRobinVar(c, cols); });
+  var v = toRobinVar(value, cols);
+  var nt = cleanNote(note, cols);
+  var bodyArgs = pyJson([cs, action, v]);
+  var why = action === "exists" ? "画面に文字列がありません" : "で要素が見つかりません";
+  var reason = "ステップ" + stepNo + "（" + nt + "）" + why;
+  return [
+    indent + "# [" + stepNo + "] " + nt,
+    indent + "SET ActBody TO $'''{\"script\": \"%JsAct%\", \"args\": " + bodyArgs + "}'''",
+    web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent),
+    indent + "Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj",
+    indent + "IF ActObj['value']['ok'] <> True THEN",
+    indent + "    SET RowError TO $'''" + reason + "'''",
+    indent + "END"
+  ];
+}
+
+function robinActBestEffort(cands, action, value, indent, note, cols) {
+  var cs = robinFilterCandidates(cands).map(function (c) { return toRobinVar(c, cols); });
+  var v = toRobinVar(value, cols);
+  var nt = cleanNote(note, cols);
+  var bodyArgs = pyJson([cs, action, v]);
+  return [
+    indent + "# " + nt,
+    indent + "SET ActBody TO $'''{\"script\": \"%JsAct%\", \"args\": " + bodyArgs + "}'''",
+    web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent),
+    indent + "WAIT 1"
+  ];
+}
+
+function candidates(step) {
+  var out = [];
+  var groups = step.selectors || [];
+  for (var i = 0; i < groups.length; i++) {
+    var g = groups[i];
+    if (Array.isArray(g)) {
+      for (var j = 0; j < g.length; j++) {
+        if (typeof g[j] === "string") { out.push(g[j]); }
+      }
+    } else if (typeof g === "string") { out.push(g); }
+  }
+  return out;
+}
+
+function splitLogin(setup) {
+  var idx = [];
+  for (var i = 0; i < setup.length; i++) {
+    var st = setup[i];
+    if (st.type === "change" && String(st.value === undefined ? "" : st.value).indexOf("{{SECRET:") === 0) {
+      idx.push(i);
+    }
+  }
+  if (!idx.length) { return { set: {}, has: false }; }
+  var lo = Math.min.apply(null, idx), hi = Math.max.apply(null, idx);
+  var end = hi;
+  for (var j = hi + 1; j < setup.length; j++) {
+    if (setup[j].type === "click" || setup[j].type === "doubleClick") { end = j; break; }
+  }
+  var set = {};
+  for (var k = lo; k <= end; k++) { set[k] = true; }
+  return { set: set, has: true };
+}
+
+function prescanCols(steps, cols) {
+  for (var i = 0; i < steps.length; i++) {
+    var st = steps[i];
+    var cs = candidates(st);
+    for (var j = 0; j < cs.length; j++) { toRobinVar(cs[j], cols); }
+    var keys = ["value", "text", "name", "url"];
+    for (var k = 0; k < keys.length; k++) {
+      var v = st[keys[k]];
+      if (v !== undefined && v !== null) { toRobinVar(v, cols); }
+    }
+  }
+}
+
+// ---------------------------------------------------------------- lint
+function lintRobin(lines) {
+  var knownEnums = {
+    "Display.Icon": ["None", "Information", "Warning", "Question"],
+    "Display.Buttons": ["OK", "OKCancel"],
+    "Display.DefaultButton": ["Button1", "Button2"],
+    "Web.Method": ["Get", "Post", "Delete"],
+    "File.IfFileExists": ["Append", "Overwrite"],
+    "File.IfExists": ["DoNothing"]
+  };
+  var warns = [];
+  for (var i = 0; i < lines.length; i++) {
+    var ln = lines[i], s = ln.trim(), no = i + 1;
+    if (s.indexOf("{{") >= 0) {
+      warns.push(no + "行: 未解決のプレースホルダが残っています: " + s.slice(0, 80));
+    }
+    if (s.charAt(0) === "#") { continue; }
+    if (ln.length > 700) {
+      warns.push(no + "行: 1行が長すぎます（" + ln.length + "文字）。分割してください");
+    }
+    var m = new RegExp("^SET\\s+" + WORD + "+\\s+TO\\s+%(" + WORD + "+)%\\s*$", "u").exec(s);
+    if (m) {
+      warns.push(no + "行: SET の右辺で % を使っています。変数の代入は `TO " + m[1] +
+                 "` と裸で書きます: " + s);
+    }
+    if (s.indexOf("InvokeWebService") >= 0 && s.indexOf("EncodeRequestBody: False") < 0) {
+      warns.push(no + "行: EncodeRequestBody: False がありません（本文がURLエンコードされます）");
+    }
+    for (var ns in knownEnums) {
+      if (!Object.prototype.hasOwnProperty.call(knownEnums, ns)) { continue; }
+      var ok = knownEnums[ns];
+      var re = new RegExp(ns.replace(/\./g, "\\.") + "\\.(\\w+)", "g"), mm;
+      while ((mm = re.exec(s)) !== null) {
+        if (ok.indexOf(mm[1]) < 0) {
+          warns.push(no + "行: " + ns + "." + mm[1] + " は実機で未確認の列挙値です。" +
+                     "確認済み: " + ok.slice().sort().join("/"));
+        }
+      }
+    }
+    var lre = /\$'''([\s\S]*?)'''/g, lm;
+    while ((lm = lre.exec(s)) !== null) {
+      var body = lm[1].split("\\'").join("");
+      if (body.indexOf("'") >= 0) {
+        warns.push(no + "行: リテラル内の単引用符が未エスケープです（\\' にする）: " + s.slice(0, 80));
+      }
+    }
+  }
+  return warns;
+}
+
+// ---------------------------------------------------------------- 本体
+function buildRobin(batch, opt) {
+  var detailsPath = opt.detailsPath;
+  var idCol = opt.idCol;
+  var driverExe = opt.driverExe || "C:\\temp\\msedgedriver.exe";
+  var outDir = opt.outDir || "C:\\temp";
+  var proxy = opt.proxy || "";
+  var autoDriver = !!opt.autoDriver;
+  var browser = opt.browser || "edge";
+  var today = opt.today;   // {y,m,d}（テスト用に固定できるようにする）
+
+  var jsOne = jsActOneline();
+  var cols = [idCol];
+  var L = [];
+  function A(s) { L.push(s); }
+
+  var setup = batch.setup || [];
+  var loopSteps = batch.loop || [];
+  var recover = batch.recover || [];
+  var teardown = batch.teardown || [];
+  var lg = splitLogin(setup);
+  var loginIdx = lg.set, hasLogin = lg.has;
+
+  [setup, loopSteps, recover, teardown].forEach(function (sec) { prescanCols(sec, cols); });
+
+  var startUrl = "";
+  for (var si = 0; si < setup.length; si++) {
+    if (setup[si].type === "navigate") { startUrl = setup[si].url || ""; break; }
+  }
+
+  A("# ============================================================");
+  A("# 自動生成 PADコード(Robin)");
+  A("# ============================================================");
+  A("# 【メモ欄】自動で分かる範囲を初期値として入れてある。適宜書き換えて使う。");
+  var mtitle = safeComment(String(batch.title === undefined ? "" : batch.title).trim(), cols);
+  var mloop = loopSteps.filter(function (s) { return s.type !== "comment"; }).length;
+  var mkeys = cols.length > 1 ? cols.slice(1).join(" ／ ") : "なし";
+  A("# タイトル: " + mtitle);
+  A("# 処理内容：明細 1 件につき " + mloop + " 操作を繰り返す" +
+    "（ID列: " + idCol + " ／ 業務キー: " + mkeys + "）");
+  if (startUrl) { A("#           開始URL: " + startUrl); }
+  var mcsv = detailsPath.split("\\").join("/").replace(/\/+$/, "").split("/").pop();
+  A("#           明細CSV: " + mcsv);
+  var d = today || (function () { var t = new Date();
+    return { y: t.getFullYear(), m: t.getMonth() + 1, d: t.getDate() }; })();
+  var pad2 = function (n) { return (n < 10 ? "0" : "") + n; };
+  A("# 備考：" + d.y + "/" + pad2(d.m) + "/" + pad2(d.d) + " 生成 ／ ブラウザー=" + browser +
+    " ／ ドライバー自動取得=" + (autoDriver ? "有効" : "無効") +
+    " ／ プロキシ=" + (proxy || "未使用"));
+  A("# ============================================================");
+  A("# LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai");
+  A("# Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).");
+  A("# ============================================================");
+  A("");
+  A("# --- 接続先：環境を切り替えるときはここを直す ---");
+  A("# 練習サイト  : file:///C:/temp/index.html");
+  A("# 本番サイト  : https://… （実環境の URL）");
+  A("SET TargetUrl TO " + robinStr(startUrl));
+  A("");
+  A("# --- プロキシ：社外サイトへ出るときだけ指定する ---");
+  A("# WebDriver が起動するブラウザーは素のプロファイルで、Windows のプロキシ設定を");
+  A("# 引き継がない。社内プロキシ経由でしか外部に出られない環境では下を有効にする。");
+  A("# localhost と file:// はプロキシを通らないので、練習サイトは影響を受けない。");
+  if (proxy) {
+    A("# UseProxy を False にすると直結（練習サイト用）に戻る。");
+    A("SET UseProxy TO True");
+    A("SET ProxyAddr TO " + robinStr(proxy));
+  } else {
+    A("# 使う場合: UseProxy を True にし、ProxyAddr にプロキシの host:port を書く。");
+    A("SET UseProxy TO False");
+    A("SET ProxyAddr TO $'''proxy.example.com:8080'''");
+  }
+  A("");
+  A("# --- ブラウザー：edge か chrome。ここ 1 行だけ直せば切り替わる ---");
+  A("# 対象サイトがブラウザー判定で表示を変える場合や、片方で不具合が出たときに使う。");
+  A("# 下の BrowserName（WebDriver への指定）とドライバーのプロセス名も自動で追従する。");
+  A("SET Browser TO " + robinStr(browser));
+  A("SET BrowserName TO $'''MicrosoftEdge'''");
+  A("SET DriverProc TO $'''msedgedriver'''");
+  A("IF Browser = $'''chrome''' THEN");
+  A("    SET BrowserName TO $'''chrome'''");
+  A("    SET DriverProc TO $'''chromedriver'''");
+  A("END");
+  A("");
+  A("# --- フォルダ・ファイル：配布時に触るのはこの BaseDir だけにする ---");
+  A("SET BaseDir TO " + robinStr(outDir));
+  A("# ※ BaseDir の末尾に \\ を付けないこと（%BaseDir%\\file.png が二重になる）");
+  A("");
+  A("# --- ドライバーの入手方法 ---");
+  A("# True  … Selenium Manager がブラウザーの版に合わせて自動取得する（推奨）。");
+  A("#         ブラウザーが更新されても入れ替えが要らない。取得先はバージョン番号を");
+  A("#         含むフォルダなので、固定パスでは書けない。");
+  A("#         selenium-manager-windows.exe は BaseDir に置くこと。取得元:");
+  A("#         https://github.com/SeleniumHQ/selenium_manager_artifacts/releases");
+  A("# False … 下の固定パスを使う。ブラウザー更新時は手動で入れ替える。");
+  A("SET AutoDriver TO " + (autoDriver ? "True" : "False"));
+  A("SET SmExe TO $'''selenium-manager-windows.exe'''");
+  A("");
+  A("# AutoDriver = False のときに使う固定パス。Browser に追従させるため、");
+  A("# edge / chrome それぞれの既定を持ち、下の IF で切り替える。");
+  A("# BaseDir 以外に置く場合は、次の 2 行を直接書き換えること。");
+  var arg = robinUnderBase(driverExe, outDir);
+  var edgeDrv = browser === "edge" ? arg : "$" + Q_ + "%BaseDir%\\\\msedgedriver.exe" + Q_;
+  var chromeDrv = browser === "chrome" ? arg : "$" + Q_ + "%BaseDir%\\\\chromedriver.exe" + Q_;
+  A("SET EdgeDriverExe TO " + edgeDrv);
+  A("SET ChromeDriverExe TO " + chromeDrv);
+  A("SET DriverExe TO EdgeDriverExe");
+  A("IF Browser = " + robinStr("chrome") + " THEN");
+  A("    SET DriverExe TO ChromeDriverExe");
+  A("END");
+  A("SET DriverUrl TO $'''http://127.0.0.1:9515'''");
+  A("SET DetailsFile TO " + robinUnderBase(detailsPath, outDir));
+  A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''");
+  A("SET LogFile TO $'''%BaseDir%\\\\pad_progress.log'''");
+  A("SET ShotDir TO $'''%BaseDir%'''");
+  A("");
+  A("# --- 運用スイッチ ---");
+  A("# まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす");
+  A("SET MaxItems TO 1");
+  A("# 起動したブラウザーとドライバーの種類・バージョンをダイアログで出す");
+  A("# False にしてもログ（pad_progress.log）には必ず 1 行残る");
+  A("SET ShowDriverInfo TO True");
+  A("# 失敗分だけを再実行するとき True（読み込み元と出力先が自動で切り替わる）");
+  A("SET RetryMode TO False");
+  if (hasLogin) {
+    A("# manual = 人が手でログイン（PAD はパスワードを一切扱わない）★推奨");
+    A("# auto   = 録画されたログイン手順を実行する");
+    A("SET LoginMode TO $'''manual'''");
+  }
+  A("IF RetryMode THEN");
+  A("    SET DetailsFile TO $'''%BaseDir%\\\\pad_result.csv'''");
+  A("    SET ResultFile TO $'''%BaseDir%\\\\pad_result_retry.csv'''");
+  A("END");
+  A("");
+  A("# --- 要素操作の共通 JavaScript ---");
+  A("# PAD は長すぎる 1 行を貼り付けても黙って無視するため、短い行に分けて継ぎ足す。");
+  A("# （%JsAct% は直前までの内容。順番どおりに貼ること）");
+  robinJsChunks(jsOne).forEach(A);
+  A("# ※ 継ぎ足しがうまくいかない場合は、同時生成した pad_flow.jsact.js の中身を");
+  A("#   「変数の設定」アクション（変数名 JsAct）の値の欄に手で貼り付けてもよい。");
+  A("");
+  A("");
+  A("# --- バージョン比較用の JavaScript ---");
+  A("# ブラウザーとドライバーのメジャーバージョン（最初のドット手前）を取り出して比べる。");
+  A("# Chrome/Edge はビルド番号まで一致するとは限らず、合わせるのはメジャーだけでよい。");
+  A("# 文字列リテラルはバッククォートを使う（JSON にも Robin にもそのまま置ける）。");
+  var jsver = "var b = String(arguments[0]).split(`.`)[0]; " +
+              "var d = String(arguments[1]).split(`.`)[0]; " +
+              "return { ok: true, bMajor: b, dMajor: d, match: (b === d) };";
+  A("SET JsVer TO " + robinStr(jsver));
+  A("# 途中で中止するかどうかの目印（ドライバー取得やログインの失敗で True になる）");
+  A("SET Halt TO False");
+  A("# 中止した理由。最後のダイアログとログにそのまま出すので、");
+  A("# Halt を立てる箇所では必ずこれも設定すること。");
+  A("SET HaltReason TO " + robinStr(""));
+  A("# セッションを張れたか。後片付けで DELETE を投げてよいかの判定に使う。");
+  A("SET SessionOk TO False");
+  A("");
+  A("# --- 実行開始をログに残す ---");
+  A("# ここは中止しても必ず通る。ループの中だけで書くと、起点に着けずに");
+  A("# 中止したとき「ログを確認してください」と案内しながらログが空になる。");
+  var hdr = robinStr("===== 実行開始 上限%MaxItems%件 RetryMode=%RetryMode% Browser=%Browser% =====");
+  A("File.WriteText File: LogFile TextToWrite: " + hdr +
+    " AppendNewLine: True IfFileExists: File.IfFileExists.Append");
+  A("");
+  A("# ドライバーをどう用意したか。ログとダイアログに出す。");
+  A("SET DriverSrc TO " + robinStr("固定パス（AutoDriver=False のためブラウザー更新時は手動で入れ替え）"));
+  A("SET SmMsg TO " + robinStr(""));
+  A("# --- ドライバーの自動取得（Selenium Manager）---");
+  A("# 設定は冒頭の AutoDriver / SmExe。ここは取得を実行する部分で、");
+  A("# 取得できたらそのパスで DriverExe を上書きする。");
+  A("IF AutoDriver THEN");
+  A("    SET SmArgs TO $'''%SmExe% --browser %Browser% --browser-version stable --output json'''");
+  A("    IF UseProxy THEN");
+  A("        SET SmArgs TO $'''%SmArgs% --proxy %ProxyAddr%'''");
+  A("    END");
+  A("    Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout " +
+    "DOSCommandOrApplication: SmArgs WorkingDirectory: BaseDir Timeout: 300 " +
+    "StandardOutput=> SmOutput StandardError=> SmError ExitCode=> SmExit");
+  A("    Variables.ConvertJsonToCustomObject Json: SmOutput CustomObject=> SmObj");
+  A("    IF SmObj['result']['code'] = 0 THEN");
+  A("        SET DriverExe TO SmObj['result']['driver_path']");
+  A("        SET DriverSrc TO " + robinStr("Selenium Manager（ブラウザーのバージョンに合わせて自動取得）"));
+  A("        SET SmMsg TO SmObj['result']['message']");
+  A("    END");
+  A("    IF SmObj['result']['code'] <> 0 THEN");
+  A("        SET Halt TO True");
+  A("        SET HaltReason TO " + robinStr("ドライバーの取得に失敗しました（Selenium Manager）"));
+  A("        Display.ShowMessageDialog.ShowMessage Title: $'''ドライバー取得に失敗''' " +
+    "Message: SmOutput Icon: Display.Icon.Information Buttons: Display.Buttons.OK " +
+    "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> SmBtn");
+  A("    END");
+  A("END");
+  A("");
+  A("# ここから先はドライバーが要る。取得に失敗していたら入らない。");
+  A("# 入ってしまうと更新前の古いドライバーで起動し、");
+  A("#「sessionId がありません」という無関係なエラーに化ける。");
+  A("IF Halt = False THEN");
+  A("# --- 古いドライバーが残っていたら終了する ---");
+  A("# 前回の実行が異常終了すると、ドライバーがポート 9515 を掴んだまま残り、");
+  A("# 新しいドライバーが起動できない（古い方が応答してしまう）。");
+  A("# 別のブラウザーのフローを続けて動かす場合もポートを奪い合うため、両方を終了させる。");
+  A("System.TerminateProcess.TerminateProcessByName ProcessName: $'''msedgedriver'''");
+  A("System.TerminateProcess.TerminateProcessByName ProcessName: $'''chromedriver'''");
+  A("WAIT 1");
+  A("");
+  A("# --- WebDriver を起動 ---");
+  A("System.RunApplication.RunApplication ApplicationPath: DriverExe " +
+    "CommandLineArguments: $'''--port=9515''' WindowStyle: System.ProcessWindowStyle.Hidden " +
+    "ProcessId=> DriverPid");
+  A("WAIT 3");
+  A("");
+  A("# --- セッション開始（ブラウザ起動）---");
+  A("# ブラウザーは冒頭の Browser、プロキシの有無は UseProxy で切り替わる。");
+  A("# 組み合わせが増えるので、本文は前から継ぎ足して組み立てる。");
+  A("SET SessionBody TO $'''{\"capabilities\": {\"alwaysMatch\": {\"browserName\": \"%BrowserName%\"'''");
+  A("IF UseProxy THEN");
+  A("    SET SessionBody TO $'''%SessionBody%, \"proxy\": {\"proxyType\": \"manual\", " +
+    "\"httpProxy\": \"%ProxyAddr%\", \"sslProxy\": \"%ProxyAddr%\"}'''");
+  A("END");
+  A("SET SessionBody TO $'''%SessionBody%}}}'''");
+  A("SET AppJson TO $'''application/json'''");
+  A("SET NewUrl TO $'''%DriverUrl%/session'''");
+  A(web("NewUrl", "Post", "SessionBody", "SessionResp", "SessionStatus"));
+  A("# ↓ 「sessionId がありません」と出たらこの行を有効にして生の応答を確認する");
+  A("# Display.ShowMessageDialog.ShowMessage Title: $'''WebDriver 応答''' " +
+    "Message: SessionResp Icon: Display.Icon.Information Buttons: Display.Buttons.OK " +
+    "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> BtnDbg");
+  A("# セッションが作れたかを応答コードで判定する。ここを見ないと、失敗応答");
+  A("#（value の中身が error/message に入れ替わる）をそのまま読みに行って");
+  A("#「sessionId がありません」という、原因の分からないエラーになる。");
+  A("IF SessionStatus <> 200 THEN");
+  A("    SET Halt TO True");
+  A("    SET HaltReason TO " +
+    robinStr("WebDriver のセッションを作成できませんでした（ブラウザーとドライバーの不一致など）"));
+  A("    Display.ShowMessageDialog.ShowMessage Title: " + robinStr("セッション作成に失敗") +
+    " Message: SessionResp Icon: Display.Icon.Warning Buttons: Display.Buttons.OK " +
+    "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> SessBtn");
+  A("END");
+  A("END");
+  A("");
+  A("IF Halt = False THEN");
+  A("Variables.ConvertJsonToCustomObject Json: SessionResp CustomObject=> SessionObj");
+  A("# カスタムオブジェクトはブラケット記法で参照する。ドット記法は使えない。");
+  A("SET SessionId TO SessionObj['value']['sessionId']");
+  A("SET SessionOk TO True");
+  A("# 以降で使い回す URL を組み立てておく（1 行を短く保つため）");
+  A("SET ExecUrl TO $'''%DriverUrl%/session/%SessionId%/execute/sync'''");
+  A("SET GoUrl TO $'''%DriverUrl%/session/%SessionId%/url'''");
+  A("SET RectUrl TO $'''%DriverUrl%/session/%SessionId%/window/rect'''");
+  A("SET ShotUrl TO $'''%DriverUrl%/session/%SessionId%/screenshot'''");
+  A("SET QuitUrl TO $'''%DriverUrl%/session/%SessionId%'''");
+  A("");
+  A("# --- 起動したブラウザーとドライバーを確認する ---");
+  A("# 値はセッションの応答（capabilities）から取る。実際に動いているものが出る。");
+  A("SET BrowserVer TO SessionObj['value']['capabilities']['browserVersion']");
+  A("# 起動したのが要求どおりのブラウザーかを先に確かめる。ドライバーは取り違えても");
+  A("# セッションを張ってしまうことがあり、そのときは空白のウィンドウが出るだけで");
+  A("# 気づけない。ここで止めないと、続く capabilities の参照キーも食い違う。");
+  A("SET RealBrowser TO SessionObj['value']['capabilities']['browserName']");
+  A("IF RealBrowser <> BrowserName THEN");
+  A("    SET Halt TO True");
+  A("    SET HaltReason TO " +
+    robinStr("要求したブラウザー(%BrowserName%)と実際に起動したブラウザー(%RealBrowser%)が違います。ドライバーの取り違えです"));
+  A("    Display.ShowMessageDialog.ShowMessage Title: " + robinStr("ブラウザーの取り違え") +
+    " Message: HaltReason Icon: Display.Icon.Warning Buttons: Display.Buttons.OK " +
+    "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> MixBtn");
+  A("END");
+  A("");
+  A("IF Halt = False THEN");
+  A("SET DriverVer TO " + robinStr("(不明)"));
+  A("IF Browser = " + robinStr("chrome") + " THEN");
+  A("    SET DriverVer TO SessionObj['value']['capabilities']['chrome']['chromedriverVersion']");
+  A("END");
+  A("IF Browser = " + robinStr("edge") + " THEN");
+  A("    SET DriverVer TO SessionObj['value']['capabilities']['msedge']['msedgedriverVersion']");
+  A("END");
+  A("# メジャーバージョンの比較はページ側の JavaScript にやらせる。");
+  A("# PAD のテキスト分割アクションを増やさずに済み、貼り付け事故の余地が減る。");
+  A("SET VerBody TO $'''{\"script\": \"%JsVer%\", \"args\": [\"%BrowserVer%\", \"%DriverVer%\"]}'''");
+  A(web("ExecUrl", "Post", "VerBody", "VerResp", "VerStatus"));
+  A("Variables.ConvertJsonToCustomObject Json: VerResp CustomObject=> VerObj");
+  A("SET VerJudge TO " + robinStr("不一致（ブラウザー更新の可能性あり）"));
+  A("IF VerObj['value']['match'] = True THEN");
+  A("    SET VerJudge TO " + robinStr("一致"));
+  A("END");
+  A("SET DriverInfo TO " + robinStr("ブラウザー=%Browser% %BrowserVer% / WebDriver=%DriverProc% " +
+    "%DriverVer% / メジャー判定=%VerJudge% / 取得方法=%DriverSrc% / パス=%DriverExe%"));
+  A("File.WriteText File: LogFile TextToWrite: " + robinStr("[ドライバー] %DriverInfo%") +
+    " AppendNewLine: True IfFileExists: File.IfFileExists.Append");
+  A("# ダイアログにだけ補足を足す。ここはページを開く前なのでブラウザーは白紙で、");
+  A("# 初めて見た人が異常だと思いやすい。ログ側は 1 行を短く保つため足さない。");
+  A("SET DriverInfoMsg TO " +
+    robinStr("%DriverInfo%  ※この時点ではまだページを開いていません（白紙で正常）。OK を押すとページを開きます。"));
+  A("IF ShowDriverInfo THEN");
+  A("    Display.ShowMessageDialog.ShowMessage Title: " + robinStr("ドライバー確認") +
+    " Message: DriverInfoMsg Icon: Display.Icon.Information Buttons: Display.Buttons.OK " +
+    "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> DrvBtn");
+  A("END");
+  A("END");
+  A("");
+  A("END");
+
+  // ---- setup ----
+  A("# ================= セットアップ（最初に 1 回）=================");
+  A("# セッションが張れていなければ、以降の URL 変数が存在しないので入らない。");
+  A("IF Halt = False THEN");
+  A("SET RowError TO $''''''");
+  var n = 0, emittedDialog = false, inAuto = false;
+  for (var i2 = 0; i2 < setup.length; i2++) {
+    var st = setup[i2], t = st.type;
+
+    if (hasLogin && loginIdx[i2] && !emittedDialog) {
+      emittedDialog = true;
+      inAuto = true;
+      A("");
+      A("# ---------- 手動ログイン（既定）----------");
+      A("# フローを止めて人がログインする。PAD はパスワードを一度も受け取らないので、");
+      A("# 変数ペイン・実行ログ・エラーメッセージのどこにも残らない。");
+      A("# ★ ログインだけでなく、繰り返しの起点画面まで人が進めてから[OK]を押す。");
+      A("#   ログイン後の画面構成はサイト側の都合で変わることがあり、機械的に");
+      A("#   辿らせるより確実で、修正も要らない。");
+      A("# WebDriver は自分が起動したブラウザーしか操作できない。別に開いてある");
+      A("# 普段のブラウザーでログインしても、フローはそのタブを見られない。");
+      A("IF LoginMode = $'''manual''' THEN");
+      A("    Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' " +
+        "Message: $'''いま開いたブラウザーでログインし、繰り返しの起点画面まで進んでから[OK]を押してください。ブラウザーは閉じないでください。''' " +
+        "Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel " +
+        "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn");
+      A("    IF LoginBtn = $'''Cancel''' THEN");
+      A("        SET Halt TO True");
+      A("        SET HaltReason TO " + robinStr("手動ログインがキャンセルされました"));
+      A("    END");
+      A("END");
+      A("");
+      A("# ---------- 自動ログイン（LoginMode = auto のときだけ）----------");
+      A("# ★ 資格情報はフローに直書きしない。下の 2 行は、デザイナーから");
+      A("#   ［入力ダイアログを表示］を 2 つ置き（パスワード側は入力の種類を");
+      A("#   「パスワード」にする）、生成変数を EdiUser / EdiPassword に");
+      A("#   リネームしたものに置き換えること。");
+      A("# ★ ログイン部分の範囲は SECRET プレースホルダの位置から機械的に判定している。");
+      A("#   録画の形によっては境界がずれるので、貼り付け後に目で確認すること。");
+      A("IF LoginMode = $'''auto''' THEN");
+      A("    SET EdiUser TO $''''''");
+      A("    SET EdiPassword TO $''''''");
+      A("    # JSON 本文を壊さないよう \\ → \\\\ 、\" → \\\" の順でエスケープする。");
+      A("    # 順序を守ること（逆にすると 1 段目で入れた \\\\ を 2 段目が書き換える）。");
+      A("    # ActivateEscapeSequences: False が重要（True だと \\\\ が 1 個に戻る）。");
+      var BS = String.fromCharCode(92), DQ = String.fromCharCode(34);
+      ["EdiUser", "EdiPassword"].forEach(function (v) {
+        var tmp = v + "Esc";
+        A("    Text.Replace.ReplaceText Text: " + v +
+          " TextToFind: $'''" + BS + BS + "''' IgnoreCase: False" +
+          " ReplaceWith: $'''" + BS + BS + BS + BS + "'''" +
+          " ActivateEscapeSequences: False" +
+          " ComparisonType: Text.TextComparisonType.CultureSensitive" +
+          " Result=> " + tmp);
+        A("    Text.Replace.ReplaceText Text: " + tmp +
+          " TextToFind: $'''" + DQ + "''' IgnoreCase: False" +
+          " ReplaceWith: $'''" + BS + BS + DQ + "'''" +
+          " ActivateEscapeSequences: False" +
+          " ComparisonType: Text.TextComparisonType.CultureSensitive" +
+          " Result=> " + v);
+      });
+    }
+
+    var ind = inAuto ? "    " : "";
+
+    if (t === "comment") { A(ind + "# 💬 " + safeComment(st.text || "", cols)); continue; }
+    if (t === "setViewport") {
+      n += 1;
+      var w = parseInt(st.width, 10) || 1920;
+      var h = parseInt(st.height, 10) || 1080;
+      A(ind + "# [" + n + "] ウィンドウサイズ " + w + "x" + h);
+      A(ind + "# エビデンスに写る範囲はこのサイズで決まる。複数の PC に配布する場合は");
+      A(ind + "# 一番小さい画面に収まる値にそろえること。");
+      A(ind + "SET RectBody TO $'''{\"width\": " + w + ", \"height\": " + h + "}'''");
+      A(web("RectUrl", "Post", "RectBody", "RectResp", "RectStatus", ind));
+      continue;
+    }
+    if (t === "navigate") {
+      n += 1;
+      A(ind + "# [" + n + "] ページを開く（URL は冒頭の TargetUrl で設定）");
+      A(ind + "SET UrlBody TO $'''{\"url\": \"%TargetUrl%\"}'''");
+      A(web("GoUrl", "Post", "UrlBody", "UrlResp", "UrlStatus", ind));
+      A(ind + "WAIT 2");
+      continue;
+    }
+    if (t === "click" || t === "doubleClick" || t === "change") {
+      n += 1;
+      var cands = candidates(st);
+      var action = t === "change" ? "fill" : "click";
+      var value = st.value === undefined ? "" : st.value;
+      if (String(value).indexOf("{{SECRET:") === 0) {
+        var nm = String(value).slice("{{SECRET:".length, -2);
+        value = nm.toUpperCase().indexOf("USER") >= 0 ? "%EdiUser%" : "%EdiPassword%";
+      }
+      L = L.concat(robinAct(cands, action, value, ind,
+                            action + " " + (cands.length ? cands[0] : ""), n, cols));
+      A(ind + "WAIT 1");
+      continue;
+    }
+  }
+
+  if (inAuto) {
+    A("END");
+    A("");
+    A("# ---------- 使い終わったパスワードは即座に消す ----------");
+    A("SET EdiPassword TO $''''''");
+    A("SET EdiPasswordEsc TO $''''''");
+  }
+  A("");
+
+  // ---- 起点画面の確認 ----
+  var firstTarget = null;
+  for (var fi = 0; fi < loopSteps.length; fi++) {
+    var fs = loopSteps[fi];
+    if (fs.type === "click" || fs.type === "doubleClick" || fs.type === "change") {
+      var fc = robinFilterCandidates(candidates(fs));
+      var bad = fc.some(function (c) { return c.indexOf("{{") >= 0; });
+      if (fc.length && !bad) { firstTarget = fc; }
+      break;
+    }
+  }
+  if (firstTarget) {
+    A("# ---------- 起点画面かどうかを確認する ----------");
+    A("# ループ最初の操作対象がこの画面にあるかを、クリックせずに調べる。");
+    A("SET ActBody TO $'''{\"script\": \"%JsAct%\", \"args\": " +
+      pyJson([firstTarget, "find", ""]) + "}'''");
+    A(web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus"));
+    A("Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj");
+    A("IF ActObj['value']['ok'] <> True THEN");
+    A("    SET Halt TO True");
+    A("    SET HaltReason TO " + robinStr("繰り返しの起点画面に到達できませんでした"));
+    A("    Display.ShowMessageDialog.ShowMessage Title: $'''起点画面ではありません''' " +
+      "Message: $'''繰り返しの起点画面が表示されていません。ブラウザーで起点画面まで進めてから、もう一度実行してください。''' " +
+      "Icon: Display.Icon.Warning Buttons: Display.Buttons.OK " +
+      "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> StartBtn");
+    A("END");
+    A("");
+  }
+
+  A("# ---------- セットアップ失敗を検知して止める ----------");
+  A("# ここで止めないと、ループ先頭で RowError がリセットされるため、");
+  A("# 全件が「ステップ1で要素が見つかりません」という偽の失敗として記録される。");
+  A("IF RowError <> $'''''' THEN");
+  A("    SET Halt TO True");
+  A("    SET HaltReason TO RowError");
+  A("END");
+  A("END");
+  A("");
+
+  // ---- 明細読み込み ----
+  var keyRef = cols.length > 1 ? "Col2" : "$''''''";
+  A("# ================= 明細（CSV）を読み込む =================");
+  A("IF Halt = False THEN");
+  A("    File.ReadFromCSVFile.ReadCSV CSVFile: DetailsFile " +
+    "Encoding: File.CSVEncoding.UTF8 TrimFields: True " +
+    "FirstLineContainsColumnNames: True " +
+    "ColumnsSeparator: File.CSVColumnsSeparator.Comma CSVTable=> Rows");
+  A("    # 結果 CSV は、そのまま明細として読み直せる列構成にする。");
+  A("    # ID だけでなく業務キーも入れないと、再実行で対象を特定できない。");
+  var keyHead = cols.length > 1 ? cols[1] : "業務キー";
+  A("    File.WriteText File: ResultFile TextToWrite: $'''" + idCol + "," + keyHead +
+    ",結果,理由,エビデンス,実行日時''' AppendNewLine: True IfFileExists: File.IfFileExists.Overwrite");
+  A("    SET OkCount TO 0");
+  A("    SET NgCount TO 0");
+  A("    SET SkipCount TO 0");
+  A("    SET Attempted TO 0");
+  A("    SET PrevFailed TO False");
+  A("");
+
+  var ind1 = "    ", inner = "        ";
+  A(ind1 + "# ================= 明細ごとの繰り返し =================");
+  A(ind1 + "LOOP FOREACH Row IN Rows");
+  A(inner + "# 明細の列を変数に取り出す（リテラル内に単引用符を入れないため）");
+  A("@@COLVARS@@");
+  A(inner + "SET RowId TO Col1");
+  A(inner + "SET RowKey TO " + keyRef);
+  A(inner + "SET RowError TO $''''''");
+  A("");
+  A(inner + "# 再実行モードでは「失敗」行だけを対象にする");
+  A(inner + "IF RetryMode THEN");
+  A(inner + "    # 対象は「失敗」と「未実行」。未実行は件数上限で打ち切った行で、");
+  A(inner + "    # これを外すと上限を刻んで回したとき続きが流せない。");
+  A(inner + "    SET DoRow TO False");
+  A(inner + "    IF Row['結果'] = " + robinStr("失敗") + " THEN");
+  A(inner + "        SET DoRow TO True");
+  A(inner + "    END");
+  A(inner + "    IF Row['結果'] = " + robinStr("未実行") + " THEN");
+  A(inner + "        SET DoRow TO True");
+  A(inner + "    END");
+  A(inner + "    IF DoRow = False THEN");
+  A(inner + "        NEXT LOOP");
+  A(inner + "    END");
+  A(inner + "END");
+  A("");
+  A(inner + "# skip 列に値がある行は飛ばす（再実行 CSV には skip 列が無いので除外）");
+  A(inner + "IF RetryMode = False THEN");
+  A(inner + "    IF Row['skip'] <> $'''''' THEN");
+  A(inner + "        SET SkipCount TO SkipCount + 1");
+  A(inner + "        File.WriteText File: ResultFile " +
+    "TextToWrite: $'''%RowId%,%RowKey%,スキップ,,,''' AppendNewLine: True " +
+    "IfFileExists: File.IfFileExists.Append");
+  A(inner + "        NEXT LOOP");
+  A(inner + "    END");
+  A(inner + "END");
+  A("");
+  A(inner + "# 件数上限。打ち切った行も記録に残す（どこから再開するか分かる）");
+  A(inner + "IF Attempted >= MaxItems THEN");
+  A(inner + "    File.WriteText File: ResultFile " +
+    "TextToWrite: $'''%RowId%,%RowKey%,未実行,\"件数上限 %MaxItems% 件に達したため\",,''' " +
+    "AppendNewLine: True IfFileExists: File.IfFileExists.Append");
+  A(inner + "    NEXT LOOP");
+  A(inner + "END");
+  A(inner + "SET Attempted TO Attempted + 1");
+  A("");
+  A(inner + "# 直前の件が失敗していたら、起点に復帰してから始める。");
+  A(inner + "# 失敗した画面のまま次の件を始めると 1 件の失敗が全件に連鎖する。");
+  A(inner + "IF PrevFailed THEN");
+  if (recover.length) {
+    for (var ri = 0; ri < recover.length; ri++) {
+      var rst = recover[ri], rt = rst.type;
+      if (rt === "comment") {
+        A(inner + "    # 💬 " + safeComment(rst.text || "", cols));
+      } else if (rt === "click" || rt === "doubleClick" || rt === "change") {
+        var rc = candidates(rst);
+        var ract = rt === "change" ? "fill" : "click";
+        L = L.concat(robinActBestEffort(rc, ract, rst.value === undefined ? "" : rst.value,
+          inner + "    ", "復帰: " + ract + " " + (rc.length ? rc[0] : ""), cols));
+      } else if (rt === "navigate") {
+        A(inner + "    SET UrlBody TO $'''{\"url\": \"%TargetUrl%\"}'''");
+        A(web("GoUrl", "Post", "UrlBody", "UrlResp", "UrlStatus", inner + "    "));
+        A(inner + "    WAIT 2");
+      }
+    }
+  } else if (startUrl) {
+    A(inner + "    # batch に recover が無いので、開始 URL を開き直して復帰する。");
+    A(inner + "    # ログインが必要なサイトではセッションが切れる可能性があるため、");
+    A(inner + "    # 録画に recover セクションを用意するほうが確実。");
+    A(inner + "    SET UrlBody TO $'''{\"url\": \"%TargetUrl%\"}'''");
+    A(web("GoUrl", "Post", "UrlBody", "UrlResp", "UrlStatus", inner + "    "));
+    A(inner + "    WAIT 2");
+  } else {
+    A(inner + "    # ★ 復帰手順が定義されていない。batch に recover を追加すること。");
+    A(inner + "    #   このままでは 1 件失敗すると以降が連鎖して失敗する。");
+  }
+  A(inner + "    SET PrevFailed TO False");
+  A(inner + "END");
+  A(inner + "# 悲観的に置く。最後まで通れば False に戻る（フラグを立てる箇所が 1 行で済む）");
+  A(inner + "SET PrevFailed TO True");
+  A("");
+  A(inner + "# 日時つきのファイル名を作る。MM は月、mm は分。");
+  A(inner + "DateTime.GetCurrentDateTime.Local " +
+    "DateTimeFormat: DateTime.DateTimeFormat.DateAndTime CurrentDateTime=> NowDt");
+  A(inner + "Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt " +
+    "CustomFormat: $'''yyyyMMdd_HHmmss''' Result=> Stamp");
+  A(inner + "Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt " +
+    "CustomFormat: $'''yyyy/MM/dd HH:mm:ss''' Result=> RecStamp");
+  A(inner + "SET ShotPath TO $'''%ShotDir%\\\\%RowId%__%RowKey%__%Stamp%.png'''");
+  A(inner + "SET FailShot TO $'''%ShotDir%\\\\fail__%RowId%__%RowKey%__%Stamp%.png'''");
+  A(inner + "File.WriteText File: LogFile " +
+    "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 開始''' AppendNewLine: True " +
+    "IfFileExists: File.IfFileExists.Append");
+  A("");
+
+  var m = 0;
+  for (var li = 0; li < loopSteps.length; li++) {
+    var lst = loopSteps[li], lt = lst.type;
+    if (lt === "comment") { A(inner + "# 💬 " + safeComment(lst.text || "", cols)); continue; }
+    if (lt === "screenshot") {
+      A(inner + "# エビデンス保存（%RowId%__%RowKey%__日時）");
+      A(inner + "# WebDriver に撮らせるとページの表示領域だけが写る。");
+      A(inner + "# デスクトップや他ウィンドウは写らず、フォーカスにも依存しない。");
+      A(inner + "# 逆にスクロールしないと見えない範囲は写らない点に注意。");
+      L = L.concat(robinShot(inner, "ShotPath"));
+      A("");
+      continue;
+    }
+    if (lt === "assertText") {
+      m += 1;
+      var atext = lst.text || "";
+      A(inner + "# 完了確認。「ボタンは押せたが実際には処理されていない」を検知する。");
+      L = L.concat(robinAct([], "exists", atext, inner, "完了確認: " + atext, m, cols));
+      L = L.concat(robinFail(inner));
+      A("");
+      continue;
+    }
+    if (lt === "click" || lt === "doubleClick" || lt === "change") {
+      m += 1;
+      var lc = candidates(lst);
+      var lact = lt === "change" ? "fill" : "click";
+      L = L.concat(robinAct(lc, lact, lst.value === undefined ? "" : lst.value, inner,
+                            lact + " " + (lc.length ? lc[0] : ""), m, cols));
+      L = L.concat(robinFail(inner));
+      A(inner + "WAIT 1");
+      A("");
+      continue;
+    }
+  }
+
+  A(inner + "# ここまで来たら成功");
+  A(inner + "SET PrevFailed TO False");
+  A(inner + "SET OkCount TO OkCount + 1");
+  A(inner + "File.WriteText File: ResultFile " +
+    "TextToWrite: $'''%RowId%,%RowKey%,成功,,\"%ShotPath%\",%RecStamp%''' " +
+    "AppendNewLine: True IfFileExists: File.IfFileExists.Append");
+  A(inner + "File.WriteText File: LogFile " +
+    "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 成功''' AppendNewLine: True " +
+    "IfFileExists: File.IfFileExists.Append");
+  A(ind1 + "END");
+  A("END");
+  A("");
+
+  if (teardown.length) {
+    A("# ================= 後処理（batch の teardown）=================");
+    for (var ti = 0; ti < teardown.length; ti++) {
+      var tst = teardown[ti], tt = tst.type;
+      if (tt === "comment") {
+        A("# 💬 " + safeComment(tst.text || "", cols));
+      } else if (tt === "click" || tt === "doubleClick" || tt === "change") {
+        var tc = candidates(tst);
+        var tact = tt === "change" ? "fill" : "click";
+        L = L.concat(robinActBestEffort(tc, tact, tst.value === undefined ? "" : tst.value, "",
+          "後処理: " + tact + " " + (tc.length ? tc[0] : ""), cols));
+      }
+    }
+    A("");
+  }
+
+  A("# ================= 後片付け =================");
+  A("# セッションを張れなかったときは QuitUrl が無いので投げない。");
+  A("IF SessionOk THEN");
+  A(web("QuitUrl", "Delete", null, "QuitResp", "QuitStatus"));
+  A("END");
+  A("System.TerminateProcess.TerminateProcessByName ProcessName: DriverProc");
+  A("IF Halt = False THEN");
+  A("    Display.ShowMessageDialog.ShowMessage Title: $'''完了''' " +
+    "Message: $'''成功 %OkCount% / 失敗 %NgCount% / スキップ %SkipCount%（上限 %MaxItems% 件）  結果CSV: %ResultFile%''' " +
+    "Icon: Display.Icon.Information Buttons: Display.Buttons.OK " +
+    "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn");
+  A("END");
+  A("IF Halt THEN");
+  A("    DateTime.GetCurrentDateTime.Local " +
+    "DateTimeFormat: DateTime.DateTimeFormat.DateAndTime CurrentDateTime=> HaltDt");
+  A("    Text.ConvertDateTimeToText.FromCustomDateTime DateTime: HaltDt " +
+    "CustomFormat: " + robinStr("yyyy/MM/dd HH:mm:ss") + " Result=> HaltStamp");
+  A("    File.WriteText File: LogFile TextToWrite: " +
+    robinStr("[%HaltStamp%] 中止 %HaltReason%") +
+    " AppendNewLine: True IfFileExists: File.IfFileExists.Append");
+  A("    Display.ShowMessageDialog.ShowMessage Title: $'''中止''' " +
+    "Message: $'''%HaltReason%のため、明細を1件も処理せず中止しました。詳細は pad_progress.log を確認してください。''' " +
+    "Icon: Display.Icon.Warning Buttons: Display.Buttons.OK " +
+    "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn");
+  A("END");
+
+  var colvars = cols.map(function (c, i) {
+    return "        SET Col" + (i + 1) + " TO Row['" + c + "']";
+  }).join("\n");
+  var body = L.join("\n").replace("@@COLVARS@@", colvars);
+  return { robin: body + "\n", jsact: jsOne + "\n", warns: lintRobin(body.split("\n")) };
+}
+
+// 録画/バッチ定義 JSON の読み込み（行頭 // と # をコメントとして落とす）
+function loadRecording(text) {
+  if (text.charCodeAt(0) === 0xFEFF) { text = text.slice(1); }
+  var kept = text.split(/\r?\n/).filter(function (ln) {
+    var s = ln.replace(/^[\s\uFEFF]+/, "");
+    return !(s.indexOf("//") === 0 || s.indexOf("#") === 0);
+  });
+  return JSON.parse(kept.join("\n"));
+}
+
+// 明細 CSV のヘッダーだけ読む（ID 列の存在確認用）
+function csvHeaders(text) {
+  if (text.charCodeAt(0) === 0xFEFF) { text = text.slice(1); }
+  var line = text.split(/\r?\n/)[0] || "";
+  var out = [], cur = "", q = false;
+  for (var i = 0; i < line.length; i++) {
+    var ch = line[i];
+    if (q) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; } else { q = false; }
+      } else { cur += ch; }
+    } else if (ch === '"') { q = true; }
+    else if (ch === ",") { out.push(cur.trim()); cur = ""; }
+    else { cur += ch; }
+  }
+  out.push(cur.trim());
+  return out.filter(function (h) { return h !== ""; });
+}
+
+root.PadConvert = {
+  buildRobin: buildRobin,
+  loadRecording: loadRecording,
+  csvHeaders: csvHeaders,
+  jsActOneline: jsActOneline
+};
+})(typeof globalThis !== "undefined" ? globalThis : this);
+</script>
+
+<script>
+(function () {
+  if (typeof document === "undefined") { return; }
+  var $ = function (id) { return document.getElementById(id); };
+  var batchText = null, batchName = "";
+  var result = null;
+
+  function show(cls, html) {
+    $("msg").innerHTML = '<div class="' + cls + '">' + html + "</div>";
+  }
+
+  function readFile(file, cb) {
+    var r = new FileReader();
+    r.onload = function () { cb(r.result); };
+    r.readAsText(file, "utf-8");
+  }
+
+  function takeBatch(file) {
+    batchName = file.name;
+    readFile(file, function (txt) {
+      batchText = txt;
+      $("batchInfo").textContent = "読み込み: " + batchName + "（" + txt.length + " 文字）";
+    });
+  }
+
+  $("batchFile").addEventListener("change", function (e) {
+    if (e.target.files[0]) { takeBatch(e.target.files[0]); }
+  });
+  var drop = $("drop");
+  ["dragenter", "dragover"].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add("on"); });
+  });
+  ["dragleave", "drop"].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove("on"); });
+  });
+  drop.addEventListener("drop", function (e) {
+    if (e.dataTransfer.files[0]) { takeBatch(e.dataTransfer.files[0]); }
+  });
+  drop.addEventListener("click", function () { $("batchFile").click(); });
+
+  var detailHeaders = null;
+  $("detailsFile").addEventListener("change", function (e) {
+    var f = e.target.files[0];
+    if (!f) { return; }
+    readFile(f, function (txt) {
+      detailHeaders = PadConvert.csvHeaders(txt);
+      $("detailsInfo").textContent = "列: " + detailHeaders.join(" / ");
+      if (!$("idcol").value && detailHeaders.length) { $("idcol").value = detailHeaders[0]; }
+    });
+  });
+
+  $("run").addEventListener("click", function () {
+    if (!batchText) { show("err", "録画 JSON を読み込んでください。"); return; }
+    var idCol = $("idcol").value.trim();
+    if (!idCol && detailHeaders && detailHeaders.length) { idCol = detailHeaders[0]; }
+    if (!idCol) { show("err", "ID 列名を入れてください（明細ファイルを選ぶと自動で入ります）。"); return; }
+    if (detailHeaders && detailHeaders.indexOf(idCol) < 0) {
+      show("err", "ID 列 '" + idCol + "' が明細の列名にありません: " + detailHeaders.join(" / "));
+      return;
+    }
+    var batch;
+    try { batch = PadConvert.loadRecording(batchText); }
+    catch (err) { show("err", "録画 JSON を読めません: " + err.message); return; }
+
+    try {
+      result = PadConvert.buildRobin(batch, {
+        detailsPath: $("details").value.trim(),
+        idCol: idCol,
+        driverExe: $("driver").value.trim(),
+        outDir: $("outdir").value.trim(),
+        proxy: $("proxy").value.trim(),
+        autoDriver: $("autodrv").checked,
+        browser: $("browser").value
+      });
+    } catch (err) { show("err", "変換に失敗しました: " + err.message); return; }
+
+    $("out").value = result.robin;
+    ["copy", "save", "copyJs", "saveJs"].forEach(function (id) { $(id).disabled = false; });
+
+    var lines = result.robin.split("\n").length;
+    var html = "変換しました（" + lines + " 行）。「Robin をコピー」を押して、PAD の" +
+               "<strong>空の新規フロー</strong>に貼り付けてください。";
+    if (result.warns.length) {
+      show("warn", "⚠ " + result.warns.length + " 件の警告があります。貼り付けが無視される可能性があります。\n" +
+                   result.warns.join("\n"));
+    } else {
+      show("ok", html);
+    }
+  });
+
+  function copyText(txt, label) {
+    navigator.clipboard.writeText(txt).then(function () {
+      show("ok", label + "をコピーしました。");
+    }, function () {
+      $("out").value = txt; $("out").select();
+      show("warn", "自動コピーできませんでした。テキスト欄を Ctrl+C でコピーしてください。");
+    });
+  }
+  function saveText(txt, name) {
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([txt], { type: "text/plain;charset=utf-8" }));
+    a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+  }
+
+  $("copy").addEventListener("click", function () { copyText(result.robin, "Robin コード"); });
+  $("copyJs").addEventListener("click", function () { copyText(result.jsact, "共通 JavaScript"); });
+  $("save").addEventListener("click", function () { saveText(result.robin, "pad_flow.robin.txt"); });
+  $("saveJs").addEventListener("click", function () { saveText(result.jsact, "pad_flow.jsact.js"); });
+})();
+</script>
+</body>
+</html>
