@@ -1110,6 +1110,8 @@ function csvHeaders(text) {
 }
 
 root.PadConvert = {
+  version: CONVERTER_VERSION,
+  kind: CONVERTER_KIND,
   buildRobin: buildRobin,
   loadRecording: loadRecording,
   csvHeaders: csvHeaders,
@@ -1122,7 +1124,7 @@ root.PadConvert = {
 (function () {
   if (typeof document === "undefined") { return; }
   var $ = function (id) { return document.getElementById(id); };
-  $("ver").textContent = "変換器 " + CONVERTER_KIND + " v" + CONVERTER_VERSION;
+  $("ver").textContent = "変換器 " + PadConvert.kind + " v" + PadConvert.version;
   var batchText = null, batchName = "";
   var result = null;
 

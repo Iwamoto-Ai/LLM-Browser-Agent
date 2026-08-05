@@ -40,6 +40,10 @@ jobs:
           node-version: "20"
       - name: Verify browser converter matches Python
         run: node tools/verify_parity.mjs
+      - name: Install jsdom
+        run: npm install --no-save jsdom
+      - name: Smoke test the converter page
+        run: node tools/smoke_converter.mjs
 
   # 2) 配管テスト: 実ブラウザ(Edge)でローカルテストサイトを操作（LLM 不要）
   selftest-windows:
