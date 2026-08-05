@@ -47,3 +47,7 @@ data/edi2_*
 build/
 dist/
 *.spec
+
+# npm の依存（jsdom などを --no-save で入れたとき）
+node_modules/
+package-lock.json
