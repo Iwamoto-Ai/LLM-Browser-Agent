@@ -54,13 +54,17 @@ for (const c of cases) {
   // Windows の Python は書き出し時に \n を \r\n に変換する。改行コードの違いは
   // 内容の違いではないので、比較の前にそろえる（CI は Linux なので LF のまま）。
   const nl = (s) => s.split("\r\n").join("\n");
-  const expected = nl(fs.readFileSync(py, "utf8"));
-  if (nl(out.robin) === expected) {
+  // 「# 変換器：…」は Python 版とブラウザ版で必ず食い違う（そのための行）。
+  // ここだけ比較から外す。他の行は 1 文字も違ってはいけない。
+  const strip = (s) => nl(s).split("\n")
+    .filter((ln) => !ln.startsWith("# 変換器：")).join("\n");
+  const expected = strip(fs.readFileSync(py, "utf8"));
+  if (strip(out.robin) === expected) {
     console.log("OK  一致:", c.batch);
   } else {
     ng++;
     console.log("NG  不一致:", c.batch);
-    const a = expected.split("\n"), b = nl(out.robin).split("\n");
+    const a = expected.split("\n"), b = strip(out.robin).split("\n");
     let shown = 0;
     for (let i = 0; i < Math.max(a.length, b.length) && shown < 8; i++) {
       if (a[i] !== b[i]) {

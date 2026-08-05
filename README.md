@@ -582,32 +582,26 @@ HTTP で指示すれば**拡張機能なしでブラウザを操作できる**�
 **💡[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)** にまとめてある。
 
 
-### 📦 Python なしで変換する（EXE 版）
+### 🌐 変換器（ブラウザ版）★推奨
 
-変換だけなら**単体の実行ファイル**でもできる。Python も依存ライブラリも要らないので、
-開発環境を用意できないメンバーでも変換に参加できる。
+**`tools/pad_converter.html` をブラウザーで開くだけ**で変換できる。インストール不要、通信なし、
+Python も実行ファイルも要らない。ファイルを 1 つ持っていって開くだけなので、
+開発ツールを入れられない PC でもそのまま使える。
 
-[Releases](../../releases) から `pad_webdriver_ref.exe` をダウンロードして、そのまま実行する。
+1. `tools/pad_converter.html` をダウンロードしてブラウザーで開く
+2. 録画 JSON をドラッグ＆ドロップ
+3. **実行環境（PAD を動かす PC）のパス**を入力（明細ファイル / ドライバー / BaseDir）
+4. 「変換する」→「Robin をコピー」→ PAD の**空の新規フロー**に `Ctrl+V`
 
-```
-pad_webdriver_ref.exe --batch recordings\edi2_practice_batch.json ^
-    --details "C:\temp\edi2_batch.csv" --id-column "プロジェクト番号" ^
-    --robin output\pad_flow.robin.txt ^
-    --driver-exe "C:\temp\msedgedriver.exe" --pad-out-dir "C:\temp" ^
-    --pad-browser edge --auto-driver
-```
+コマンドラインの引数を覚える必要がない。**画面に「実行環境のパスを入れる」と明記してある**ので、
+変換環境のパスを渡してしまう取り違えも起きにくい。
 
-引数は Python 版とまったく同じで、出力も一致する（CI で毎回突き合わせている）。
+出力は Python 版と 1 文字まで一致する（`tools/verify_parity.mjs` で CI が毎回突き合わせている）。
+生成物のヘッダーに `# 変換器：ブラウザ版 v1.0.0` が入るので、**どちらの変換器のどの版で作られたか**は
+後から分かる。
 
-- **8MB 程度の 1 ファイル。** インストール不要
-- **署名は付いていない。** 初回は SmartScreen が警告を出す。Release の
-  `SHA256SUMS.txt` と `Get-FileHash` の結果を照合してから使うこと
-- 環境によっては、署名の無い実行ファイルの持ち込み自体が制限されていることがある。
-  その場合は変換を別の PC で行い、できあがった `.robin.txt`（ただのテキスト）を
-  持ち込めばよい
-
-自分でビルドする場合は Windows 上で `.\build_exe.ps1` を実行する
-（`-Mode onedir` でフォルダ形式にもできる）。
+> 共通 JavaScript は**コピーのみ**で、保存機能は用意していない。スクリプト単体のファイルは
+> ウイルス対策にブロックされるため。通常は Robin の中に 18 行へ分割して埋め込まれるので出番はない。
 
 ### 🗺️ 録画 JSON から PAD フローを作る流れ
 
@@ -623,8 +617,10 @@ pad_webdriver_ref.exe --batch recordings\edi2_practice_batch.json ^
                     ▼
 変換環境（Python が使える PC。ブラウザも WebDriver も不要）
   ② setup / loop / recover / teardown に分割、値を {{列名}} / {{SECRET:…}} へ
-  ③ python pad_webdriver_ref.py --robin output/pad_flow.robin.txt …
-       └→ pad_flow.robin.txt（PAD に貼る本体）＋ pad_flow.jsact.js
+  ③ 変換する（どちらでも同じ結果）
+       ・ブラウザ版: tools/pad_converter.html を開いて Robin をコピー ★推奨
+       ・Python 版 : python pad_webdriver_ref.py --robin output/pad_flow.robin.txt …
+       └→ pad_flow.robin.txt（PAD に貼る本体）
                     │
                     │  生成した PADコード(Robin) を実行環境へ渡す
                     ▼
@@ -637,7 +633,7 @@ pad_webdriver_ref.exe --batch recordings\edi2_practice_batch.json ^
 ```
 
 
-### ⚙️ 操作録画をPADコードへ変換ツール　pad_webdriver_ref.py
+### ⚙️ 変換器（Python 版・上級者向け）　pad_webdriver_ref.py
 
 ```
 # Python が使える環境で変換する（ブラウザも WebDriver も不要）
@@ -678,6 +674,22 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 
 最後の 1 つが効く。**PAD は解釈できない行をエラーも出さずに無視する**ため、生成時に検出できないと
 「貼り付けたのにアクションが足りない」という形で後から発覚する。
+
+### 📦 EXE をビルドする（任意）
+
+Python 版は単体の実行ファイルにもできる。**配布はしていない**ので、必要なら自分でビルドする。
+
+```
+pip install pyinstaller
+.\build_exe.ps1              # -Mode onedir でフォルダ形式にもできる
+```
+
+`dist\pad_webdriver_ref.exe`（8MB 程度）ができる。引数は Python 版と同じで、出力も一致する。
+ビルド後にサイズと SHA256 が表示される。
+
+- **署名は付かない。** 環境によっては、署名の無い実行ファイルの実行自体が制限されていることがある
+- **変換だけならブラウザ版で足りる**ので、EXE が要る場面は限られる。バッチファイルから
+  自動で回したい、といった用途向け
 
 `{{列名}}` はループ先頭で `SET Col1 TO Row['列名']` として取り出され、以降は `%Col1%` で参照される
 （リテラル内に単引用符を入れると貼り付けが無視されるため）。`{{SECRET:…}}` は JSON 用に
