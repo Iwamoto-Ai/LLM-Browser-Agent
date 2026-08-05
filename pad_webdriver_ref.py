@@ -800,8 +800,9 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# （%JsAct% は直前までの内容。順番どおりに貼ること）")
     for line in _robin_js_chunks(js_one):
         A(line)
-    A("# ※ 継ぎ足しがうまくいかない場合は、同時生成した pad_flow.jsact.js の中身を")
-    A("#   「変数の設定」アクション（変数名 JsAct）の値の欄に手で貼り付けてもよい。")
+    A("# ※ 継ぎ足しがうまくいかない場合は、共通 JavaScript（変換器のコピー機能、または")
+    A("#   Python 版が同時に出力する .jsact ファイル）の中身を「変数の設定」アクション")
+    A("#   （変数名 JsAct）の値の欄に手で貼り付けてもよい。")
     A("")
     A("")
     A("# --- バージョン比較用の JavaScript ---")

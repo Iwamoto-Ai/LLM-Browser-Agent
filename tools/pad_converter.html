@@ -73,8 +73,11 @@
   <button id="copy" disabled>Robin をコピー</button>
   <button id="save" disabled>Robin を保存</button>
   <button id="copyJs" disabled>共通 JavaScript をコピー</button>
-  <button id="saveJs" disabled>共通 JavaScript を保存</button>
 </div>
+
+<p class="hint">「保存」はブラウザーの既定のダウンロードフォルダーに書き出します。
+   共通 JavaScript はコピーのみです（スクリプト単体のファイルはウイルス対策に
+   ブロックされるため）。</p>
 
 <div id="msg"></div>
 <textarea id="out" readonly spellcheck="false"></textarea>
@@ -544,8 +547,9 @@ function buildRobin(batch, opt) {
   A("# PAD は長すぎる 1 行を貼り付けても黙って無視するため、短い行に分けて継ぎ足す。");
   A("# （%JsAct% は直前までの内容。順番どおりに貼ること）");
   robinJsChunks(jsOne).forEach(A);
-  A("# ※ 継ぎ足しがうまくいかない場合は、同時生成した pad_flow.jsact.js の中身を");
-  A("#   「変数の設定」アクション（変数名 JsAct）の値の欄に手で貼り付けてもよい。");
+  A("# ※ 継ぎ足しがうまくいかない場合は、共通 JavaScript（変換器のコピー機能、または");
+  A("#   Python 版が同時に出力する .jsact ファイル）の中身を「変数の設定」アクション");
+  A("#   （変数名 JsAct）の値の欄に手で貼り付けてもよい。");
   A("");
   A("");
   A("# --- バージョン比較用の JavaScript ---");
@@ -1184,7 +1188,7 @@ root.PadConvert = {
     } catch (err) { show("err", "変換に失敗しました: " + err.message); return; }
 
     $("out").value = result.robin;
-    ["copy", "save", "copyJs", "saveJs"].forEach(function (id) { $(id).disabled = false; });
+    ["copy", "save", "copyJs"].forEach(function (id) { $(id).disabled = false; });
 
     var lines = result.robin.split("\n").length;
     var html = "変換しました（" + lines + " 行）。「Robin をコピー」を押して、PAD の" +
@@ -1216,7 +1220,6 @@ root.PadConvert = {
   $("copy").addEventListener("click", function () { copyText(result.robin, "Robin コード"); });
   $("copyJs").addEventListener("click", function () { copyText(result.jsact, "共通 JavaScript"); });
   $("save").addEventListener("click", function () { saveText(result.robin, "pad_flow.robin.txt"); });
-  $("saveJs").addEventListener("click", function () { saveText(result.jsact, "pad_flow.jsact.js"); });
 })();
 </script>
 </body>
