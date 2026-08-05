@@ -420,10 +420,12 @@ PAD は貼り付けたテキストを解釈できないと**エラーも出さ�
   SET JsAct TO $'''前半…'''
   SET JsAct TO $'''%JsAct%後半…'''
   ```
-- **`.js` ファイルに逃がして読み込む。** 生成される `pad_flow.jsact.js` を PAD 実行 PC の
-  出力フォルダに置き、「ファイルからテキストを読み取る」で `%JsAct%` に入れる。
-  それも通らない場合は「変数の設定」を手で 1 つ置き、値の欄に `.js` の中身を直接貼る
-  （UI の入力欄なら長い文字列でも入る）。変数名は `JsAct`。
+- **共通 JavaScript を丸ごと貼る。** 「変数の設定」アクションを 1 つ置き、値の欄に
+  中身を直接貼る（UI の入力欄なら長い文字列でも入る）。変数名は `JsAct`。
+  中身はブラウザ版の「共通 JavaScript をコピー」で取るか、Python 版が同時に出力する
+  `pad_flow.jsact.js` から取る。
+  **ブラウザ版にファイル保存の機能は無い。** 単体のスクリプトファイルはウイルス対策に
+  ブロックされ、`.txt` にリネームしても同じだった（拡張子ではなく中身が検知される）。
 
 ### 系統 3: 変数の渡し方
 
@@ -538,7 +540,7 @@ END
 
 ---
 
-## 🤖 録画JSONファイルをPADコード(Robin)へ pad_webdriver_ref.py で変換
+## 🤖 録画JSONファイルをPADコード(Robin)へ変換する
 
 PAD のフローは内部的に **Robin 言語**で表現されており、フローデザイナーのキャンバスに
 **Robin のテキストを貼り付ける（Ctrl+V）とアクションが並ぶ**。この性質を使い、
@@ -551,6 +553,38 @@ PAD のフローは内部的に **Robin 言語**で表現されており、フ�
 
 
 
+
+### 🌐 変換の手段は 2 つ（出力は同じ）
+
+| | 中身 | 向いている人 |
+| --- | --- | --- |
+| **ブラウザ版**（推奨） | `tools/pad_converter.html` をブラウザーで開くだけ | 全員。インストール不要、通信なし |
+| Python 版 | `pad_webdriver_ref.py` をコマンドラインから | 自動化したい人、上級者 |
+
+**出力は 1 文字まで一致する。** `tools/verify_parity.mjs` が CI で毎回突き合わせている。
+どちらで作ったものかは生成物のヘッダーに残る。
+
+```
+# 変換器：ブラウザ版 v1.0.0
+```
+
+版の値は両方にソース定数として持たせてあり、**上げるときは必ず同時に直す**。
+`verify_parity.mjs` はこの 1 行だけ比較から外している（種類が必ず食い違うため）。
+
+ブラウザ版の手順は 4 つ。
+
+1. `tools/pad_converter.html` をブラウザーで開く
+2. 録画 JSON をドラッグ＆ドロップ
+3. **実行環境（PAD を動かす PC）のパス**を入力（明細ファイル / ドライバー / BaseDir）
+4. 「変換する」→「Robin をコピー」→ PAD の**空の新規フロー**に `Ctrl+V`
+
+引数を覚える必要がなく、画面に「実行環境のパスを入れる」と明記してあるので、
+**変換環境のパスを渡してしまう取り違え**（後述）も起きにくい。
+
+> 共通 JavaScript は**コピーのみ**で、保存機能は用意していない。実機で
+> `pad_flow.jsact.js` がウイルス対策にブロックされ、`.txt` にリネームしても
+> 同じだった。**拡張子ではなく中身（DOM 操作のスクリプト）が検知される。**
+> 同じ内容でも Robin 側は 18 行に分割されているため問題なくダウンロードできる。
 
 ### 🗺️ 全体の流れ
 
@@ -653,7 +687,7 @@ Python を要求する部分で、ここは対象システムに触らない。
 
 ---
 
-### 手順 ④：PADコード(Robin)を生成する (pad_webdriver_ref.py)
+### 手順 ④：PADコード(Robin)を生成する（ブラウザ版 / pad_webdriver_ref.py）
 
 ```
 # Python が使えるPCで変換する（ブラウザも WebDriver も不要）
@@ -675,7 +709,7 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 | `--batch` | バッチ定義 JSON（③で作ったもの） |
 | `--details` | 明細 CSV のパス。`SET DetailsFile` になる |
 | `--id-column` | ID 列の名前。この列が `Col1` になり、進捗・結果・再実行のキーになる |
-| `--robin` | 出力先。同名で `.jsact.js` も一緒に出る |
+| `--robin` | 出力先。同名で `.jsact.js` も一緒に出る（ブラウザ版はコピーのみ） |
 | `--driver-exe` | `msedgedriver.exe` のパス。`SET DriverExe` になる |
 | `--pad-out-dir` | 出力フォルダ。`SET BaseDir` になる |
 
@@ -769,8 +803,9 @@ SET ShotDir TO $'''%BaseDir%'''
   1 つキャンバスに置いてコピー（Ctrl+C）してテキストに貼れば、その環境での正しい書式が分かる
 
 `SET JsAct TO …` の継ぎ足しが通らなかった場合だけ、その行を削除して
-「変数の設定」アクションを 1 つ置き、値の欄に `pad_flow.jsact.js` の中身を直接貼る
-（UI の入力欄なら長い文字列でも入る）。変数名は `JsAct`。
+「変数の設定」アクションを 1 つ置き、値の欄に共通 JavaScript の中身を直接貼る
+（UI の入力欄なら長い文字列でも入る）。変数名は `JsAct`。中身はブラウザ版の
+「共通 JavaScript をコピー」か、Python 版が出力する `pad_flow.jsact.js` から取る。
 
 ---
 
@@ -1084,6 +1119,77 @@ File.ConvertFromBase64    … IfFileExists: File.IfExists.DoNothing / Overwrite
 ---
 
 
+## 📥 ファイルのダウンロード（エビデンスが画面に出ない場合）
+
+登録の結果が画面に表示されず、**別メニューから Excel や PDF をダウンロードして初めて
+内容が分かる**業務がある。スクリーンショットでは証跡にならないため、ファイルとして
+受け取って保存する必要がある。以下はすべて実機で確認した書式（PAD 無料版 / Windows 11 / Edge）。
+
+### 保存先を固定し、確認ダイアログを出さない
+
+WebDriver が起動するブラウザーは素のプロファイルなので、既定では「ダウンロード」
+フォルダーに落ち、場合によっては確認が出る。セッション作成時の `prefs` で 4 つとも抑える。
+
+```
+SET SessionBody TO $'''%SessionBody%, \"ms:edgeOptions\": {\"prefs\": {\"download.default_directory\": \"C:\\\\temp\\\\evidence\"'''
+SET SessionBody TO $'''%SessionBody%, \"download.prompt_for_download\": false, \"plugins.always_open_pdf_externally\": true'''
+SET SessionBody TO $'''%SessionBody%, \"profile\": {\"default_content_setting_values\": {\"automatic_downloads\": 1}}}}'''
+```
+
+| 設定 | 効果 |
+| --- | --- |
+| `download.default_directory` | 保存先。**JSON の中に Windows パスを書くのでバックスラッシュは 4 本**（Robin で `\\`→`\`、JSON で `\\`→`\`） |
+| `download.prompt_for_download: false` | 保存ダイアログを出さない |
+| `plugins.always_open_pdf_externally: true` | **PDF をビューアで開かずファイルとして落とす。** これが無いと PDF は保存されない |
+| `automatic_downloads: 1` | 「複数ファイルのダウンロードを許可しますか」を出さない |
+
+**`prompt_for_download` と `automatic_downloads` は別物。** 前者だけでは
+「ブロック / 許可」の確認が出て、押すまでダウンロードが始まらない。
+
+### 完了を待つ
+
+クリックした瞬間はまだ書き込み中で、`.crdownload` が残る。**それが消えたことだけを
+見ていると、ダウンロードが始まる前に条件を満たして先へ進んでしまう。** 目的のファイルが
+実際に現れるまで数える。
+
+```
+LOOP WHILE Pending > 0
+    Folder.GetFiles Folder: DlDir FileFilter: $'''*.crdownload''' IncludeSubfolders: False FailOnAccessDenied: True SortBy1: Folder.SortBy.Name SortDescending1: False SortBy2: Folder.SortBy.LastModified SortDescending2: False SortBy3: Folder.SortBy.LastAccessed SortDescending3: False Files=> TempFiles
+    SET Pending TO TempFiles.Count
+    …（目的のファイルがそろったか数え、そろっていなければ Pending を 1 に戻す）
+    WAIT 1
+    SET Waited TO Waited + 1
+    IF Waited >= 30 THEN
+        SET Pending TO 0
+    END
+END
+```
+
+複合条件（`AND`）は実機未確認なので使わず、打ち切りは内側の `IF` で行っている。
+
+### エビデンス名に付け替える
+
+```
+File.RenameFiles.Rename Files: SrcFile NewName: NewBase KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> RenamedFiles
+```
+
+- **`NewName` は拡張子なしの名前だけでよい。** `KeepExtension: True` なので元の拡張子が残り、
+  **Excel と PDF で処理を分ける必要がない**
+- リネームは同じフォルダー内で行われるため、パスを付ける必要はない
+- **対象が存在しないと `FileNotFoundException` で止まる。** `Folder.GetFiles` で
+  存在を確かめてから実行すること
+
+サーバーが付けるファイル名が事前に分からない場合は、クリック前にファイル数を数え、
+増えたあとで `Folder.SortBy.LastModified` の降順から一番新しいものを取る。
+
+### 落とし穴
+
+- **ドライバーを取り違えてもセッションは張れる場合がある**が、`browserName` の不一致は
+  chromedriver も msedgedriver も `session not created` で拒否する。一方
+  **バージョンの不一致は拒否しない**（msedgedriver 150 で Edge 151 のセッションが張れた）
+- **単体のスクリプトファイルはウイルス対策にブロックされる。** `.js` でも `.txt` でも同じで、
+  拡張子ではなく中身が検知される。共通 JavaScript はコピーで受け渡すこと
+
 ## 🕒 日時とファイル名
 
 `DateTime.DateTimeFormat.DateAndTime` は `2026/07/23 8:41:00` のような値を返し、`/` と `:` は
@@ -1175,7 +1281,10 @@ END
 | 日時 → テキスト | `Text.ConvertDateTimeToText.FromCustomDateTime DateTime: CustomFormat: Result=>` |
 | ダイアログ | `Display.ShowMessageDialog.ShowMessage Title: Message: Icon: Buttons: Display.Buttons.OKCancel DefaultButton: IsTopMost: ButtonPressed=>` |
 | テキストの置換 | `Text.Replace.ReplaceText Text: TextToFind: IgnoreCase: ReplaceWith: ActivateEscapeSequences: ComparisonType: Text.TextComparisonType.CultureSensitive Result=>` |
-| ループ / 条件 / 変数 | `LOOP FOREACH … IN … END` / `NEXT LOOP` / `IF … THEN … END` / `SET … TO …` |
+| フォルダー作成 | `Folder.Create FolderPath: FolderName: Folder=>` |
+| フォルダー内のファイル取得 | `Folder.GetFiles Folder: FileFilter: IncludeSubfolders: FailOnAccessDenied: SortBy1: Folder.SortBy.Name SortDescending1: … Files=>` |
+| ファイル名の変更 | `File.RenameFiles.Rename Files: NewName: KeepExtension: IfFileExists: File.IfExists.Overwrite RenamedFiles=>` |
+| ループ / 条件 / 変数 | `LOOP FOREACH … IN … END` / `NEXT LOOP` / `IF … THEN … END` / `SET … TO …` / `LOOP WHILE … END` |
 
 `LOOP FOREACH` の内側でネストした `IF` と `NEXT LOOP` も正常に動作する。
 
@@ -1200,6 +1309,11 @@ END
 - `EXIT FUNCTION`
 - `Web.InvokeWebService` の `ConnectionTimeout` / `FollowRedirection` / `ClearCookies` / `Encoding`
 - `URL:`（正しくは `Url:`）
+- `Folder.SortBy1.NoSort` / `Folder.SortBy2.…` / `Folder.SortBy3.…`
+  （正しい名前空間は **`Folder.SortBy`**。確認済みの値は `Name` / `FullName` /
+  `LastModified` / `LastAccessed`）
+- `File.RenameFiles.RenameByReplacingText`（「新しい名前を設定する」は
+  **`File.RenameFiles.Rename`**）
 
 ---
 
