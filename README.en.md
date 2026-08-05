@@ -414,6 +414,7 @@ python run_recording.py --recording recordings/test_site.example.json --values d
 > for work that needs judgment or has screen variations, use **LLM-driven (template
 > operation)**. Both share the same `browser` layer.
 
+
 ### 🧪 Try it without a real system: local practice site (iframe + popup)
 
 Even without access to a real business system, a **practice dummy site with iframes
@@ -636,34 +637,29 @@ corporate proxy, and has been used on a real business system.** The build guide,
 confirmed on a real machine, and the full list of pitfalls are in
 **💡[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)** (written in Japanese).
 
-### 📦 Converting without Python (EXE build)
+### 🌐 Converter (browser version) — recommended
 
-Conversion alone can be done with a **single standalone executable**. No Python and no
-dependencies are required, so teammates who cannot set up a development environment
-can still convert recordings.
+**Just open `tools/pad_converter.html` in a browser.** No installation, no network access,
+no Python and no executable. It is a single file you can carry to any PC, which makes it
+usable even where development tools cannot be installed.
 
-Download `pad_webdriver_ref.exe` from [Releases](../../releases) and run it directly.
+1. Download `tools/pad_converter.html` and open it in a browser
+2. Drag and drop the recording JSON
+3. Fill in the paths **of the execution environment** (details file / driver / BaseDir)
+4. Convert → "Robin をコピー" → paste into an **empty new flow** in PAD with `Ctrl+V`
 
-```
-pad_webdriver_ref.exe --batch recordings\edi2_practice_batch.json ^
-    --details "C:\temp\edi2_batch.csv" --id-column "<ID column>" ^
-    --robin output\pad_flow.robin.txt ^
-    --driver-exe "C:\temp\msedgedriver.exe" --pad-out-dir "C:\temp" ^
-    --pad-browser edge --auto-driver
-```
+There are no command-line arguments to memorise, and the form states explicitly that the
+paths belong to the machine that runs PAD — the mistake of passing conversion-environment
+paths is much harder to make.
 
-The arguments are identical to the Python version, and so is the output — CI compares
-the two on every release build.
+The output matches the Python version byte for byte; `tools/verify_parity.mjs` checks this
+in CI on every push. The generated header carries a line such as
+`# 変換器：ブラウザ版 v1.0.0`, so you can always tell which converter and which version
+produced a given flow.
 
-- **A single file of around 8 MB.** No installation
-- **It is not code-signed.** SmartScreen will warn on first run. Check the value in
-  `SHA256SUMS.txt` against `Get-FileHash` before using it
-- Some environments block unsigned executables outright. In that case, run the
-  conversion on another PC and carry over the resulting `.robin.txt`, which is
-  plain text
-
-To build it yourself, run `.\build_exe.ps1` on Windows
-(`-Mode onedir` produces a folder instead of a single file).
+> The shared JavaScript can only be copied, not saved. Antivirus software blocks standalone
+> script files, and the snippet is normally embedded in the Robin code as 18 split lines
+> anyway, so a separate file is rarely needed.
 
 ### 🗺️ From a recording JSON to a PAD flow
 
@@ -676,8 +672,10 @@ or approved (step 1, the recording itself, does need access to the target system
 Conversion environment (a PC with Python; no browser, no WebDriver needed)
   1. Record the task with Chrome Recorder → export as JSON
   2. Split into setup / loop / recover / teardown; replace values with {{column}} / {{SECRET:…}}
-  3. python pad_webdriver_ref.py --robin output/pad_flow.robin.txt …
-       └→ pad_flow.robin.txt (paste this into PAD) + pad_flow.jsact.js (fallback)
+  3. Convert (either route gives the same result)
+       - Browser: open tools/pad_converter.html and copy the Robin code (recommended)
+       - Python : python pad_webdriver_ref.py --robin output/pad_flow.robin.txt …
+       └→ pad_flow.robin.txt (paste this into PAD)
                     │
                     │  hand the generated PAD code (Robin) to the execution environment
                     ▼
@@ -689,7 +687,7 @@ Execution environment (only WebDriver and PAD; no Python needed)
   7. Outputs in C:\temp: evidence PNGs / pad_result.csv / pad_progress.log
 ```
 
-### ⚙️ Converting a recording into PAD code — pad_webdriver_ref.py
+### ⚙️ Converter (Python version, for advanced users) — pad_webdriver_ref.py
 
 ```
 # Convert on a machine that has Python (no browser, no WebDriver needed)
@@ -737,6 +735,23 @@ to a JSON-escaped variable, so **no plaintext secret ends up in the generated fi
 navigator expands, for example) can change on the site's side, and walking them mechanically leads to a stop
 before the start screen is reached. Letting a human get there sidesteps that entirely, so the recorded steps
 after login only run when `LoginMode` is `auto`.
+
+### 📦 Building an EXE (optional)
+
+The Python version can be turned into a standalone executable. **It is not distributed** —
+build it yourself if you need one.
+
+```
+pip install pyinstaller
+.\build_exe.ps1              # -Mode onedir produces a folder instead of a single file
+```
+
+This produces `dist\pad_webdriver_ref.exe` (around 8 MB). The arguments and the output are
+identical to the Python version. The script prints the size and SHA256 when it finishes.
+
+- **It is not code-signed.** Some environments block unsigned executables outright
+- **The browser version covers conversion on its own**, so an EXE is only worth it for
+  narrow cases such as driving the conversion from a batch file
 
 ### 🧪 Export just the guide / practice locally
 
