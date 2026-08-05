@@ -52,6 +52,13 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 
+# 変換器の版。ブラウザ版（tools/pad_converter.html）と必ず同じ値にすること。
+# 生成物の先頭に「# 変換器：…」として出るので、持ち込まれた Robin を見たときに
+# どちらで、どの版で作られたものかが分かる。tools/verify_parity.mjs は
+# この行だけ比較から外している（種類が違うので必ず食い違うため）。
+CONVERTER_VERSION = "1.0.0"
+CONVERTER_KIND = "Python版"
+
 from engine_common import mask_secrets, resolve_secrets
 from recorder_import import fill_value, load_recording
 from details_io import load_details
@@ -715,6 +722,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# ============================================================")
     A("# LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai")
     A("# Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).")
+    A(f"# 変換器：{CONVERTER_KIND} v{CONVERTER_VERSION}")
     A("# ============================================================")
     A("")
     A("# --- 接続先：環境を切り替えるときはここを直す ---")

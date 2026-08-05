@@ -85,6 +85,7 @@
 <footer>
 LLM-Browser-Agent　PAD版　<a href="https://github.com/Iwamoto-Ai/LLM-Browser-Agent">GitHub</a>　/
 Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).<br>
+<span id="ver"></span><br>
 出力は Python 版 <code>pad_webdriver_ref.py</code> と一致します（CI で毎回突き合わせています）。
 </footer>
 
@@ -175,6 +176,11 @@ function pyJson(v) {
 var WORD = "[\\p{L}\\p{N}\\p{M}_]";
 
 var Q_ = "'''";
+
+// 変換器の版。Python 版（pad_webdriver_ref.py の CONVERTER_VERSION）と
+// 必ず同じ値にすること。生成物の先頭に「# 変換器：…」として出る。
+var CONVERTER_VERSION = "1.0.0";
+var CONVERTER_KIND = "ブラウザ版";
 
 function robinStr(s) {
   return "$'''" + String(s).split("\\").join("\\\\").split("'").join("\\'") + "'''";
@@ -461,6 +467,7 @@ function buildRobin(batch, opt) {
   A("# ============================================================");
   A("# LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai");
   A("# Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).");
+  A("# 変換器：" + CONVERTER_KIND + " v" + CONVERTER_VERSION + "");
   A("# ============================================================");
   A("");
   A("# --- 接続先：環境を切り替えるときはここを直す ---");
@@ -1115,6 +1122,7 @@ root.PadConvert = {
 (function () {
   if (typeof document === "undefined") { return; }
   var $ = function (id) { return document.getElementById(id); };
+  $("ver").textContent = "変換器 " + CONVERTER_KIND + " v" + CONVERTER_VERSION;
   var batchText = null, batchName = "";
   var result = null;
 

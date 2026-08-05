@@ -6,10 +6,11 @@
 # 処理内容：明細 1 件につき 6 操作を繰り返す（ID列: ID ／ 業務キー: KEY）
 #           開始URL: file:///C:/temp/sample.html
 #           明細CSV: sample_batch.csv
-# 備考：2026/08/02 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
+# 備考：2026/08/05 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
 # ============================================================
 # LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
 # Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).
+# 変換器：Python版 v1.0.0
 # ============================================================
 
 # --- 接続先：環境を切り替えるときはここを直す ---
@@ -102,8 +103,9 @@ SET JsAct TO $'''%JsAct%tion === `click`) { try { el.scrollIntoView({ block: `ce
 SET JsAct TO $'''%JsAct%if (action === `fill`) { el.focus(); el.value = value; el.dispatchEvent(new Event(`input`, { bubbles'''
 SET JsAct TO $'''%JsAct%: true })); el.dispatchEvent(new Event(`change`, { bubbles: true })); } return { ok: true, used: can'''
 SET JsAct TO $'''%JsAct%ds[i] }; } return { ok: false, used: null };'''
-# ※ 継ぎ足しがうまくいかない場合は、同時生成した pad_flow.jsact.js の中身を
-#   「変数の設定」アクション（変数名 JsAct）の値の欄に手で貼り付けてもよい。
+# ※ 継ぎ足しがうまくいかない場合は、共通 JavaScript（変換器のコピー機能、または
+#   Python 版が同時に出力する .jsact ファイル）の中身を「変数の設定」アクション
+#   （変数名 JsAct）の値の欄に手で貼り付けてもよい。
 
 
 # --- バージョン比較用の JavaScript ---
