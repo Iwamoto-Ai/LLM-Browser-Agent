@@ -15,7 +15,8 @@ dom.window.addEventListener("error", (e) => errors.push(String(e.error || e.mess
 await new Promise((r) => setTimeout(r, 300));
 
 const d = dom.window.document;
-for (const id of ["run", "copy", "save", "copyJs", "batchFile", "drop", "ver"]) {
+for (const id of ["run", "copy", "save", "copyJs", "batchFile", "drop", "ver",
+                  "idcol", "idcolHint", "detailsFile"]) {
   if (!d.getElementById(id)) { errors.push("要素が無い: #" + id); }
 }
 // 共通 JavaScript の保存はウイルス対策にブロックされるため、あってはいけない

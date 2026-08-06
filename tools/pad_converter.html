@@ -48,7 +48,7 @@
   <div><label for="details">明細ファイル (--details)</label>
     <input type="text" id="details" value="C:\temp\edi2_batch.csv"></div>
   <div><label for="idcol">ID 列 (--id-column)</label>
-    <input type="text" id="idcol" value=""> <span class="hint">空なら明細の先頭列</span></div>
+    <input type="text" id="idcol" value=""> <span class="hint" id="idcolHint">下の「明細ファイル」を選べば先頭列が自動で入ります</span></div>
   <div><label for="driver">ドライバー (--driver-exe)</label>
     <input type="text" id="driver" value="C:\temp\msedgedriver.exe"></div>
   <div><label for="outdir">BaseDir (--pad-out-dir)</label>
@@ -65,6 +65,8 @@
     <input type="checkbox" id="autodrv" checked> --auto-driver</div>
   <div><label for="detailsFile">明細ファイル（列名の確認用・任意）</label>
     <input type="file" id="detailsFile" accept=".csv,.txt"></div>
+  <div class="hint">上の「明細ファイル (--details)」は実行環境のパスを書くだけで、中身は読めません。
+     列名を確かめたい場合は、<strong>変換するこの PC にある</strong>同じ CSV をここで選びます。</div>
   <div class="hint" id="detailsInfo"></div>
 </fieldset>
 
@@ -1168,7 +1170,10 @@ root.PadConvert = {
     readFile(f, function (txt) {
       detailHeaders = PadConvert.csvHeaders(txt);
       $("detailsInfo").textContent = "列: " + detailHeaders.join(" / ");
-      if (!$("idcol").value && detailHeaders.length) { $("idcol").value = detailHeaders[0]; }
+      if (detailHeaders.length) {
+        $("idcolHint").textContent = "空なら先頭列（" + detailHeaders[0] + "）を使います";
+        if (!$("idcol").value) { $("idcol").value = detailHeaders[0]; }
+      }
     });
   });
 
@@ -1176,7 +1181,12 @@ root.PadConvert = {
     if (!batchText) { show("err", "録画 JSON を読み込んでください。"); return; }
     var idCol = $("idcol").value.trim();
     if (!idCol && detailHeaders && detailHeaders.length) { idCol = detailHeaders[0]; }
-    if (!idCol) { show("err", "ID 列名を入れてください（明細ファイルを選ぶと自動で入ります）。"); return; }
+    if (!idCol) {
+      show("err", "ID 列名を入れてください。<br>" +
+        "ブラウザ版は実行環境にある CSV を読めないため、空欄のままにはできません。" +
+        "「明細ファイル（列名の確認用・任意）」で同じ CSV を選ぶと、先頭列が自動で入ります。");
+      return;
+    }
     if (detailHeaders && detailHeaders.indexOf(idCol) < 0) {
       show("err", "ID 列 '" + idCol + "' が明細の列名にありません: " + detailHeaders.join(" / "));
       return;
