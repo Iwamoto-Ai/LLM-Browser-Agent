@@ -17,6 +17,9 @@ output/
 *.gif
 # もしリポジトリで配布したい画像があれば、次の形で個別に戻す:
 #   !docs/sample.png
+# ドキュメントに貼る画面写真（社内情報を含まないものだけ置くこと）
+!docs/SS_pad_converter_html_1.png
+!docs/SS_pad_converter_html_2.png
 
 # PAD 用に生成したフロー（実環境向けは社内 URL・実発注番号を含むため追跡しない）
 *.robin.txt
