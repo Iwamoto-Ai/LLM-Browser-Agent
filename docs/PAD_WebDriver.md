@@ -1,7 +1,7 @@
 # Power Automate Desktop 無料版 (PAD) と WebDriver だけでバッチ実行する（ブラウザ拡張機能は不要）
 
 Power Automate Desktop 無料版（PAD）の Web 自動化アクションは専用のブラウザ拡張機能を必要とするが、
-**WebDriver はブラウザ拡張機能が無くても動作する。（無関係）** `msedgedriver.exe` 自体がローカルの HTTP サーバーとして動く。
+**WebDriver はブラウザ拡張機能が無くても動作する。** `msedgedriver.exe` 自体がローカルの HTTP サーバーとして動く。
 つまり **HTTP リクエストを送れれば、拡張機能なしでブラウザを完全に操作できる**。
 PAD の「Web サービスの呼び出し」がまさにそれに当たる。
 
@@ -95,7 +95,7 @@ Python 版との対応:
  　　ブラウザのバージョンが更新されたら同じバージョンに入れ替える。　<br>
 
 　　msedgedriver.exe と chromedriver.exe は技術的にはどちらもChromiumエンジンを基にしているため、 <br>
-　　コードの書き方やAPI（操作コマンド）、DevTools は、ほぼ共通で対象ブラウザが Edge か Chrome かの違い。　<br>
+　　コードの書き方やAPI（操作コマンド）、DevTools は、ほぼ共通で違いはごくわずかで、ほぼ対象ブラウザが Edge か Chrome かの違い。<br>
 
 2. **プロキシ除外**: 社内プロキシがあると `localhost` 宛が失敗する。Windows のプロキシ設定で
    `localhost;127.0.0.1` を除外に入れる（Ollama で `NO_PROXY=localhost` を設定したのと同じ対策）。
@@ -544,7 +544,7 @@ END
 
 PAD のフローは内部的に **Robin 言語**で表現されており、フローデザイナーのキャンバスに
 **Robin のテキストを貼り付ける（Ctrl+V）とアクションが並ぶ**。この性質を使い、
-**Chrome Recorder の録画 JSON から PAD のフローを機械的に生成する**のがこの節の内容。
+**Chrome等の DevTools Recorder でブラウザ操作を録画し JSONでエクスポートし バッチ定義 JSON 編集後に生成器で PAD のフローへ変換生成する**のがこの節の内容。
 
 **アクションを 1 つずつ手で置く必要がない。**
 それ以上に重要なのは、 **この手順書に書かれた落とし穴の回避策がすべて生成器に組み込まれている** 
@@ -558,8 +558,8 @@ PAD のフローは内部的に **Robin 言語**で表現されており、フ�
 
 | | 中身 | 向いている人 |
 | --- | --- | --- |
-| **ブラウザ版**（推奨） | `tools/pad_converter.html` をブラウザーで開くだけ | 全員。インストール不要、通信なし |
-| Python 版 | `pad_webdriver_ref.py` をコマンドラインから | 自動化したい人、上級者 |
+| **ブラウザ版**（推奨） | `pad_converter.html` をブラウザーで開くだけ | 一般ユーザー向け。インストール不要、通信なし、Pythonなどの開発ツール不要 |
+| Python 版 | `pad_webdriver_ref.py` をコマンドラインで実行 | 上級者向け。自動化したい人 |
 
 **出力は 1 文字まで一致する。** `tools/verify_parity.mjs` が CI で毎回突き合わせている。
 どちらで作ったものかは生成物のヘッダーに残る。
@@ -571,9 +571,10 @@ PAD のフローは内部的に **Robin 言語**で表現されており、フ�
 版の値は両方にソース定数として持たせてあり、**上げるときは必ず同時に直す**。
 `verify_parity.mjs` はこの 1 行だけ比較から外している（種類が必ず食い違うため）。
 
+
 ブラウザ版の手順は 4 つ。
 
-1. `tools/pad_converter.html` をブラウザーで開く
+1. `tools/pad_converter.html` をダウンロードしてローカル（例 C:\Temp ）に置きブラウザーで開く
 2. 録画 JSON をドラッグ＆ドロップ
 3. **実行環境（PAD を動かす PC）のパス**を入力（明細ファイル / ドライバー / BaseDir）
 4. 「変換する」→「Robin をコピー」→ PAD の**空の新規フロー**に `Ctrl+V`
@@ -585,6 +586,15 @@ PAD のフローは内部的に **Robin 言語**で表現されており、フ�
 > `pad_flow.jsact.js` がウイルス対策にブロックされ、`.txt` にリネームしても
 > 同じだった。**拡張子ではなく中身（DOM 操作のスクリプト）が検知される。**
 > 同じ内容でも Robin 側は 18 行に分割されているため問題なくダウンロードできる。
+
+
+<div align="center">
+　ブラウザ版 生成器  `tools/pad_converter.html` の画面
+  <img src="SS_pad_converter_html_1.png">
+</div>
+
+
+
 
 ### 🗺️ 全体の流れ
 
@@ -603,50 +613,51 @@ PAD のフローは内部的に **Robin 言語**で表現されており、フ�
 │           │                                               │
 └───────────▼───────────────────────────────────────────────┘
             │  
-            │  操作録画ファイル（JSON）を変換環境へ渡す
+            │  操作録画ファイル（JSON）
             │  
-┌───────────────────────────────────────────────────────────┐
-│ 変換環境（Python が使える PC。ブラウザも WebDriver も不要）  │
-│                                                           │
-│           │  python pad_webdriver_ref.py --robin …        │
-│           ▼                                               │
-│  ④ output/pad_flow.robin.txt   ← PAD に貼り付ける本体      │
-│     output/pad_flow.jsact.js   ← 長い行が貼れない時に使う   │
-│                                                           │
-│     （任意）--trace で手順書 pad_trace.md も出せる          │
-└───────────┬───────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│ 変換生成器                                                   │
+│           │  ブラウザ版 `pad_converter.html`                 │
+│           │  　または                                        │
+│           │  python版 `pad_webdriver_ref.py`                │
+│           ▼                                                 │
+│  ④ output/pad_flow.robin.txt   ← PAD に貼り付ける本体        │
+│     output/pad_flow.jsact.js   ← 長い行が貼れない時に使う     │
+│                                                             │
+│   （任意）python版のみ --trace で手順書 pad_trace.md も出せる  │
+└───────────┬─────────────────────────────────────────────────┘
             │  
-            │  生成したPADコード(Robin) を業務環境へ渡す
+            │  生成したPADコード(Robin) 
             │  
-┌───────────▼───────────────────────────────────────────────────────────────────────────┐
-│ 業務環境（PAD と WebDriver だけ使える PC。 Python は不要）                               │
-│                                                                                       │
-│  ⑤ C:\temp に置く                                                                      │
-│       msedgedriver.exe と selenium-manager-windows.exe ／ 明細CSV ／ pad_flow.jsact.js │
-│           ▼                                                                           │
-│  ⑥ PAD で新規フロー → キャンバスに Ctrl+V                                               │
-│           ▼                                                                           │
-│  ⑦ MaxItems = 1 で試走 → 目で確認 → データ件数に増やし本番実行                            │
-│           ▼                                                                           │
-│  ⑧ C:\temp に出力                                                                     │
-│       <ID>__<業務キー>__日時.png（エビデンス）                                          │
-│       pad_result.csv（結果・再実行の入力にもなる）                                      │
-│       pad_progress.log（進捗）                                                        │
-└──────────────────────────────────────────────────────────────────────────────────────┘
+┌───────────▼────────────────────────────────────────────────────────────────────────────┐
+│ 業務環境                                                                                │
+│ （Power Automate Desktop 無料版(PAD) と WebDriver が使える PC。 Python は不要）           │
+│                                                                                        │
+│  ⑤ C:\temp に置く                                                                       │
+│       msedgedriver.exe と selenium-manager-windows.exe ／ 明細CSV ／ pad_flow.jsact.js  │
+│           ▼                                                                            │
+│  ⑥ PAD で新規フロー → キャンバスに Ctrl+V                                                │
+│           ▼                                                                            │
+│  ⑦ MaxItems = 1 で試走 → 目で確認 → データ件数に増やし本番実行                             │
+│           ▼                                                                            │
+│  ⑧ C:\temp に出力                                                                       │
+│       <ID>__<業務キー>__日時.png（エビデンス）                                           │
+│       pad_result.csv（結果・再実行の入力にもなる）                                        │
+│       pad_progress.log（進捗）                                                          │
+└────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**実行環境に Python が無くてもよい**のがこの方式の要点。変換だけを Python が使える PC で行い、
+**実行環境に Python が無くてもよい**のがこの方式の要点。
 できあがった PADコード(Robin)を実行環境の PAD に貼り付けて使う。
-変換に使うPCは Python は必須だが、ブラウザも WebDriver も無くてよい。
 
-なお、録画（①）は**対象システムにアクセスできる環境**で行う必要がある。②③④の変換作業だけが
-Python を要求する部分で、ここは対象システムに触らない。
+なお、録画（①）は**対象システムにアクセスできる環境**で行う必要がある。
+
 
 ---
 
 ### 手順 ①〜③：録画 JSON をバッチ定義 JSON にする
 
-録画のしかたは README の「Chrome Recorder で録画 → 決定論リプレイ」を参照。
+録画のしかたは README の「🎥 ブラウザに内蔵されている DevTools の Recorder でブラウザ操作録画 → 決定論リプレイ（拡張機能不要）」を参照。
 エクスポートした JSON を、次の 4 つのセクションに振り分ける。
 
 ```
@@ -687,8 +698,33 @@ Python を要求する部分で、ここは対象システムに触らない。
 
 ---
 
-### 手順 ④：PADコード(Robin)を生成する（ブラウザ版 / pad_webdriver_ref.py）
+### 手順 ④：PADコード(Robin)を生成する
+#### 一般ユーザー向け: ブラウザ版 `pad_converter.html`　　※ Python などの開発ツール不要
 
+<div align="center"> <img src="SS_pad_converter_html_2.png"> </div>
+
+1. 録画 JSON
+ここにドラッグ＆ドロップ、またはファイルを選択
+
+2. 実行環境（PAD を動かす PC）のパス
+ここに書いた値は生成物にそのまま埋め込まれます。変換した PC のパスではなく、 PAD を動かす PC のパスを入れてください。
+明細ファイル (--details)：   C:\temp\edi2_batch.csv
+ID 列 (--id-column)： 　プロジェクト番号
+　　　　下の「明細ファイル」を選べば先頭列が自動で入ります
+ドライバー (--driver-exe)：　C:\temp\msedgedriver.exe
+BaseDir (--pad-out-dir)：  C:\temp
+
+3. オプション
+ブラウザー (--pad-browser)：  edge
+プロキシ (--proxy) ： 　proxy.example.com:8080
+ドライバー自動取得：   --auto-driver
+明細ファイル（列名の確認用・任意） ファイルが選択されていません
+上の「明細ファイル (--details)」は実行環境のパスを書くだけで、中身は読めません。 
+列名を確かめたい場合は、変換するこの PC にある同じ CSV をここで選びます。
+
+
+
+#### 上級者向け: Python 版 `pad_webdriver_ref.py`
 ```
 # Python が使えるPCで変換する（ブラウザも WebDriver も不要）
 python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
@@ -845,7 +881,7 @@ SET ShotDir TO $'''%BaseDir%'''
 
 ---
 
-### （任意）手順書だけを出す
+### （任意）手順書だけを出す　　　※ python版のみ
 
 `--robin` の代わりに `--trace` を使うと、**PAD が送るのと同じ HTTP 呼び出しを同じ順序で
 実際に送りながら**、その呼び出し列を Markdown の表として書き出せる。フローを人に説明する
