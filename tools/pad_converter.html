@@ -367,6 +367,31 @@ function prescanCols(steps, cols) {
   }
 }
 
+// セクションごとに扱えるステップ種別。ここに無い種別は黙って捨てられるため、
+// 変換時に警告する。Python 版の SECTION_STEPS と同じ内容にすること。
+var SECTION_STEPS = {
+  setup: ["comment", "setViewport", "navigate", "click", "doubleClick", "change"],
+  loop: ["comment", "screenshot", "assertText", "click", "doubleClick", "change"],
+  recover: ["comment", "navigate", "click", "doubleClick", "change"],
+  teardown: ["comment", "click", "doubleClick", "change"]
+};
+
+function warnUnsupportedSteps(batch) {
+  var out = [];
+  for (var sec in SECTION_STEPS) {
+    if (!Object.prototype.hasOwnProperty.call(SECTION_STEPS, sec)) { continue; }
+    var allowed = SECTION_STEPS[sec], steps = batch[sec] || [];
+    for (var i = 0; i < steps.length; i++) {
+      var ty = steps[i].type || "";
+      if (ty && allowed.indexOf(ty) < 0) {
+        out.push(sec + " の " + (i + 1) + " 番目: 種別 '" + ty + "' は " + sec +
+                 " では無視されます（使えるのは " + allowed.slice().sort().join(" / ") + "）");
+      }
+    }
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- lint
 function lintRobin(lines) {
   var knownEnums = {
@@ -1079,7 +1104,8 @@ function buildRobin(batch, opt) {
     return "        SET Col" + (i + 1) + " TO Row['" + c + "']";
   }).join("\n");
   var body = L.join("\n").replace("@@COLVARS@@", colvars);
-  return { robin: body + "\n", jsact: jsOne + "\n", warns: lintRobin(body.split("\n")) };
+  var warns = warnUnsupportedSteps(batch).concat(lintRobin(body.split("\n")));
+  return { robin: body + "\n", jsact: jsOne + "\n", warns: warns };
 }
 
 // 録画/バッチ定義 JSON の読み込み（行頭 // と # をコメントとして落とす）
