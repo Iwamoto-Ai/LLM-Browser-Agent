@@ -584,6 +584,8 @@ HTTP で指示すれば**拡張機能なしでブラウザを操作できる**�
 成功 3 / スキップ 1）。**社内プロキシ経由の外部サイトにも接続でき、実業務システムでの処理も確認済み。**
 組み立て手順・実機で確定した PADコード(Robin) の書式・落とし穴は
 **💡[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)** にまとめてある。
+生成器の設計や、実機で分かった PAD の書式の癖は
+**[docs/PAD_WebDriver_internals.md](docs/PAD_WebDriver_internals.md)** に分けてある。
 
 
 
