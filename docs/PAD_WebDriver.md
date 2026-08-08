@@ -613,9 +613,9 @@ BaseDir (--pad-out-dir)：  C:\temp
 
 
 
-#### 上級者向け: Python 版 `pad_webdriver_ref.py`
+#### 上級者向け: Python版の変換器 `pad_webdriver_ref.py`
 ```
-# Python が使えるPCで変換する（ブラウザも WebDriver も不要）
+# Python版の変換器を使う場合は Python必要。（ブラウザ、WebDriver は不要）
 python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
     --details "C:\temp\edi2_batch.csv" --id-column "プロジェクト番号" `
     --robin output/pad_flow.robin.txt `
@@ -993,7 +993,7 @@ File.RenameFiles.Rename Files: SrcFile NewName: NewBase KeepExtension: True IfFi
 - **ドライバーを取り違えてもセッションは張れる場合がある**が、`browserName` の不一致は
   chromedriver も msedgedriver も `session not created` で拒否する。一方
   **バージョンの不一致は拒否しない**（msedgedriver 150 で Edge 151 のセッションが張れた）
-- **単体のスクリプトファイルはウイルス対策にブロックされる。** `.js` でも `.txt` でも同じで、
+- **単体のスクリプトファイルはウイルス対策に誤ブロックされる。** `.js` でも `.txt` でも同じで、
   拡張子ではなく中身が検知される。共通 JavaScript はコピーで受け渡すこと
 
 ---

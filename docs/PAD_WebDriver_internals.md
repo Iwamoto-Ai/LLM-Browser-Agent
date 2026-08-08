@@ -11,8 +11,8 @@
 
 ## 📖 目次
 
-**設計**　[🔌 使う HTTP 呼び出しは 6 種類だけ](#-使う-http-呼び出しは-6-種類だけ) / [📜 共通 JavaScript（変数 `%JsAct%` に入れておく）](#-共通-javascript変数-jsact-に入れておく) / [🔁 フローの組み立て](#-フローの組み立て) / [📸 エビデンスの撮り方](#-エビデンスの撮り方) / [🔐 自動ログインへの設計変更](#-自動ログインへの設計変更)
-**実機で分かったこと**　[⚠️ Web.InvokeWebService の引数（最重要）](#-webinvokewebservice-の引数最重要) / [📌 Robin リテラルのエスケープ（実機で判明）](#-robin-リテラルのエスケープ実機で判明) / [✅ 実機で確認できたアクション書式（PAD 無料版 / Windows 11）](#-実機で確認できたアクション書式pad-無料版--windows-11)
+**設計**　[🔌 使う HTTP 呼び出しは 6 種類だけ](#-使う-http-呼び出しは-6-種類だけ) / [📜 共通 JavaScript（変数 `%JsAct%` に入れておく）](#-共通-javascript変数-jsact-に入れておく) / [🔁 フローの組み立て](#-フローの組み立て) / [📸 エビデンスの撮り方](#-エビデンスの撮り方) / [🔐 自動ログインへの設計変更](#-自動ログインへの設計変更) <br>
+**実機で分かったこと**　[⚠️ Web.InvokeWebService の引数（最重要）](#-webinvokewebservice-の引数最重要) / [📌 Robin リテラルのエスケープ（実機で判明）](#-robin-リテラルのエスケープ実機で判明) / [✅ 実機で確認できたアクション書式（PAD 無料版 / Windows 11）](#-実機で確認できたアクション書式pad-無料版--windows-11) <br>
 **Python 版限定**　[📄 手順書の自動生成（Pythonが使える環境で使う）](#-手順書の自動生成pythonが使える環境で使う)
 
 ---
@@ -522,11 +522,12 @@ File: $'''ShotPath'''     ← 誤り（"ShotPath" という文字列になる）
 
 ## 📄 手順書の自動生成（Pythonが使える環境で使う）
 
-変換環境（Python が使える PC）向けに、**PAD が送るのと同じ HTTP 呼び出しを同じ順序で送る参照実装**を用意している。
-実際に練習サイトへ流して成功を確認しつつ、その呼び出し列を**Markdown の表として書き出せるので、資料作成に使える。**
+Python版の変換器は、**PAD が送るのと同じ HTTP 呼び出しを同じ順序で送る参照実装**を用意している。
+実際に練習サイトへ流して成功を確認しつつ、その呼び出し列を**Markdown の表として書き出せるので、手順書作成に使える。**
 
 ```
-# 別ターミナルで: msedgedriver.exe --port=9515
+# 別ターミナルでWebドライバーを実行しておく: msedgedriver.exe --port=9515
+# 手順書生成
 python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
     --details data/edi2_practice_batch.csv --trace output/pad_trace.md
 ```
