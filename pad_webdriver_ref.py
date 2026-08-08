@@ -1422,6 +1422,30 @@ def _use_utf8_stdout() -> None:
             pass
 
 
+# セクションごとに生成器が扱えるステップ種別。ここに無い種別を書いても
+# 黙って捨てられるため、生成時に警告する。たとえば setup に assertText を
+# 置いても何も出力されない（起点の確認はループ先頭の要素から自動生成する）。
+SECTION_STEPS = {
+    "setup": {"comment", "setViewport", "navigate", "click", "doubleClick", "change"},
+    "loop": {"comment", "screenshot", "assertText", "click", "doubleClick", "change"},
+    "recover": {"comment", "navigate", "click", "doubleClick", "change"},
+    "teardown": {"comment", "click", "doubleClick", "change"},
+}
+
+
+def _warn_unsupported_steps(batch: dict) -> list:
+    """バッチ定義の中で、そのセクションでは無視される種別を拾う。"""
+    warns = []
+    for sec, allowed in SECTION_STEPS.items():
+        for i, st in enumerate(batch.get(sec) or [], 1):
+            t = st.get("type", "")
+            if t and t not in allowed:
+                warns.append(
+                    f"{sec} の {i} 番目: 種別 '{t}' は {sec} では無視されます"
+                    f"（使えるのは {' / '.join(sorted(allowed))}）")
+    return warns
+
+
 def main() -> None:
     _use_utf8_stdout()
     p = argparse.ArgumentParser(
@@ -1478,6 +1502,8 @@ def main() -> None:
         print(f"📄 PAD 用 Robin コード: {out}")
         print(f"📄 共通 JavaScript   : {js_out}")
         _warn_exec_paths(args)
+        for w in _warn_unsupported_steps(batch):
+            print("  ⚠ " + w)
         print(f"   → .js は PAD 実行 PC の {args.pad_out_dir} に置くこと")
         if not args.trace:
             return
