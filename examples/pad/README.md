@@ -68,3 +68,4 @@ python pad_webdriver_ref.py \
 `--batch` と `--robin` は変換環境のパス。
 
 詳しい解説は [`../../docs/PAD_WebDriver.md`](../../docs/PAD_WebDriver.md)。
+生成器の設計は [`../../docs/PAD_WebDriver_internals.md`](../../docs/PAD_WebDriver_internals.md)。

@@ -636,6 +636,8 @@ the bundled practice site `test_site/edi2/`: 3 ok / 1 skipped). **It also reache
 corporate proxy, and has been used on a real business system.** The build guide, the PAD code (Robin) syntax
 confirmed on a real machine, and the full list of pitfalls are in
 **💡[docs/PAD_WebDriver.md](docs/PAD_WebDriver.md)** (written in Japanese).
+The generator's design and the PAD syntax quirks found on real machines are split out into
+**[docs/PAD_WebDriver_internals.md](docs/PAD_WebDriver_internals.md)** (also Japanese).
 
 ### 🌐 Converter (browser version) — recommended
 
