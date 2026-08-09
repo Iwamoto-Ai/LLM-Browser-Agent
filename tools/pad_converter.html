@@ -121,6 +121,7 @@
   <button id="copy" disabled>Robin をコピー</button>
   <button id="save" disabled>Robin を保存</button>
   <button id="copyJs" disabled>共通 JavaScript をコピー</button>
+  <button id="resetAll">最初からやり直す</button>
 </div>
 
 <p class="hint">「保存」はブラウザーの既定のダウンロードフォルダーに書き出します。
@@ -497,6 +498,33 @@ function describeStep(step) {
   return { jp: jp, raw: raw };
 }
 
+// 録画中に入力した値（ID・パスワードらしいものを除く）。
+// 「検索欄に打った番号」と「その番号の行をクリック」は同じ文字列になるので、
+// クリック側のセレクタに含まれていれば、そこも毎回変わる値だと分かる。
+function typedValues(steps) {
+  var out = [];
+  for (var i = 0; i < steps.length; i++) {
+    var st = steps[i];
+    if (st.type !== "change") { continue; }
+    var cs = candidates(st).join(" ");
+    if (RE_USER.test(cs) || RE_PASS.test(cs)) { continue; }
+    var v = String(st.value === undefined ? "" : st.value).trim();
+    if (v.length >= 3 && out.indexOf(v) < 0) { out.push(v); }
+  }
+  return out;
+}
+
+// セレクタの中に、その値がそのまま入っているか
+function selectorLiteral(step, vals) {
+  var cs = candidates(step);
+  for (var i = 0; i < cs.length; i++) {
+    for (var j = 0; j < vals.length; j++) {
+      if (cs[i].indexOf(vals[j]) >= 0) { return vals[j]; }
+    }
+  }
+  return "";
+}
+
 var RE_USER = /ユーザー|ユーザ|user|ログインid|loginid|account/i;
 var RE_PASS = /パスワード|password|passwd|\bpwd\b/i;
 var RE_LOGIN = /ログイン|login|サインイン|sign\s?in/i;
@@ -516,7 +544,7 @@ function sig(step) {
 function guessAssignments(steps) {
   var a = [], i;
   for (i = 0; i < steps.length; i++) {
-    a.push({ sec: "loop", secret: "", varCol: "", shot: false });
+    a.push({ sec: "loop", secret: "", varCol: "", selLit: "", shot: false });
   }
   var loginEnd = -1;
   for (i = 0; i < steps.length; i++) {
@@ -562,6 +590,16 @@ function guessAssignments(steps) {
       a[i].varCol = "?";   // 列名は利用者に選んでもらう
     }
   }
+
+  // 検索結果の行をクリックする操作。セレクタの中に、さきほど打った値が
+  // そのまま入っている。ここも毎回変わるので、列名に置き換える必要がある。
+  var vals = typedValues(steps);
+  for (i = 0; i < steps.length; i++) {
+    if (steps[i].type !== "change") {
+      var lit = selectorLiteral(steps[i], vals);
+      if (lit) { a[i].selLit = lit; a[i].varCol = "?"; }
+    }
+  }
   return a;
 }
 
@@ -578,6 +616,24 @@ function buildBatch(steps, assigns, title) {
       copy.url = st.url;
     } else {
       copy.selectors = st.selectors || [];
+      if (as.selLit && as.varCol && as.varCol !== "?") {
+        // セレクタの中の実値を {{列名}} に差し替える。
+        // 同時に、その値を含まない候補は捨てる。録画には
+        // id/N58:PosPoNumber:0 のような「一覧の 1 行目」を指す候補も残るが、
+        // 番号で当たらなかったときにそちらへ落ちると、別の案件の行を
+        // 押してしまい、しかも気づけない。
+        var kept = [];
+        for (var g = 0; g < copy.selectors.length; g++) {
+          var grp = copy.selectors[g] || [], hit = false, out2 = [];
+          for (var s2 = 0; s2 < grp.length; s2++) {
+            var v2 = String(grp[s2]);
+            if (v2.indexOf(as.selLit) >= 0) { hit = true; }
+            out2.push(v2.split(as.selLit).join("{{" + as.varCol + "}}"));
+          }
+          if (hit) { kept.push(out2); }
+        }
+        copy.selectors = kept;
+      }
       var v = st.value === undefined ? "" : st.value;
       if (as.secret) { v = "{{SECRET:" + as.secret + "}}"; }
       else if (as.varCol && as.varCol !== "?") { v = "{{" + as.varCol + "}}"; }
@@ -1379,16 +1435,28 @@ root.PadConvert = {
     readFile(file, function (txt) {
       batchText = txt;
       $("batchInfo").textContent = "読み込み: " + batchName + "（" + txt.length + " 文字）";
-      var obj = null;
-      try { obj = PadConvert.loadRecording(txt); } catch (e) { obj = null; }
-      if (obj && PadConvert.isRecording(obj)) {
+      var obj = null, err = "";
+      try { obj = PadConvert.loadRecording(txt); }
+      catch (e) { obj = null; err = e.message; }
+      recSteps = null;
+      $("assignBox").hidden = true;
+      if (!obj) {
+        show("err", "JSON として読めませんでした: " + err +
+             "<br>録画 JSON か、バッチ定義 JSON を選んでください。");
+      } else if (PadConvert.isRecording(obj)) {
         recTitle = obj.title || batchName.replace(/\.json$/i, "");
         recSteps = PadConvert.usableSteps(obj);
         recAssign = PadConvert.guessAssignments(recSteps);
         renderAssign((obj.steps || []).length);
+        show("ok", "録画 JSON として読み込みました。下の「1-2. 操作の振り分け」で" +
+             "箱と値を確かめてください。");
+      } else if (obj.setup || obj.loop) {
+        var n = (obj.loop || []).length;
+        show("ok", "バッチ定義 JSON として読み込みました（loop " + n + " 手順）。" +
+             "振り分けは済んでいるので、<strong>そのまま「変換する」</strong>を押してください。");
       } else {
-        recSteps = null;
-        $("assignBox").hidden = true;
+        show("warn", "JSON は読めましたが、録画（steps）でもバッチ定義（setup / loop）でも" +
+             "ありません。ファイルを確かめてください。");
       }
     });
   }
@@ -1416,8 +1484,17 @@ root.PadConvert = {
       }
       sel += "</select>";
       var val = "";
-      if (recSteps[i].type === "change") {
-        var off = as.sec === "skip" ? " disabled" : "";
+      var off = as.sec === "skip" ? " disabled" : "";
+      if (recSteps[i].type !== "change" && as.selLit) {
+        // 検索結果の行など、クリック先が毎回変わる操作
+        val = '<select data-i="' + i + '" class="valSel"' + off + ">" +
+              '<option value="">そのまま</option>' +
+              '<option value="col" selected>毎回変わる値</option></select>' +
+              ' <input type="text" class="colTxt" data-i="' + i + '" placeholder="列名"' +
+              ' value="' + (as.varCol && as.varCol !== "?" ? as.varCol : "") + '"' + off + ">" +
+              '<br><span class="hint">録画時の値「' + as.selLit + '」を置き換えます。' +
+              'この値を含まない候補（一覧の何行目、という指定）は捨てます</span>';
+      } else if (recSteps[i].type === "change") {
         val = '<select data-i="' + i + '" class="valSel"' + off + ">" +
               '<option value="">そのまま</option>' +
               '<option value="col"' + (as.varCol ? " selected" : "") + ">毎回変わる値</option>" +
@@ -1611,6 +1688,20 @@ root.PadConvert = {
 
   $("copy").addEventListener("click", function () { copyText(result.robin, "Robin コード"); });
   $("copyJs").addEventListener("click", function () { copyText(result.jsact, "共通 JavaScript"); });
+  $("resetAll").addEventListener("click", function () {
+    // 読み込んだものと結果だけを消す。実行環境のパスは打ち直しになると面倒なので残す。
+    batchText = null; batchName = ""; result = null;
+    recSteps = null; recAssign = null; recTitle = ""; detailHeaders = null;
+    $("batchFile").value = ""; $("detailsFile").value = "";
+    $("batchInfo").textContent = ""; $("detailsInfo").textContent = "";
+    $("assignBox").hidden = true; $("assignTable").innerHTML = "";
+    $("assignMsg").innerHTML = ""; $("out").value = "";
+    ["copy", "save", "copyJs", "copyBatch", "saveBatch"].forEach(function (id) {
+      $(id).disabled = true;
+    });
+    $("idcolHint").textContent = "下の「明細ファイル」を選べば先頭列が自動で入ります";
+    show("ok", "最初からやり直せます。実行環境のパスはそのまま残してあります。");
+  });
   $("save").addEventListener("click", function () { saveText(result.robin, "pad_flow.robin.txt"); });
 })();
 </script>
