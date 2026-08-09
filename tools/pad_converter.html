@@ -17,15 +17,40 @@
          color: #666; margin-bottom: 8px; }
  .drop.on { border-color: #06c; color: #06c; }
  button { padding: 7px 18px; margin-right: 8px; }
+ #assignTable { border-collapse: collapse; width: 100%; font-size: 13px; margin: 8px 0; }
+ #assignTable th, #assignTable td { border: 1px solid #ccc; padding: 4px 6px; text-align: left;
+                                    vertical-align: top; }
+ #assignTable th { background: rgba(128,128,128,.15); }
+ #assignTable td.raw { font-family: Consolas, monospace; font-size: 11px; color: #6b7280;
+                       word-break: break-all; max-width: 22em; }
+ #assignTable tr.origin { background: rgba(0,128,255,.10); }
+ #assignTable td.mark { white-space: nowrap; font-weight: bold; color: #0b62c4; }
+ #assignTable select { font-size: 12px; }
+ #assignTable input[type=text] { font-size: 12px; width: 9em; }
  #out { width: 100%; height: 340px; font-family: Consolas, monospace; font-size: 12px;
         white-space: pre; }
- .warn { background: #fff6e0; border-left: 4px solid #e8a300; padding: 8px 12px;
+ /* 背景色を固定しているので、文字色も必ず指定する。指定しないとダークモードで
+    既定の白文字になり、薄い背景に白文字で何も読めなくなる。 */
+ .warn { background: #fff6e0; border-left: 4px solid #e8a300; color: #3d2c00; padding: 8px 12px;
          margin: 8px 0; white-space: pre-wrap; font-size: 13px; }
- .err  { background: #ffecec; border-left: 4px solid #d33; padding: 8px 12px; margin: 8px 0; }
- .ok   { background: #eef7ee; border-left: 4px solid #2a2; padding: 8px 12px; margin: 8px 0; }
+ .err  { background: #ffecec; border-left: 4px solid #d33; color: #5a1111;
+         padding: 8px 12px; margin: 8px 0; }
+ .ok   { background: #eef7ee; border-left: 4px solid #2a2; color: #14371a;
+         padding: 8px 12px; margin: 8px 0; }
  .hint { color: #666; font-size: 13px; }
  footer { color: #777; font-size: 12px; margin-top: 32px; border-top: 1px solid #ddd;
           padding-top: 10px; }
+ /* ダークモードでは薄いグレーが背景に沈むので、明るめに寄せる */
+ @media (prefers-color-scheme: dark) {
+   .lead, .hint, footer { color: #a6adba; }
+   fieldset { border-color: #4a5058; }
+   footer { border-top-color: #4a5058; }
+   .drop { border-color: #6b737d; color: #a6adba; }
+   #assignTable th, #assignTable td { border-color: #4a5058; }
+   #assignTable td.raw { color: #9aa3ad; }
+   #assignTable td.mark { color: #6fb3ff; }
+   #assignTable tr.origin { background: rgba(80,160,255,.16); }
+ }
 </style>
 </head>
 <body>
@@ -39,6 +64,27 @@
   <div class="drop" id="drop">ここにドラッグ＆ドロップ、またはファイルを選択</div>
   <input type="file" id="batchFile" accept=".json,.txt">
   <div class="hint" id="batchInfo"></div>
+</fieldset>
+
+<fieldset id="assignBox" hidden>
+  <legend>1-2. 操作の振り分け</legend>
+  <p class="hint">録画された操作を 4 つの箱に振り分けます。
+     <strong>推測で選んであるので、違うところだけ直してください。</strong>
+     キー入力の記録など、変換に使わないものは隠しています。</p>
+  <div class="hint" id="assignInfo"></div>
+  <table id="assignTable"></table>
+  <p class="hint">
+     <strong>setup</strong>=最初に 1 回だけ　
+     <strong>loop</strong>=1 件ごとに繰り返す　
+     <strong>loop+復帰</strong>=繰り返し、かつ失敗時に戻る手順にも使う　
+     <strong>teardown</strong>=最後に 1 回　
+     <strong>使わない</strong>=変換に含めない</p>
+  <div>
+    <button id="makeBatch">この振り分けでバッチ定義を作る</button>
+    <button id="copyBatch" disabled>バッチ定義をコピー</button>
+    <button id="saveBatch" disabled>バッチ定義を保存</button>
+  </div>
+  <div id="assignMsg"></div>
 </fieldset>
 
 <fieldset>
@@ -389,6 +435,161 @@ function warnUnsupportedSteps(batch) {
       }
     }
   }
+  return out;
+}
+
+
+// ================================================================
+// 録画 JSON の振り分け支援
+// ----------------------------------------------------------------
+// 録画そのままの JSON（steps だけを持つ）を読み込んだとき、利用者が
+// JSON を触らずにバッチ定義へ組み立てられるようにする。
+// 出力はバッチ定義 JSON。そこから先は従来と同じ経路を通る。
+// ================================================================
+
+// 生成器が扱う種別だけを残す。録画には keyDown / keyUp が大量に入るが、
+// 変換には使わないので一覧から外す（1 件の録画で 121 件中 95 件がこれだった）。
+var USABLE_TYPES = ["setViewport", "navigate", "click", "doubleClick", "change"];
+
+function isRecording(obj) {
+  return !!(obj && Array.isArray(obj.steps) && !obj.loop && !obj.setup);
+}
+
+function usableSteps(rec) {
+  var out = [];
+  var steps = (rec && rec.steps) || [];
+  for (var i = 0; i < steps.length; i++) {
+    if (USABLE_TYPES.indexOf(steps[i].type) >= 0) { out.push(steps[i]); }
+  }
+  return out;
+}
+
+// 先頭のセレクタから、人が読める名前を取り出す。取り出せないこともある。
+function stepLabel(step) {
+  var cs = candidates(step);
+  for (var i = 0; i < cs.length; i++) {
+    var c = cs[i];
+    var m = /^aria\/(.+)$/.exec(c) || /^text\/(.+)$/.exec(c);
+    if (m) {
+      var name = m[1].split("[")[0].trim();
+      if (name) { return name; }
+    }
+  }
+  return "";
+}
+
+var ACTION_JP = { click: "を押す", doubleClick: "をダブルクリック", change: "に入力する" };
+
+// 説明と、生のセレクタの両方を返す。生の側も見せることで、
+// 「この書き方はこう読む」が利用者に伝わる。
+function describeStep(step) {
+  var cs = candidates(step);
+  var raw = cs.length ? cs[0] : "";
+  if (step.type === "setViewport") {
+    return { jp: "ウィンドウサイズを " + (step.width || "") + "×" + (step.height || "") + " にする", raw: "" };
+  }
+  if (step.type === "navigate") {
+    return { jp: "ページを開く", raw: step.url || "" };
+  }
+  var label = stepLabel(step);
+  var verb = ACTION_JP[step.type] || "";
+  var jp = label ? "「" + label + "」" + verb : "";
+  return { jp: jp, raw: raw };
+}
+
+var RE_USER = /ユーザー|ユーザ|user|ログインid|loginid|account/i;
+var RE_PASS = /パスワード|password|passwd|\bpwd\b/i;
+var RE_LOGIN = /ログイン|login|サインイン|sign\s?in/i;
+
+function sig(step) {
+  var cs = candidates(step);
+  return step.type + "|" + (cs.length ? cs[0] : "");
+}
+
+// 振り分けの推測。規則は画面にも出して、利用者が直せるようにする。
+//  1. setViewport / navigate は setup
+//  2. ユーザー名・パスワードらしい入力欄は SECRET 扱いにして setup
+//  3. 「ログイン」らしいクリックまでは setup
+//  4. その後は loop
+//  5. loop の末尾のうち、setup にも出てくる操作（ホームへ戻る等）は recover の候補
+//  6. loop の中で値を入れている箇所は「毎回変わる値」の候補
+function guessAssignments(steps) {
+  var a = [], i;
+  for (i = 0; i < steps.length; i++) {
+    a.push({ sec: "loop", secret: "", varCol: "", shot: false });
+  }
+  var loginEnd = -1;
+  for (i = 0; i < steps.length; i++) {
+    var st = steps[i], cs = candidates(st).join(" ");
+    if (st.type === "setViewport" || st.type === "navigate") {
+      a[i].sec = "setup"; loginEnd = Math.max(loginEnd, i); continue;
+    }
+    if (st.type === "change" && RE_PASS.test(cs)) {
+      a[i].sec = "setup"; a[i].secret = "MY_PASSWORD"; loginEnd = Math.max(loginEnd, i); continue;
+    }
+    if (st.type === "change" && RE_USER.test(cs)) {
+      a[i].sec = "setup"; a[i].secret = "MY_USERNAME"; loginEnd = Math.max(loginEnd, i); continue;
+    }
+    if (st.type === "click" && RE_LOGIN.test(cs)) { loginEnd = Math.max(loginEnd, i); }
+  }
+  // ログインらしき位置までは setup。その先が本体。
+  for (i = 0; i <= loginEnd && i < steps.length; i++) { a[i].sec = "setup"; }
+
+  // 末尾は「起点へ戻る」操作であることが多い。同じ操作が前にも出ていれば、
+  // そこが繰り返しの起点。つまり「戻る操作の直後」から loop が始まる。
+  //   … ホーム → 取引情報 → 検索 → 実行 → ホーム
+  //              ~~~~~~~~~~~~~~~~~~~~~~~~  ここが loop
+  var last = steps.length - 1;
+  if (last > loginEnd) {
+    var tailSig = sig(steps[last]), j = -1;
+    for (i = loginEnd + 1; i < last; i++) {
+      if (sig(steps[i]) === tailSig) { j = i; break; }
+    }
+    if (j >= 0) {
+      // 戻る操作が複数手順あることもあるので、一致する範囲を伸ばす
+      var k = 1;
+      while (j + k < last && last - k > j + k - 1 &&
+             sig(steps[j + k]) === sig(steps[last - k + 1 - 1])) { k += 1; }
+      for (i = loginEnd + 1; i < j + k; i++) { a[i].sec = "setup"; }
+      for (i = last - k + 1; i <= last; i++) { a[i].sec = "loop+recover"; }
+    }
+  }
+
+  // 値を入れている箇所（SECRET 以外）は「毎回変わる値」の候補
+  for (i = 0; i < steps.length; i++) {
+    if (steps[i].type === "change" && !a[i].secret &&
+        String(steps[i].value === undefined ? "" : steps[i].value) !== "") {
+      a[i].varCol = "?";   // 列名は利用者に選んでもらう
+    }
+  }
+  return a;
+}
+
+// 振り分け結果からバッチ定義を組み立てる
+function buildBatch(steps, assigns, title) {
+  var out = { title: title || "", setup: [], loop: [], recover: [], teardown: [] };
+  for (var i = 0; i < steps.length; i++) {
+    var st = steps[i], as = assigns[i];
+    if (as.sec === "skip") { continue; }
+    var copy = { type: st.type };
+    if (st.type === "setViewport") {
+      copy.width = st.width; copy.height = st.height;
+    } else if (st.type === "navigate") {
+      copy.url = st.url;
+    } else {
+      copy.selectors = st.selectors || [];
+      var v = st.value === undefined ? "" : st.value;
+      if (as.secret) { v = "{{SECRET:" + as.secret + "}}"; }
+      else if (as.varCol && as.varCol !== "?") { v = "{{" + as.varCol + "}}"; }
+      if (st.type === "change") { copy.value = v; }
+    }
+    if (as.sec === "loop+recover") { out.loop.push(copy); out.recover.push(copy); }
+    else { out[as.sec].push(copy); }
+    if (as.shot && (as.sec === "loop" || as.sec === "loop+recover")) {
+      out.loop.push({ type: "screenshot", name: "エビデンス" });
+    }
+  }
+  if (!out.teardown.length) { delete out.teardown; }
   return out;
 }
 
@@ -1138,6 +1339,11 @@ function csvHeaders(text) {
 }
 
 root.PadConvert = {
+  isRecording: isRecording,
+  usableSteps: usableSteps,
+  describeStep: describeStep,
+  guessAssignments: guessAssignments,
+  buildBatch: buildBatch,
   version: CONVERTER_VERSION,
   kind: CONVERTER_KIND,
   buildRobin: buildRobin,
@@ -1166,11 +1372,125 @@ root.PadConvert = {
     r.readAsText(file, "utf-8");
   }
 
+  var recSteps = null, recAssign = null, recTitle = "", lastTotal = 0;
+
   function takeBatch(file) {
     batchName = file.name;
     readFile(file, function (txt) {
       batchText = txt;
       $("batchInfo").textContent = "読み込み: " + batchName + "（" + txt.length + " 文字）";
+      var obj = null;
+      try { obj = PadConvert.loadRecording(txt); } catch (e) { obj = null; }
+      if (obj && PadConvert.isRecording(obj)) {
+        recTitle = obj.title || batchName.replace(/\.json$/i, "");
+        recSteps = PadConvert.usableSteps(obj);
+        recAssign = PadConvert.guessAssignments(recSteps);
+        renderAssign((obj.steps || []).length);
+      } else {
+        recSteps = null;
+        $("assignBox").hidden = true;
+      }
+    });
+  }
+
+  var SEC_OPTS = [["setup", "setup（最初に1回）"], ["loop", "loop（1件ごと）"],
+                  ["loop+recover", "loop+復帰"], ["teardown", "teardown（最後に1回）"],
+                  ["skip", "使わない"]];
+
+  function renderAssign(total) {
+    lastTotal = total;
+    var origin = -1;
+    for (var oi = 0; oi < recAssign.length; oi++) {
+      if (recAssign[oi].sec === "loop" || recAssign[oi].sec === "loop+recover") {
+        origin = oi; break;
+      }
+    }
+    var rows = ['<tr><th>#</th><th>起点</th><th>操作</th><th>録画された指定</th><th>箱</th>' +
+                '<th>値の扱い</th><th>この後にエビデンス</th></tr>'];
+    for (var i = 0; i < recSteps.length; i++) {
+      var d = PadConvert.describeStep(recSteps[i]), as = recAssign[i];
+      var sel = '<select data-i="' + i + '" class="secSel">';
+      for (var k = 0; k < SEC_OPTS.length; k++) {
+        sel += '<option value="' + SEC_OPTS[k][0] + '"' +
+               (SEC_OPTS[k][0] === as.sec ? " selected" : "") + ">" + SEC_OPTS[k][1] + "</option>";
+      }
+      sel += "</select>";
+      var val = "";
+      if (recSteps[i].type === "change") {
+        var off = as.sec === "skip" ? " disabled" : "";
+        val = '<select data-i="' + i + '" class="valSel"' + off + ">" +
+              '<option value="">そのまま</option>' +
+              '<option value="col"' + (as.varCol ? " selected" : "") + ">毎回変わる値</option>" +
+              '<option value="MY_USERNAME"' + (as.secret === "MY_USERNAME" ? " selected" : "") +
+              ">ユーザーID</option>" +
+              '<option value="MY_PASSWORD"' + (as.secret === "MY_PASSWORD" ? " selected" : "") +
+              ">パスワード</option></select>" +
+              ' <input type="text" class="colTxt" data-i="' + i + '" placeholder="列名"' +
+              ' value="' + (as.varCol && as.varCol !== "?" ? as.varCol : "") + '"' + off +
+              (as.varCol && as.sec !== "skip" ? "" : " hidden") + ">";
+      }
+      var shot = '<input type="checkbox" class="shotChk" data-i="' + i + '"' +
+                 (as.shot ? " checked" : "") + ">";
+      var mark = i === origin
+        ? '<td class="mark">▶ 起点</td>'
+        : '<td><button class="originBtn" data-i="' + i + '">ここを起点に</button></td>';
+      rows.push('<tr' + (i === origin ? ' class="origin"' : "") + "><td>" + (i + 1) + "</td>" +
+                mark + "<td>" + (d.jp || "（名前なし）") +
+                '</td><td class="raw">' + (d.raw || "") + "</td><td>" + sel +
+                "</td><td>" + val + "</td><td>" + shot + "</td></tr>");
+    }
+    $("assignTable").innerHTML = rows.join("");
+    var od = origin >= 0 ? PadConvert.describeStep(recSteps[origin]) : null;
+    $("assignInfo").innerHTML =
+      "録画 " + total + " 件のうち、変換に使う " + recSteps.length + " 件を表示しています。<br>" +
+      (od ? "<strong>繰り返しの起点: " + (origin + 1) + " 行目　" + (od.jp || od.raw || "") +
+            "</strong>　（ここが 1 件目の最初の操作。違っていれば「ここを起点に」を押す）"
+          : "<strong>繰り返しの操作がありません。</strong>　loop を 1 つ以上選んでください。");
+    $("assignBox").hidden = false;
+    bindAssign();
+  }
+
+  function bindAssign() {
+    var q = function (c) { return $("assignTable").querySelectorAll(c); };
+    Array.prototype.forEach.call(q(".secSel"), function (el) {
+      el.addEventListener("change", function () {
+        recAssign[+el.dataset.i].sec = el.value;
+        renderAssign(lastTotal);   // 起点の表示と、使わない行の無効化を反映する
+      });
+    });
+    Array.prototype.forEach.call(q(".valSel"), function (el) {
+      el.addEventListener("change", function () {
+        var i = +el.dataset.i, as = recAssign[i];
+        var txt = $("assignTable").querySelector('.colTxt[data-i="' + i + '"]');
+        as.secret = ""; as.varCol = "";
+        if (el.value === "col") { as.varCol = txt.value || "?"; txt.hidden = false; }
+        else { txt.hidden = true; if (el.value) { as.secret = el.value; } }
+      });
+    });
+    Array.prototype.forEach.call(q(".colTxt"), function (el) {
+      el.addEventListener("input", function () {
+        recAssign[+el.dataset.i].varCol = el.value || "?";
+      });
+    });
+    Array.prototype.forEach.call(q(".originBtn"), function (el) {
+      el.addEventListener("click", function () {
+        var at = +el.dataset.i;
+        // ここより前の繰り返しは setup へ、ここから後の setup は loop へ移す。
+        // 末尾の「戻る」（loop+復帰）はそのまま残す。
+        for (var j = 0; j < recAssign.length; j++) {
+          if (j < at && (recAssign[j].sec === "loop" || recAssign[j].sec === "loop+recover")) {
+            recAssign[j].sec = "setup";
+          } else if (j >= at && recAssign[j].sec === "setup") {
+            recAssign[j].sec = "loop";
+          }
+        }
+        renderAssign(lastTotal);
+      });
+    });
+    Array.prototype.forEach.call(q(".shotChk"), function (el) {
+      el.addEventListener("change", function () {
+        recAssign[+el.dataset.i].shot = el.checked;
+      });
     });
   }
 
@@ -1201,6 +1521,32 @@ root.PadConvert = {
         if (!$("idcol").value) { $("idcol").value = detailHeaders[0]; }
       }
     });
+  });
+
+  $("makeBatch").addEventListener("click", function () {
+    if (!recSteps) { return; }
+    var miss = [];
+    for (var i = 0; i < recAssign.length; i++) {
+      if (recAssign[i].sec !== "skip" && recAssign[i].varCol === "?") { miss.push(i + 1); }
+    }
+    if (miss.length) {
+      $("assignMsg").innerHTML = '<div class="warn">' +
+        miss.join(" / ") + " 行目：「毎回変わる値」の列名が空です。明細 CSV の見出しと" +
+        "同じ名前を入れてください。そのままでよければ「そのまま」に変えてください。</div>";
+      return;
+    }
+    var batch = PadConvert.buildBatch(recSteps, recAssign, recTitle);
+    batchText = JSON.stringify(batch, null, 2);
+    $("out").value = batchText;
+    ["copyBatch", "saveBatch"].forEach(function (id) { $(id).disabled = false; });
+    var n = function (k) { return (batch[k] || []).length; };
+    $("assignMsg").innerHTML = '<div class="ok">バッチ定義を作りました（setup ' + n("setup") +
+      " / loop " + n("loop") + " / recover " + n("recover") + " / teardown " + n("teardown") +
+      "）。下の「変換する」を押すと PADコードになります。</div>";
+  });
+  $("copyBatch").addEventListener("click", function () { copyText(batchText, "バッチ定義"); });
+  $("saveBatch").addEventListener("click", function () {
+    saveText(batchText, "pad_batch.json");
   });
 
   $("run").addEventListener("click", function () {
