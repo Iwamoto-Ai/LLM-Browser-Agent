@@ -422,13 +422,29 @@ def _robin_safe_selector(sel: str) -> str:
     m = re.match(r'^xpath///\*\[@id=[\'"]([^\'"]+)[\'"]\]$', sel)
     if m:
         return "id/" + m.group(1)
+    # aria/名前[role="link"] のような属性の付いた形は、名前の部分しか使わない
+    # （共通 JavaScript が [ 以降を切り落とす）。ここで先に切っておけば、
+    # 二重引用符が理由で候補ごと落ちるのを避けられる。
+    if sel.startswith("aria/") and "[" in sel:
+        return "aria/" + sel[5:].split("[")[0].strip()
     return sel
 
 
 def _robin_filter_candidates(cands: list) -> list:
-    """単引用符を含む候補を除く（Robin リテラルに入れられないため）。
+    """Robin リテラルや JSON 本文に入れられない候補を落とす。
+
+    * 単引用符 … Robin の $'''…''' に入れると PAD が黙って無視する
+    * 二重引用符 … 本文は {"script": "…", "args": […]} という JSON なので、
+      候補の中に生の " があるとそこで文字列が閉じ、WebDriver が
+      「invalid argument: missing command parameters」を返す
+
     すべて落ちてしまう場合は、CSS の id セレクタなど代替を残せないか呼び出し側で確認する。"""
-    out = [c for c in (_robin_safe_selector(x) for x in cands) if "'" not in c]
+    out = []
+    for x in cands:
+        c = _robin_safe_selector(x)
+        if "'" in c or '"' in c:
+            continue
+        out.append(c)
     return out
 
 
@@ -656,6 +672,17 @@ def _lint_robin(lines: list, log=print) -> list:
             body = lit.replace("\\'", "")
             if "'" in body:
                 warns.append(f"{i}行: リテラル内の単引用符が未エスケープです（\\' にする）: {s[:80]}")
+        # JSON 本文に生の二重引用符が混ざっていないか。
+        # {"script": "…", "args": […]} の中で " が閉じてしまうと、WebDriver は
+        # 「invalid argument: missing command parameters」を返す。
+        # 例: aria/検収照会[role="link"] のようなセレクタをそのまま埋めた場合。
+        key = 'args\\": ['
+        if key in s:
+            args_part = s.split(key, 1)[1]
+            if '"' in args_part.replace('\\"', ""):
+                warns.append(
+                    f"{i}行: JSON 本文の args に生の二重引用符が入っています。"
+                    f"そのままだと WebDriver がエラーを返します: {s[:80]}")
     for w in warns:
         log(f"  ⚠ {w}")
     return warns
