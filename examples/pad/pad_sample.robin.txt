@@ -6,7 +6,7 @@
 # 処理内容：明細 1 件につき 6 操作を繰り返す（ID列: ID ／ 業務キー: KEY）
 #           開始URL: file:///C:/temp/sample.html
 #           明細CSV: sample_batch.csv
-# 備考：2026/08/05 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
+# 備考：2026/08/10 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
 # ============================================================
 # LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
 # Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).
@@ -42,13 +42,21 @@ SET BaseDir TO $'''C:\\temp'''
 # ※ BaseDir の末尾に \ を付けないこと（%BaseDir%\file.png が二重になる）
 
 # --- ドライバーの入手方法 ---
-# True  … Selenium Manager がブラウザーの版に合わせて自動取得する（推奨）。
-#         ブラウザーが更新されても入れ替えが要らない。取得先はバージョン番号を
-#         含むフォルダなので、固定パスでは書けない。
-#         selenium-manager-windows.exe は BaseDir に置くこと。取得元:
-#         https://github.com/SeleniumHQ/selenium_manager_artifacts/releases
-# False … 下の固定パスを使う。ブラウザー更新時は手動で入れ替える。
+# AutoDriver = True なら、入っているブラウザーに合わせて自動で取ってくる。
+# ブラウザーが更新されても入れ替えが要らない。
+#
+# DriverSource = direct  … ベンダーのサイトから直接取る（推奨）。
+#   使うのは curl.exe / tar.exe / powershell.exe だけで、どれも Windows に
+#   最初から入っている Microsoft 署名済みの実行ファイル。持ち込みの exe を
+#   実行できない環境でも動く。落ちてくるドライバーもベンダー署名付き。
+# DriverSource = manager … Selenium Manager に任せる。
+#   selenium-manager-windows.exe を BaseDir に置いておく必要がある。取得元:
+#   https://github.com/SeleniumHQ/selenium_manager_artifacts/releases
+#   ※ 署名の無い実行ファイルを止める環境では、これ自体が起動できない。
+#
+# AutoDriver = False … 下の固定パスを使う。ブラウザー更新時は手で入れ替える。
 SET AutoDriver TO True
+SET DriverSource TO $'''direct'''
 SET SmExe TO $'''selenium-manager-windows.exe'''
 
 # AutoDriver = False のときに使う固定パス。Browser に追従させるため、
@@ -129,15 +137,112 @@ File.WriteText File: LogFile TextToWrite: $'''===== 実行開始 上限%MaxItems
 # ドライバーをどう用意したか。ログとダイアログに出す。
 SET DriverSrc TO $'''固定パス（AutoDriver=False のためブラウザー更新時は手動で入れ替え）'''
 SET SmMsg TO $''''''
-# --- ドライバーの自動取得（Selenium Manager）---
-# 設定は冒頭の AutoDriver / SmExe。ここは取得を実行する部分で、
-# 取得できたらそのパスで DriverExe を上書きする。
+
+# ---------- ベンダーから直接取ってくる（DriverSource = direct）----------
+# 版ごとのフォルダに入れる。ブラウザーが更新されると版が変わり、
+# フォルダ名も変わるので自動的に取り直しになる。中身を比べる必要がない。
 IF AutoDriver THEN
+IF DriverSource = $'''direct''' THEN
+    # 入っているブラウザーの版をレジストリから読む。
+    # [Console]::Write は改行を付けないので、そのまま URL に埋め込める。
+    # [char]46 は「.」。引用符を書かずに済ませるための書き方。
+    SET VerCmd TO $'''powershell -NoProfile -Command [Console]::Write((Get-ItemProperty HKCU:\\Software\\Microsoft\\Edge\\BLBeacon).version)'''
+    IF Browser = $'''chrome''' THEN
+        SET VerCmd TO $'''powershell -NoProfile -Command [Console]::Write((Get-ItemProperty HKCU:\\Software\\Google\\Chrome\\BLBeacon).version.Split([char]46)[0])'''
+    END
+    Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: VerCmd WorkingDirectory: BaseDir Timeout: 120 StandardOutput=> BrowserKey StandardError=> VerErr ExitCode=> VerExit
+    IF BrowserKey = $'''''' THEN
+        SET Halt TO True
+        SET HaltReason TO $'''レジストリからブラウザーの版を読めませんでした'''
+    END
+
+    # Edge は入っている版の zip がそのまま用意されている。Chrome は版ぴったりの
+    # ドライバーが無いことが多いので、メジャー番号でその世代の最新版を問い合わせる。
+    SET DrvVer TO BrowserKey
+    IF Halt = False THEN
+        IF Browser = $'''chrome''' THEN
+            SET RelUrl TO $'''https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_%BrowserKey%'''
+            SET VerFile TO $'''%BaseDir%\\drvver.txt'''
+            SET RelCmd TO $'''curl.exe -f -L -sS -o "%VerFile%" %RelUrl%'''
+            IF UseProxy THEN
+                SET RelCmd TO $'''curl.exe -f -L -sS -x %ProxyAddr% -o "%VerFile%" %RelUrl%'''
+            END
+            Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: RelCmd WorkingDirectory: BaseDir Timeout: 300 StandardOutput=> RelOut StandardError=> RelErr ExitCode=> RelExit
+            SET ReadCmd TO $'''powershell -NoProfile -Command [Console]::Write((Get-Content -Raw %VerFile%).Trim())'''
+            Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: ReadCmd WorkingDirectory: BaseDir Timeout: 120 StandardOutput=> DrvVer StandardError=> ReadErr ExitCode=> ReadExit
+            IF DrvVer = $'''''' THEN
+                SET Halt TO True
+                SET HaltReason TO $'''ドライバーの版を問い合わせられませんでした'''
+            END
+        END
+    END
+
+    IF Halt = False THEN
+        Folder.Create FolderPath: BaseDir FolderName: $'''driver''' Folder=> DrvRoot
+        Folder.Create FolderPath: $'''%BaseDir%\\driver''' FolderName: DrvVer Folder=> DrvDirObj
+        SET DrvDir TO $'''%BaseDir%\\driver\\%DrvVer%'''
+        # Edge の zip は exe が直下、Chrome は chromedriver-win64 の下に入る
+        SET DrvHome TO DrvDir
+        SET DrvExeName TO $'''msedgedriver.exe'''
+        SET ZipUrl TO $'''https://msedgedriver.microsoft.com/%DrvVer%/edgedriver_win64.zip'''
+        IF Browser = $'''chrome''' THEN
+            SET DrvHome TO $'''%DrvDir%\\chromedriver-win64'''
+            SET DrvExeName TO $'''chromedriver.exe'''
+            SET ZipUrl TO $'''https://storage.googleapis.com/chrome-for-testing-public/%DrvVer%/win64/chromedriver-win64.zip'''
+        END
+        SET ZipPath TO $'''%DrvDir%\\driver.zip'''
+        Folder.GetFiles Folder: DrvHome FileFilter: DrvExeName IncludeSubfolders: False FailOnAccessDenied: True SortBy1: Folder.SortBy.Name SortDescending1: False SortBy2: Folder.SortBy.LastModified SortDescending2: False SortBy3: Folder.SortBy.LastAccessed SortDescending3: False Files=> HaveDrv
+        IF HaveDrv.Count = 0 THEN
+            # -f を付けないと 404 でも curl は成功を返し、エラーページを zip として
+            # 保存してしまう。その先の tar が失敗して原因が読めなくなる。
+            SET DlCmd TO $'''curl.exe -f -L -sS -o "%ZipPath%" %ZipUrl%'''
+            IF UseProxy THEN
+                SET DlCmd TO $'''curl.exe -f -L -sS -x %ProxyAddr% -o "%ZipPath%" %ZipUrl%'''
+            END
+            Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: DlCmd WorkingDirectory: BaseDir Timeout: 600 StandardOutput=> DlOut StandardError=> DlErr ExitCode=> DlExit
+            IF DlExit <> 0 THEN
+                SET Halt TO True
+                SET HaltReason TO $'''ドライバーを取得できませんでした（curl の終了コード %DlExit%）'''
+            END
+            IF Halt = False THEN
+                SET UnzipCmd TO $'''tar.exe -xf "%ZipPath%" -C "%DrvDir%"'''
+                Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: UnzipCmd WorkingDirectory: BaseDir Timeout: 300 StandardOutput=> UzOut StandardError=> UzErr ExitCode=> UzExit
+            END
+        END
+    END
+
+    IF Halt = False THEN
+        Folder.GetFiles Folder: DrvHome FileFilter: DrvExeName IncludeSubfolders: False FailOnAccessDenied: True SortBy1: Folder.SortBy.Name SortDescending1: False SortBy2: Folder.SortBy.LastModified SortDescending2: False SortBy3: Folder.SortBy.LastAccessed SortDescending3: False Files=> HaveDrv2
+        IF HaveDrv2.Count = 0 THEN
+            SET Halt TO True
+            SET HaltReason TO $'''ドライバーを展開できませんでした（tar の終了コード %UzExit%）'''
+        END
+    END
+    IF Halt = False THEN
+        SET DriverExe TO $'''%DrvHome%\\%DrvExeName%'''
+        SET DriverSrc TO $'''ベンダーから直接取得（%DrvVer% / 版ごとのフォルダに保管）'''
+    END
+END
+END
+
+# ---------- Selenium Manager に任せる（DriverSource = manager）----------
+# 設定は冒頭の AutoDriver / SmExe。取得できたらそのパスで DriverExe を上書きする。
+IF AutoDriver THEN
+IF DriverSource = $'''manager''' THEN
     SET SmArgs TO $'''%SmExe% --browser %Browser% --browser-version stable --output json'''
     IF UseProxy THEN
         SET SmArgs TO $'''%SmArgs% --proxy %ProxyAddr%'''
     END
     Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: SmArgs WorkingDirectory: BaseDir Timeout: 300 StandardOutput=> SmOutput StandardError=> SmError ExitCode=> SmExit
+    # 終了コードを先に見る。exe が起動できないと出力が空になり、そのまま
+    # JSON に変換しようとして「CustomObject が取れません」という、原因の
+    # 分からないエラーになる。
+    IF SmExit <> 0 THEN
+        SET Halt TO True
+        SET HaltReason TO $'''Selenium Manager を実行できませんでした'''
+        Display.ShowMessageDialog.ShowMessage Title: $'''Selenium Manager を実行できません''' Message: SmError Icon: Display.Icon.Warning Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> SmBtn2
+    END
+    IF Halt = False THEN
     Variables.ConvertJsonToCustomObject Json: SmOutput CustomObject=> SmObj
     IF SmObj['result']['code'] = 0 THEN
         SET DriverExe TO SmObj['result']['driver_path']
@@ -149,6 +254,8 @@ IF AutoDriver THEN
         SET HaltReason TO $'''ドライバーの取得に失敗しました（Selenium Manager）'''
         Display.ShowMessageDialog.ShowMessage Title: $'''ドライバー取得に失敗''' Message: SmOutput Icon: Display.Icon.Information Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> SmBtn
     END
+    END
+END
 END
 
 # ここから先はドライバーが要る。取得に失敗していたら入らない。

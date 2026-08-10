@@ -257,14 +257,25 @@ function robinSafeSelector(sel) {
   if (m) { return "id/" + m[1]; }
   m = /^xpath\/\/\/\*\[@id=['"]([^'"]+)['"]\]$/.exec(sel);
   if (m) { return "id/" + m[1]; }
+  // aria/名前[role="link"] のような属性の付いた形は、名前の部分しか使わない
+  // （共通 JavaScript が [ 以降を切り落とす）。ここで先に切っておけば、
+  // 二重引用符が理由で候補ごと落ちるのを避けられる。
+  if (sel.indexOf("aria/") === 0 && sel.indexOf("[") >= 0) {
+    return "aria/" + sel.slice(5).split("[")[0].trim();
+  }
   return sel;
 }
 
+// Robin リテラルや JSON 本文に入れられない候補を落とす。
+//  ・単引用符 … Robin の $'''…''' に入れると PAD が黙って無視する
+//  ・二重引用符 … 本文は {"script": "…", "args": […]} という JSON なので、
+//    候補に生の " があるとそこで文字列が閉じ、WebDriver が
+//    「invalid argument: missing command parameters」を返す
 function robinFilterCandidates(cands) {
   var out = [];
   for (var i = 0; i < cands.length; i++) {
     var c = robinSafeSelector(cands[i]);
-    if (c.indexOf("'") < 0) { out.push(c); }
+    if (c.indexOf("'") < 0 && c.indexOf('"') < 0) { out.push(c); }
   }
   return out;
 }
@@ -295,6 +306,35 @@ function safeComment(text, cols) {
   t = t.replace(/\{\{SECRET:([^}]*)\}\}/g, "[SECRET:$1]");
   t = t.split("{{").join("[").split("}}").join("]");
   return t;
+}
+
+
+// ドライバーをベンダーから直接取るときに使うコマンド。引用符を書かずに済むよう、
+// レジストリのキーは空白の無いものを直接指定し、区切り文字は [char]46 で表す。
+// [Console]::Write は改行を付けないので、結果をそのまま URL に埋め込める。
+var EDGE_VER_CMD = "powershell -NoProfile -Command [Console]::Write(" +
+  "(Get-ItemProperty HKCU:\\Software\\Microsoft\\Edge\\BLBeacon).version)";
+var CHROME_VER_CMD = "powershell -NoProfile -Command [Console]::Write(" +
+  "(Get-ItemProperty HKCU:\\Software\\Google\\Chrome\\BLBeacon)" +
+  ".version.Split([char]46)[0])";
+
+// DOS コマンドの実行（実機で確認済みの書式）
+function dosCmd(cmdVar, outVar, errVar, exitVar, timeout, indent) {
+  indent = indent || "";
+  return indent + "Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout " +
+    "DOSCommandOrApplication: " + cmdVar + " WorkingDirectory: BaseDir " +
+    "Timeout: " + timeout + " StandardOutput=> " + outVar +
+    " StandardError=> " + errVar + " ExitCode=> " + exitVar;
+}
+
+// フォルダー内のファイル取得。並べ替えの列挙は Folder.SortBy.○○（実機確認済み）
+function folderGet(folderVar, filterVar, outVar) {
+  return "Folder.GetFiles Folder: " + folderVar + " FileFilter: " + filterVar +
+    " IncludeSubfolders: False FailOnAccessDenied: True " +
+    "SortBy1: Folder.SortBy.Name SortDescending1: False " +
+    "SortBy2: Folder.SortBy.LastModified SortDescending2: False " +
+    "SortBy3: Folder.SortBy.LastAccessed SortDescending3: False " +
+    "Files=> " + outVar;
 }
 
 var WEB_FLAGS = "EncodeRequestBody: False FailOnErrorStatus: False";
@@ -695,6 +735,19 @@ function lintRobin(lines) {
         warns.push(no + "行: リテラル内の単引用符が未エスケープです（\\' にする）: " + s.slice(0, 80));
       }
     }
+    // JSON 本文に生の二重引用符が混ざっていないか。
+    // {"script": "…", "args": […]} の中で " が閉じてしまうと、WebDriver は
+    // 「invalid argument: missing command parameters」を返す。
+    // 例: aria/検収照会[role="link"] のようなセレクタをそのまま埋めた場合。
+    var key = 'args\\": [';
+    var kAt = s.indexOf(key);
+    if (kAt >= 0) {
+      var argsPart = s.slice(kAt + key.length).split('\\"').join("");
+      if (argsPart.indexOf('"') >= 0) {
+        warns.push(no + "行: JSON 本文の args に生の二重引用符が入っています。" +
+                   "そのままだと WebDriver がエラーを返します: " + s.slice(0, 80));
+      }
+    }
   }
   return warns;
 }
@@ -789,13 +842,21 @@ function buildRobin(batch, opt) {
   A("# ※ BaseDir の末尾に \\ を付けないこと（%BaseDir%\\file.png が二重になる）");
   A("");
   A("# --- ドライバーの入手方法 ---");
-  A("# True  … Selenium Manager がブラウザーの版に合わせて自動取得する（推奨）。");
-  A("#         ブラウザーが更新されても入れ替えが要らない。取得先はバージョン番号を");
-  A("#         含むフォルダなので、固定パスでは書けない。");
-  A("#         selenium-manager-windows.exe は BaseDir に置くこと。取得元:");
-  A("#         https://github.com/SeleniumHQ/selenium_manager_artifacts/releases");
-  A("# False … 下の固定パスを使う。ブラウザー更新時は手動で入れ替える。");
-  A("SET AutoDriver TO " + (autoDriver ? "True" : "False"));
+  A("# AutoDriver = True なら、入っているブラウザーに合わせて自動で取ってくる。");
+  A("# ブラウザーが更新されても入れ替えが要らない。");
+  A("#");
+  A("# DriverSource = direct  … ベンダーのサイトから直接取る（推奨）。");
+  A("#   使うのは curl.exe / tar.exe / powershell.exe だけで、どれも Windows に");
+  A("#   最初から入っている Microsoft 署名済みの実行ファイル。持ち込みの exe を");
+  A("#   実行できない環境でも動く。落ちてくるドライバーもベンダー署名付き。");
+  A("# DriverSource = manager … Selenium Manager に任せる。");
+  A("#   selenium-manager-windows.exe を BaseDir に置いておく必要がある。取得元:");
+  A("#   https://github.com/SeleniumHQ/selenium_manager_artifacts/releases");
+  A("#   ※ 署名の無い実行ファイルを止める環境では、これ自体が起動できない。");
+  A("#");
+  A("# AutoDriver = False … 下の固定パスを使う。ブラウザー更新時は手で入れ替える。");
+  A("SET AutoDriver TO " + (autoDriver ? "True" : "False") + "");
+  A("SET DriverSource TO " + robinStr('direct') + "");
   A("SET SmExe TO $'''selenium-manager-windows.exe'''");
   A("");
   A("# AutoDriver = False のときに使う固定パス。Browser に追従させるため、");
@@ -869,10 +930,99 @@ function buildRobin(batch, opt) {
   A("# ドライバーをどう用意したか。ログとダイアログに出す。");
   A("SET DriverSrc TO " + robinStr("固定パス（AutoDriver=False のためブラウザー更新時は手動で入れ替え）"));
   A("SET SmMsg TO " + robinStr(""));
-  A("# --- ドライバーの自動取得（Selenium Manager）---");
-  A("# 設定は冒頭の AutoDriver / SmExe。ここは取得を実行する部分で、");
-  A("# 取得できたらそのパスで DriverExe を上書きする。");
+  A("");
+  A("# ---------- ベンダーから直接取ってくる（DriverSource = direct）----------");
+  A("# 版ごとのフォルダに入れる。ブラウザーが更新されると版が変わり、");
+  A("# フォルダ名も変わるので自動的に取り直しになる。中身を比べる必要がない。");
   A("IF AutoDriver THEN");
+  A("IF DriverSource = " + robinStr('direct') + " THEN");
+  A("    # 入っているブラウザーの版をレジストリから読む。");
+  A("    # [Console]::Write は改行を付けないので、そのまま URL に埋め込める。");
+  A("    # [char]46 は「.」。引用符を書かずに済ませるための書き方。");
+  A("    SET VerCmd TO " + robinStr(EDGE_VER_CMD) + "");
+  A("    IF Browser = " + robinStr('chrome') + " THEN");
+  A("        SET VerCmd TO " + robinStr(CHROME_VER_CMD) + "");
+  A("    END");
+  A(dosCmd("VerCmd", "BrowserKey", "VerErr", "VerExit", 120, "    "));
+  A("    IF BrowserKey = " + robinStr('') + " THEN");
+  A("        SET Halt TO True");
+  A("        SET HaltReason TO " + robinStr('レジストリからブラウザーの版を読めませんでした') + "");
+  A("    END");
+  A("");
+  A("    # Edge は入っている版の zip がそのまま用意されている。Chrome は版ぴったりの");
+  A("    # ドライバーが無いことが多いので、メジャー番号でその世代の最新版を問い合わせる。");
+  A("    SET DrvVer TO BrowserKey");
+  A("    IF Halt = False THEN");
+  A("        IF Browser = " + robinStr('chrome') + " THEN");
+  A("            SET RelUrl TO $'''https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_%BrowserKey%'''");
+  A("            SET VerFile TO $'''%BaseDir%\\\\drvver.txt'''");
+  A("            SET RelCmd TO $'''curl.exe -f -L -sS -o \"%VerFile%\" %RelUrl%'''");
+  A("            IF UseProxy THEN");
+  A("                SET RelCmd TO $'''curl.exe -f -L -sS -x %ProxyAddr% -o \"%VerFile%\" %RelUrl%'''");
+  A("            END");
+  A(dosCmd("RelCmd", "RelOut", "RelErr", "RelExit", 300, "            "));
+  A("            SET ReadCmd TO $'''powershell -NoProfile -Command [Console]::Write((Get-Content -Raw %VerFile%).Trim())'''");
+  A(dosCmd("ReadCmd", "DrvVer", "ReadErr", "ReadExit", 120, "            "));
+  A("            IF DrvVer = " + robinStr('') + " THEN");
+  A("                SET Halt TO True");
+  A("                SET HaltReason TO " + robinStr('ドライバーの版を問い合わせられませんでした') + "");
+  A("            END");
+  A("        END");
+  A("    END");
+  A("");
+  A("    IF Halt = False THEN");
+  A("        Folder.Create FolderPath: BaseDir FolderName: $'''driver''' Folder=> DrvRoot");
+  A("        Folder.Create FolderPath: $'''%BaseDir%\\\\driver''' FolderName: DrvVer Folder=> DrvDirObj");
+  A("        SET DrvDir TO $'''%BaseDir%\\\\driver\\\\%DrvVer%'''");
+  A("        # Edge の zip は exe が直下、Chrome は chromedriver-win64 の下に入る");
+  A("        SET DrvHome TO DrvDir");
+  A("        SET DrvExeName TO $'''msedgedriver.exe'''");
+  A("        SET ZipUrl TO $'''https://msedgedriver.microsoft.com/%DrvVer%/edgedriver_win64.zip'''");
+  A("        IF Browser = " + robinStr('chrome') + " THEN");
+  A("            SET DrvHome TO $'''%DrvDir%\\\\chromedriver-win64'''");
+  A("            SET DrvExeName TO $'''chromedriver.exe'''");
+  A("            SET ZipUrl TO $'''https://storage.googleapis.com/chrome-for-testing-public/%DrvVer%/win64/chromedriver-win64.zip'''");
+  A("        END");
+  A("        SET ZipPath TO $'''%DrvDir%\\\\driver.zip'''");
+  A("        " + folderGet("DrvHome", "DrvExeName", "HaveDrv"));
+  A("        IF HaveDrv.Count = 0 THEN");
+  A("            # -f を付けないと 404 でも curl は成功を返し、エラーページを zip として");
+  A("            # 保存してしまう。その先の tar が失敗して原因が読めなくなる。");
+  A("            SET DlCmd TO $'''curl.exe -f -L -sS -o \"%ZipPath%\" %ZipUrl%'''");
+  A("            IF UseProxy THEN");
+  A("                SET DlCmd TO $'''curl.exe -f -L -sS -x %ProxyAddr% -o \"%ZipPath%\" %ZipUrl%'''");
+  A("            END");
+  A(dosCmd("DlCmd", "DlOut", "DlErr", "DlExit", 600, "            "));
+  A("            IF DlExit <> 0 THEN");
+  A("                SET Halt TO True");
+  A("                SET HaltReason TO $'''ドライバーを取得できませんでした（curl の終了コード %DlExit%）'''");
+  A("            END");
+  A("            IF Halt = False THEN");
+  A("                SET UnzipCmd TO $'''tar.exe -xf \"%ZipPath%\" -C \"%DrvDir%\"'''");
+  A(dosCmd("UnzipCmd", "UzOut", "UzErr", "UzExit", 300, "                "));
+  A("            END");
+  A("        END");
+  A("    END");
+  A("");
+  A("    IF Halt = False THEN");
+  A("        " + folderGet("DrvHome", "DrvExeName", "HaveDrv2"));
+  A("        IF HaveDrv2.Count = 0 THEN");
+  A("            SET Halt TO True");
+  A("            SET HaltReason TO $'''ドライバーを展開できませんでした（tar の終了コード %UzExit%）'''");
+  A("        END");
+  A("    END");
+  A("    IF Halt = False THEN");
+  A("        SET DriverExe TO $'''%DrvHome%\\\\%DrvExeName%'''");
+  A("        SET DriverSrc TO " + robinStr('ベンダーから直接取得（%DrvVer% / 版ごとのフォルダに保管）') + "");
+  A("    END");
+  A("END");
+  A("END");
+  A("");
+
+  A("# ---------- Selenium Manager に任せる（DriverSource = manager）----------");
+  A("# 設定は冒頭の AutoDriver / SmExe。取得できたらそのパスで DriverExe を上書きする。");
+  A("IF AutoDriver THEN");
+  A("IF DriverSource = " + robinStr("manager") + " THEN");
   A("    SET SmArgs TO $'''%SmExe% --browser %Browser% --browser-version stable --output json'''");
   A("    IF UseProxy THEN");
   A("        SET SmArgs TO $'''%SmArgs% --proxy %ProxyAddr%'''");
@@ -880,6 +1030,18 @@ function buildRobin(batch, opt) {
   A("    Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout " +
     "DOSCommandOrApplication: SmArgs WorkingDirectory: BaseDir Timeout: 300 " +
     "StandardOutput=> SmOutput StandardError=> SmError ExitCode=> SmExit");
+  A("    # 終了コードを先に見る。exe が起動できないと出力が空になり、そのまま");
+  A("    # JSON に変換しようとして「CustomObject が取れません」という、原因の");
+  A("    # 分からないエラーになる。");
+  A("    IF SmExit <> 0 THEN");
+  A("        SET Halt TO True");
+  A("        SET HaltReason TO " + robinStr("Selenium Manager を実行できませんでした"));
+  A("        Display.ShowMessageDialog.ShowMessage Title: " +
+    robinStr("Selenium Manager を実行できません") +
+    " Message: SmError Icon: Display.Icon.Warning Buttons: Display.Buttons.OK " +
+    "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> SmBtn2");
+  A("    END");
+  A("    IF Halt = False THEN");
   A("    Variables.ConvertJsonToCustomObject Json: SmOutput CustomObject=> SmObj");
   A("    IF SmObj['result']['code'] = 0 THEN");
   A("        SET DriverExe TO SmObj['result']['driver_path']");
@@ -893,6 +1055,8 @@ function buildRobin(batch, opt) {
     "Message: SmOutput Icon: Display.Icon.Information Buttons: Display.Buttons.OK " +
     "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> SmBtn");
   A("    END");
+  A("    END");
+  A("END");
   A("END");
   A("");
   A("# ここから先はドライバーが要る。取得に失敗していたら入らない。");

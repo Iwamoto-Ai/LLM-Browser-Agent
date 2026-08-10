@@ -422,13 +422,29 @@ def _robin_safe_selector(sel: str) -> str:
     m = re.match(r'^xpath///\*\[@id=[\'"]([^\'"]+)[\'"]\]$', sel)
     if m:
         return "id/" + m.group(1)
+    # aria/名前[role="link"] のような属性の付いた形は、名前の部分しか使わない
+    # （共通 JavaScript が [ 以降を切り落とす）。ここで先に切っておけば、
+    # 二重引用符が理由で候補ごと落ちるのを避けられる。
+    if sel.startswith("aria/") and "[" in sel:
+        return "aria/" + sel[5:].split("[")[0].strip()
     return sel
 
 
 def _robin_filter_candidates(cands: list) -> list:
-    """単引用符を含む候補を除く（Robin リテラルに入れられないため）。
+    """Robin リテラルや JSON 本文に入れられない候補を落とす。
+
+    * 単引用符 … Robin の $'''…''' に入れると PAD が黙って無視する
+    * 二重引用符 … 本文は {"script": "…", "args": […]} という JSON なので、
+      候補の中に生の " があるとそこで文字列が閉じ、WebDriver が
+      「invalid argument: missing command parameters」を返す
+
     すべて落ちてしまう場合は、CSS の id セレクタなど代替を残せないか呼び出し側で確認する。"""
-    out = [c for c in (_robin_safe_selector(x) for x in cands) if "'" not in c]
+    out = []
+    for x in cands:
+        c = _robin_safe_selector(x)
+        if "'" in c or '"' in c:
+            continue
+        out.append(c)
     return out
 
 
@@ -656,6 +672,17 @@ def _lint_robin(lines: list, log=print) -> list:
             body = lit.replace("\\'", "")
             if "'" in body:
                 warns.append(f"{i}行: リテラル内の単引用符が未エスケープです（\\' にする）: {s[:80]}")
+        # JSON 本文に生の二重引用符が混ざっていないか。
+        # {"script": "…", "args": […]} の中で " が閉じてしまうと、WebDriver は
+        # 「invalid argument: missing command parameters」を返す。
+        # 例: aria/検収照会[role="link"] のようなセレクタをそのまま埋めた場合。
+        key = 'args\\": ['
+        if key in s:
+            args_part = s.split(key, 1)[1]
+            if '"' in args_part.replace('\\"', ""):
+                warns.append(
+                    f"{i}行: JSON 本文の args に生の二重引用符が入っています。"
+                    f"そのままだと WebDriver がエラーを返します: {s[:80]}")
     for w in warns:
         log(f"  ⚠ {w}")
     return warns
@@ -759,13 +786,21 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# ※ BaseDir の末尾に \\ を付けないこと（%BaseDir%\\file.png が二重になる）")
     A("")
     A("# --- ドライバーの入手方法 ---")
-    A("# True  … Selenium Manager がブラウザーの版に合わせて自動取得する（推奨）。")
-    A("#         ブラウザーが更新されても入れ替えが要らない。取得先はバージョン番号を")
-    A("#         含むフォルダなので、固定パスでは書けない。")
-    A("#         selenium-manager-windows.exe は BaseDir に置くこと。取得元:")
-    A("#         https://github.com/SeleniumHQ/selenium_manager_artifacts/releases")
-    A("# False … 下の固定パスを使う。ブラウザー更新時は手動で入れ替える。")
+    A("# AutoDriver = True なら、入っているブラウザーに合わせて自動で取ってくる。")
+    A("# ブラウザーが更新されても入れ替えが要らない。")
+    A("#")
+    A("# DriverSource = direct  … ベンダーのサイトから直接取る（推奨）。")
+    A("#   使うのは curl.exe / tar.exe / powershell.exe だけで、どれも Windows に")
+    A("#   最初から入っている Microsoft 署名済みの実行ファイル。持ち込みの exe を")
+    A("#   実行できない環境でも動く。落ちてくるドライバーもベンダー署名付き。")
+    A("# DriverSource = manager … Selenium Manager に任せる。")
+    A("#   selenium-manager-windows.exe を BaseDir に置いておく必要がある。取得元:")
+    A("#   https://github.com/SeleniumHQ/selenium_manager_artifacts/releases")
+    A("#   ※ 署名の無い実行ファイルを止める環境では、これ自体が起動できない。")
+    A("#")
+    A("# AutoDriver = False … 下の固定パスを使う。ブラウザー更新時は手で入れ替える。")
     A(f"SET AutoDriver TO {'True' if auto_driver else 'False'}")
+    A(f"SET DriverSource TO {_robin_str('direct')}")
     A("SET SmExe TO $'''selenium-manager-windows.exe'''")
     A("")
     A("# AutoDriver = False のときに使う固定パス。Browser に追従させるため、")
@@ -841,10 +876,98 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     _fx = _robin_str("固定パス（AutoDriver=False のためブラウザー更新時は手動で入れ替え）")
     A(f"SET DriverSrc TO {_fx}")
     A(f"SET SmMsg TO {_robin_str('')}")
-    A("# --- ドライバーの自動取得（Selenium Manager）---")
-    A("# 設定は冒頭の AutoDriver / SmExe。ここは取得を実行する部分で、")
-    A("# 取得できたらそのパスで DriverExe を上書きする。")
+    A("")
+    A("# ---------- ベンダーから直接取ってくる（DriverSource = direct）----------")
+    A("# 版ごとのフォルダに入れる。ブラウザーが更新されると版が変わり、")
+    A("# フォルダ名も変わるので自動的に取り直しになる。中身を比べる必要がない。")
     A("IF AutoDriver THEN")
+    A(f"IF DriverSource = {_robin_str('direct')} THEN")
+    A("    # 入っているブラウザーの版をレジストリから読む。")
+    A("    # [Console]::Write は改行を付けないので、そのまま URL に埋め込める。")
+    A("    # [char]46 は「.」。引用符を書かずに済ませるための書き方。")
+    A(f"    SET VerCmd TO {_robin_str(_EDGE_VER_CMD)}")
+    A(f"    IF Browser = {_robin_str('chrome')} THEN")
+    A(f"        SET VerCmd TO {_robin_str(_CHROME_VER_CMD)}")
+    A("    END")
+    A(_dos("VerCmd", "BrowserKey", "VerErr", "VerExit", 120, "    "))
+    A(f"    IF BrowserKey = {_robin_str('')} THEN")
+    A("        SET Halt TO True")
+    A(f"        SET HaltReason TO {_robin_str('レジストリからブラウザーの版を読めませんでした')}")
+    A("    END")
+    A("")
+    A("    # Edge は入っている版の zip がそのまま用意されている。Chrome は版ぴったりの")
+    A("    # ドライバーが無いことが多いので、メジャー番号でその世代の最新版を問い合わせる。")
+    A("    SET DrvVer TO BrowserKey")
+    A("    IF Halt = False THEN")
+    A(f"        IF Browser = {_robin_str('chrome')} THEN")
+    A("            SET RelUrl TO $'''https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_%BrowserKey%'''")
+    A("            SET VerFile TO $'''%BaseDir%\\\\drvver.txt'''")
+    A("            SET RelCmd TO $'''curl.exe -f -L -sS -o \"%VerFile%\" %RelUrl%'''")
+    A("            IF UseProxy THEN")
+    A("                SET RelCmd TO $'''curl.exe -f -L -sS -x %ProxyAddr% -o \"%VerFile%\" %RelUrl%'''")
+    A("            END")
+    A(_dos("RelCmd", "RelOut", "RelErr", "RelExit", 300, "            "))
+    A("            SET ReadCmd TO $'''powershell -NoProfile -Command [Console]::Write((Get-Content -Raw %VerFile%).Trim())'''")
+    A(_dos("ReadCmd", "DrvVer", "ReadErr", "ReadExit", 120, "            "))
+    A(f"            IF DrvVer = {_robin_str('')} THEN")
+    A("                SET Halt TO True")
+    A(f"                SET HaltReason TO {_robin_str('ドライバーの版を問い合わせられませんでした')}")
+    A("            END")
+    A("        END")
+    A("    END")
+    A("")
+    A("    IF Halt = False THEN")
+    A("        Folder.Create FolderPath: BaseDir FolderName: $'''driver''' Folder=> DrvRoot")
+    A("        Folder.Create FolderPath: $'''%BaseDir%\\\\driver''' FolderName: DrvVer Folder=> DrvDirObj")
+    A("        SET DrvDir TO $'''%BaseDir%\\\\driver\\\\%DrvVer%'''")
+    A("        # Edge の zip は exe が直下、Chrome は chromedriver-win64 の下に入る")
+    A("        SET DrvHome TO DrvDir")
+    A("        SET DrvExeName TO $'''msedgedriver.exe'''")
+    A("        SET ZipUrl TO $'''https://msedgedriver.microsoft.com/%DrvVer%/edgedriver_win64.zip'''")
+    A(f"        IF Browser = {_robin_str('chrome')} THEN")
+    A("            SET DrvHome TO $'''%DrvDir%\\\\chromedriver-win64'''")
+    A("            SET DrvExeName TO $'''chromedriver.exe'''")
+    A("            SET ZipUrl TO $'''https://storage.googleapis.com/chrome-for-testing-public/%DrvVer%/win64/chromedriver-win64.zip'''")
+    A("        END")
+    A("        SET ZipPath TO $'''%DrvDir%\\\\driver.zip'''")
+    A("        " + _folder_get("DrvHome", "DrvExeName", "HaveDrv"))
+    A("        IF HaveDrv.Count = 0 THEN")
+    A("            # -f を付けないと 404 でも curl は成功を返し、エラーページを zip として")
+    A("            # 保存してしまう。その先の tar が失敗して原因が読めなくなる。")
+    A("            SET DlCmd TO $'''curl.exe -f -L -sS -o \"%ZipPath%\" %ZipUrl%'''")
+    A("            IF UseProxy THEN")
+    A("                SET DlCmd TO $'''curl.exe -f -L -sS -x %ProxyAddr% -o \"%ZipPath%\" %ZipUrl%'''")
+    A("            END")
+    A(_dos("DlCmd", "DlOut", "DlErr", "DlExit", 600, "            "))
+    A("            IF DlExit <> 0 THEN")
+    A("                SET Halt TO True")
+    A("                SET HaltReason TO $'''ドライバーを取得できませんでした（curl の終了コード %DlExit%）'''")
+    A("            END")
+    A("            IF Halt = False THEN")
+    A("                SET UnzipCmd TO $'''tar.exe -xf \"%ZipPath%\" -C \"%DrvDir%\"'''")
+    A(_dos("UnzipCmd", "UzOut", "UzErr", "UzExit", 300, "                "))
+    A("            END")
+    A("        END")
+    A("    END")
+    A("")
+    A("    IF Halt = False THEN")
+    A("        " + _folder_get("DrvHome", "DrvExeName", "HaveDrv2"))
+    A("        IF HaveDrv2.Count = 0 THEN")
+    A("            SET Halt TO True")
+    A("            SET HaltReason TO $'''ドライバーを展開できませんでした（tar の終了コード %UzExit%）'''")
+    A("        END")
+    A("    END")
+    A("    IF Halt = False THEN")
+    A("        SET DriverExe TO $'''%DrvHome%\\\\%DrvExeName%'''")
+    A(f"        SET DriverSrc TO {_robin_str('ベンダーから直接取得（%DrvVer% / 版ごとのフォルダに保管）')}")
+    A("    END")
+    A("END")
+    A("END")
+    A("")
+    A("# ---------- Selenium Manager に任せる（DriverSource = manager）----------")
+    A("# 設定は冒頭の AutoDriver / SmExe。取得できたらそのパスで DriverExe を上書きする。")
+    A("IF AutoDriver THEN")
+    A(f"IF DriverSource = {_robin_str('manager')} THEN")
     A("    SET SmArgs TO $'''%SmExe% --browser %Browser% --browser-version stable "
       "--output json'''")
     A("    IF UseProxy THEN")
@@ -853,6 +976,19 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("    Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout "
       "DOSCommandOrApplication: SmArgs WorkingDirectory: BaseDir Timeout: 300 "
       "StandardOutput=> SmOutput StandardError=> SmError ExitCode=> SmExit")
+    A("    # 終了コードを先に見る。exe が起動できないと出力が空になり、そのまま")
+    A("    # JSON に変換しようとして「CustomObject が取れません」という、原因の")
+    A("    # 分からないエラーになる。")
+    A("    IF SmExit <> 0 THEN")
+    A("        SET Halt TO True")
+    A(f"        SET HaltReason TO {_robin_str('Selenium Manager を実行できませんでした')}")
+    A("        Display.ShowMessageDialog.ShowMessage Title: "
+      + _robin_str("Selenium Manager を実行できません")
+      + " Message: SmError Icon: Display.Icon.Warning Buttons: Display.Buttons.OK "
+        "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True "
+        "ButtonPressed=> SmBtn2")
+    A("    END")
+    A("    IF Halt = False THEN")
     A("    Variables.ConvertJsonToCustomObject Json: SmOutput CustomObject=> SmObj")
     A("    IF SmObj['result']['code'] = 0 THEN")
     A("        SET DriverExe TO SmObj['result']['driver_path']")
@@ -869,6 +1005,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
       "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True "
       "ButtonPressed=> SmBtn")
     A("    END")
+    A("    END")
+    A("END")
     A("END")
     A("")
     A("# ここから先はドライバーが要る。取得に失敗していたら入らない。")
@@ -1381,6 +1519,35 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     with open(js_path, "w", encoding="utf-8") as f:
         f.write(js_one + "\n")
     return os.path.abspath(path)
+
+
+# ドライバーをベンダーから直接取るときに使うコマンド。引用符を書かずに済むよう、
+# レジストリのキーは空白の無いものを直接指定し、区切り文字は [char]46 で表す。
+# [Console]::Write は改行を付けないので、結果をそのまま URL に埋め込める。
+_EDGE_VER_CMD = ("powershell -NoProfile -Command [Console]::Write("
+                 "(Get-ItemProperty HKCU:\\Software\\Microsoft\\Edge\\BLBeacon).version)")
+_CHROME_VER_CMD = ("powershell -NoProfile -Command [Console]::Write("
+                   "(Get-ItemProperty HKCU:\\Software\\Google\\Chrome\\BLBeacon)"
+                   ".version.Split([char]46)[0])")
+
+
+def _dos(cmd_var: str, out_var: str, err_var: str, exit_var: str,
+         timeout: int, indent: str = "") -> str:
+    """DOS コマンドの実行（実機で確認済みの書式）。"""
+    return (f"{indent}Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout "
+            f"DOSCommandOrApplication: {cmd_var} WorkingDirectory: BaseDir "
+            f"Timeout: {timeout} StandardOutput=> {out_var} "
+            f"StandardError=> {err_var} ExitCode=> {exit_var}")
+
+
+def _folder_get(folder_var: str, filter_var: str, out_var: str) -> str:
+    """フォルダー内のファイル取得。並べ替えの列挙は Folder.SortBy.○○（実機確認済み）。"""
+    return (f"Folder.GetFiles Folder: {folder_var} FileFilter: {filter_var} "
+            "IncludeSubfolders: False FailOnAccessDenied: True "
+            "SortBy1: Folder.SortBy.Name SortDescending1: False "
+            "SortBy2: Folder.SortBy.LastModified SortDescending2: False "
+            "SortBy3: Folder.SortBy.LastAccessed SortDescending3: False "
+            f"Files=> {out_var}")
 
 
 def _warn_exec_paths(args) -> None:
