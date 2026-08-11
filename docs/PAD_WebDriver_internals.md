@@ -11,10 +11,9 @@
 
 ## 📖 目次
 
-**設計**　[🔌 使う HTTP 呼び出しは 6 種類だけ](#-使う-http-呼び出しは-6-種類だけ) / [📜 共通 JavaScript（変数 `%JsAct%` に入れておく）](#-共通-javascript変数-jsact-に入れておく) / [🔁 フローの組み立て](#-フローの組み立て) / [📸 エビデンスの撮り方](#-エビデンスの撮り方) / [🔐 資格情報を「読まない」設計](#-資格情報を読まない設計) <br>
-**実機で分かったこと**　[⚠️ Web.InvokeWebService の引数（最重要）](#-webinvokewebservice-の引数最重要) / [📌 Robin リテラルのエスケープ（実機で判明）](#-robin-リテラルのエスケープ実機で判明) / [✅ 実機で確認できたアクション書式（PAD 無料版 / Windows 11）](#-実機で確認できたアクション書式pad-無料版--windows-11) <br>
+**設計**　[🔌 使う HTTP 呼び出しは 6 種類だけ](#-使う-http-呼び出しは-6-種類だけ) / [📜 共通 JavaScript（変数 `%JsAct%` に入れておく）](#-共通-javascript変数-jsact-に入れておく) / [🔁 フローの組み立て](#-フローの組み立て) / [📸 エビデンスの撮り方](#-エビデンスの撮り方) / [🔐 資格情報を「読まない」設計](#-資格情報を読まない設計) / [🔄 WebDriver の自動取得](#-webdriver-の自動取得) / [📥 ファイルのダウンロード（エビデンスが画面に出ない場合）](#-ファイルのダウンロードエビデンスが画面に出ない場合) / [🕒 日時とファイル名](#-日時とファイル名)
+**実機で分かったこと**　[⚠️ Web.InvokeWebService の引数（最重要）](#-webinvokewebservice-の引数最重要) / [📌 Robin リテラルのエスケープ（実機で判明）](#-robin-リテラルのエスケープ実機で判明) / [✅ 実機で確認できたアクション書式（PAD 無料版 / Windows 11）](#-実機で確認できたアクション書式pad-無料版--windows-11)
 **Python 版限定**　[📄 手順書の自動生成（Pythonが使える環境で使う）](#-手順書の自動生成pythonが使える環境で使う)
-
 ---
 
 # 第 1 部　設計
@@ -320,6 +319,268 @@ JSON 用にエスケープして自動ログインのブロックに入れてい
 
 無人実行はできなくなるが、PAD 版はエビデンスを取りながら人が見守る用途なので
 問題にならない、という判断。
+
+---
+
+## 🔄 WebDriver の自動取得
+
+**Edge と Chromeブラウザ は自動更新される。** そのたびに `msedgedriver.exe` を同じバージョンに入れ替えないと
+`session not created` で止まる。　これを手作業で追いかけるのは現実的でない。
+
+自動にするため **Selenium Manager**（Selenium 公式の単体実行ファイルで、Python も Node.js も要らない）
+を使用し、インストール済みブラウザーに対応するバージョンのWebDriverを自動で取得し更新する。
+
+-⚠️`selenium-manager-windows.exe` をダウンロードし実行環境の `BaseDir`（例 `C:\temp`）に置いておく必要がある。 <br>
+　　入手先: <https://github.com/SeleniumHQ/selenium_manager_artifacts/releases>
+
+```
+selenium-manager-windows.exe --browser edge --browser-version stable --output json
+```
+
+```json
+{
+  "logs": [ … ],
+  "result": {
+    "code": 0,
+    "message": "",
+    "driver_path": "C:\\Users\\…\\.cache\\selenium\\msedgedriver\\win64\\150.0.4078.105\\msedgedriver.exe",
+    "browser_path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+  }
+}
+```
+
+⚠️**置き場所がバージョン番号を含むフォルダになる**点に注意。固定パスを `DriverExe` に書くと
+更新のたびに壊れるので、この  `result.driver_path` をフローが読み取って使う。
+
+**Chrome でも同じ仕組みが使える。** 生成物の冒頭にある `Browser` を `chrome` に変えるだけで、
+WebDriver へ渡すブラウザー名（`MicrosoftEdge` → `chrome`）、終了させるプロセス名
+（`msedgedriver` → `chromedriver`）、Selenium Manager が取得するドライバーの 3 つが同時に切り替わる。
+
+```
+SET Browser TO $'''edge'''
+SET BrowserName TO $'''MicrosoftEdge'''
+SET DriverProc TO $'''msedgedriver'''
+IF Browser = $'''chrome''' THEN
+    SET BrowserName TO $'''chrome'''
+    SET DriverProc TO $'''chromedriver'''
+END
+```
+
+💡対象サイトがブラウザー判定で表示を変える場合や、片方で不具合が出たときの逃げ道としても使える。
+生成時に決めておくなら `--pad-browser chrome` を付ける。
+
+生成器に `--auto-driver` を付けると次の仕組みが入る。**スイッチは冒頭の設定にまとめてあり、
+実際に取得を走らせる処理だけがドライバー起動の直前に置かれる。**
+
+```
+# --- ドライバーの入手方法 ---（冒頭の設定）
+SET AutoDriver TO True
+SET SmExe TO $'''selenium-manager-windows.exe'''
+```
+
+
+```
+SET AutoDriver TO True
+SET SmExe TO $'''selenium-manager-windows.exe'''
+IF AutoDriver THEN
+    SET SmArgs TO $'''%SmExe% --browser %Browser% --browser-version stable --output json'''
+    IF UseProxy THEN
+        SET SmArgs TO $'''%SmArgs% --proxy %ProxyAddr%'''
+    END
+    Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: SmArgs WorkingDirectory: BaseDir Timeout: 300 StandardOutput=> SmOutput StandardError=> SmError ExitCode=> SmExit
+    Variables.ConvertJsonToCustomObject Json: SmOutput CustomObject=> SmObj
+    IF SmObj['result']['code'] = 0 THEN
+        SET DriverExe TO SmObj['result']['driver_path']
+    END
+END
+```
+
+- **標準出力を受け取るのは「DOS コマンドの実行」**（`Scripting.RunDOSCommand`）。これまで使ってきた
+  「アプリケーションの実行」では出力を受け取れない。
+- **社内プロキシ環境ではドライバーのダウンロードもプロキシ経由**になるため、`--proxy` が要る。
+  `UseProxy` が `True` のときだけ自動で付く。
+- 初回はダウンロードが走るので `Timeout` は長め（300 秒）にしておく。2 回目以降はキャッシュから返る。
+- `ELSE` を使わず `IF code = 0` と `IF code <> 0` の 2 つに分けている（未検証の構文を避けるため）。
+- 取得に失敗したときは `Halt` を立てて**ドライバー起動そのものに入らない**。ここで止めないと、
+  更新前の古い固定パスで起動してしまい、症状が「セッション作成の失敗」に化けて原因が読めなくなる。
+
+### ドライバーとブラウザーの照合を目に見える形にする
+
+`AutoDriver` は「合っているはず」を前提にしていて、実際に何が起動したのかは出てこなかった。
+セッションを張った直後に、応答の `capabilities` から**実際に動いているもの**を取り出して
+ログとダイアログに出す。
+
+```
+SET BrowserVer TO SessionObj['value']['capabilities']['browserVersion']
+SET DriverVer TO $'''(不明)'''
+IF Browser = $'''chrome''' THEN
+    SET DriverVer TO SessionObj['value']['capabilities']['chrome']['chromedriverVersion']
+END
+IF Browser = $'''edge''' THEN
+    SET DriverVer TO SessionObj['value']['capabilities']['msedge']['msedgedriverVersion']
+END
+```
+
+出力はこの 1 行。`ShowDriverInfo` を `False` にするとダイアログは出ないが、ログには必ず残る。
+
+```
+[ドライバー] ブラウザー=chrome 151.0.7922.72 / WebDriver=chromedriver 151.0.7922.72 (…) /
+メジャー判定=一致 / 取得方法=Selenium Manager（ブラウザーのバージョンに合わせて自動取得）/ パス=…
+```
+
+- **比較するのはメジャーバージョンだけ。** Chrome とドライバーはビルド番号まで一致するとは
+  限らない（ブラウザー 115.0.5790.110 に対しドライバー 115.0.5790.102 など）。完全一致で
+  判定すると、正常な組み合わせを不一致と報告してしまう。
+- **メジャーの取り出しはページ側の JavaScript にやらせている。** PAD のテキスト分割アクションを
+  増やさずに済み、貼り付け時に黙って落ちる行を作らない。`/session/…/execute/sync` は
+  すでに使っている呼び出しなので、新しい仕組みは何も増えない。
+- `取得方法` は `AutoDriver` の結果で切り替わる。自動取得なら「ブラウザーのバージョンに
+  合わせて自動取得」、`False` なら「固定パス（ブラウザー更新時は手動で入れ替え）」と出る。
+  **ブラウザーだけ更新されて止まったときに、どちらの経路で動いていたかが後から分かる。**
+
+### 起動したブラウザーが要求どおりか確かめる ★重要
+
+**ドライバーは `browserName` の不一致を拒否する。** chromedriver に `MicrosoftEdge` を、
+msedgedriver に `chrome` を渡すと、どちらも `session not created: No matching capabilities
+found` を返した（実機確認）。ただし**バージョンの不一致は拒否しない** — msedgedriver 150 で
+Edge 151 のセッションは作れた。
+
+危ないのはフロー側の食い違いのほうである。`Browser` は capabilities のどのキーを読むかを
+決め、`BrowserName` は WebDriver へ送る値で、片方だけ書き換えると**セッションは正常に
+張れるのに版の取得だけが空振りする**。実機ではこれで「プロパティがありません」という、
+原因とは無関係な行で止まった。応答の `browserName` を見て、`BrowserName` と違えば
+そこで止める。
+
+```
+SET RealBrowser TO SessionObj['value']['capabilities']['browserName']
+IF RealBrowser <> BrowserName THEN
+    SET Halt TO True
+    SET HaltReason TO $'''要求したブラウザー(%BrowserName%)と実際に起動したブラウザー(%RealBrowser%)が違います。ドライバーの取り違えです'''
+END
+```
+
+**この判定を version の取得より前に置くこと。** `capabilities` の中でドライバーの版が入る
+キーはブラウザーごとに違う（Chrome は `chrome.chromedriverVersion`、Edge は
+`msedge.msedgedriverVersion`）ため、取り違えたまま先に進むと、こちらが想定したキーが
+存在せず「プロパティがありません」で落ちる。原因（取り違え）とは無関係な行で止まるので、
+切り分けが遠回りになる。
+
+### 中止した理由を記録する
+
+`Halt` は「ドライバー取得の失敗」「手動ログインのキャンセル」「起点画面に着けない」
+「セットアップ中のエラー」のどれでも立つ。理由を持たせないと、最後のダイアログが常に
+同じ文面になり、実際の原因と食い違う。`HaltReason` を必ずセットし、ダイアログと
+ログの両方に出す。
+
+```
+[2026/08/02 16:20:11] 中止 繰り返しの起点画面に到達できませんでした
+```
+
+
+
+---
+
+---
+
+## 📥 ファイルのダウンロード（エビデンスが画面に出ない場合）
+
+登録の結果が画面に表示されず、**別メニューから Excel や PDF をダウンロードして初めて
+内容が分かる**業務がある。スクリーンショットでは証跡にならないため、ファイルとして
+受け取って保存する必要がある。以下はすべて実機で確認した書式（PAD 無料版 / Windows 11 / Edge）。
+
+### 保存先を固定し、確認ダイアログを出さない
+
+WebDriver が起動するブラウザーは素のプロファイルなので、既定では「ダウンロード」
+フォルダーに落ち、場合によっては確認が出る。セッション作成時の `prefs` で 4 つとも抑える。
+
+```
+SET SessionBody TO $'''%SessionBody%, \"ms:edgeOptions\": {\"prefs\": {\"download.default_directory\": \"C:\\\\temp\\\\evidence\"'''
+SET SessionBody TO $'''%SessionBody%, \"download.prompt_for_download\": false, \"plugins.always_open_pdf_externally\": true'''
+SET SessionBody TO $'''%SessionBody%, \"profile\": {\"default_content_setting_values\": {\"automatic_downloads\": 1}}}}'''
+```
+
+| 設定 | 効果 |
+| --- | --- |
+| `download.default_directory` | 保存先。**JSON の中に Windows パスを書くのでバックスラッシュは 4 本**（Robin で `\\`→`\`、JSON で `\\`→`\`） |
+| `download.prompt_for_download: false` | 保存ダイアログを出さない |
+| `plugins.always_open_pdf_externally: true` | **PDF をビューアで開かずファイルとして落とす。** これが無いと PDF は保存されない |
+| `automatic_downloads: 1` | 「複数ファイルのダウンロードを許可しますか」を出さない |
+
+**`prompt_for_download` と `automatic_downloads` は別物。** 前者だけでは
+「ブロック / 許可」の確認が出て、押すまでダウンロードが始まらない。
+
+### 完了を待つ
+
+クリックした瞬間はまだ書き込み中で、`.crdownload` が残る。**それが消えたことだけを
+見ていると、ダウンロードが始まる前に条件を満たして先へ進んでしまう。** 目的のファイルが
+実際に現れるまで数える。
+
+```
+LOOP WHILE Pending > 0
+    Folder.GetFiles Folder: DlDir FileFilter: $'''*.crdownload''' IncludeSubfolders: False FailOnAccessDenied: True SortBy1: Folder.SortBy.Name SortDescending1: False SortBy2: Folder.SortBy.LastModified SortDescending2: False SortBy3: Folder.SortBy.LastAccessed SortDescending3: False Files=> TempFiles
+    SET Pending TO TempFiles.Count
+    …（目的のファイルがそろったか数え、そろっていなければ Pending を 1 に戻す）
+    WAIT 1
+    SET Waited TO Waited + 1
+    IF Waited >= 30 THEN
+        SET Pending TO 0
+    END
+END
+```
+
+複合条件（`AND`）は実機未確認なので使わず、打ち切りは内側の `IF` で行っている。
+
+### エビデンス名に付け替える
+
+```
+File.RenameFiles.Rename Files: SrcFile NewName: NewBase KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> RenamedFiles
+```
+
+- **`NewName` は拡張子なしの名前だけでよい。** `KeepExtension: True` なので元の拡張子が残り、
+  **Excel と PDF で処理を分ける必要がない**
+- リネームは同じフォルダー内で行われるため、パスを付ける必要はない
+- **対象が存在しないと `FileNotFoundException` で止まる。** `Folder.GetFiles` で
+  存在を確かめてから実行すること
+
+サーバーが付けるファイル名が事前に分からない場合は、クリック前にファイル数を数え、
+増えたあとで `Folder.SortBy.LastModified` の降順から一番新しいものを取る。
+
+### 落とし穴
+
+- **ドライバーを取り違えてもセッションは張れる場合がある**が、`browserName` の不一致は
+  chromedriver も msedgedriver も `session not created` で拒否する。一方
+  **バージョンの不一致は拒否しない**（msedgedriver 150 で Edge 151 のセッションが張れた）
+- **単体のスクリプトファイルはウイルス対策に誤ブロックされる。** `.js` でも `.txt` でも同じで、
+  拡張子ではなく中身が検知される。共通 JavaScript はコピーで受け渡すこと
+
+---
+
+---
+
+## 🕒 日時とファイル名
+
+`DateTime.DateTimeFormat.DateAndTime` は `2026/07/23 8:41:00` のような値を返し、`/` と `:` は
+Windows のファイル名に使えない。テキストに整形してから使う。
+
+```
+DateTime.GetCurrentDateTime.Local DateTimeFormat: DateTime.DateTimeFormat.DateAndTime CurrentDateTime=> NowDt
+Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt CustomFormat: $'''yyyyMMdd_HHmmss''' Result=> Stamp
+```
+
+**`MM` は月、`mm` は分。** `yyyymmdd` と書くと月の位置に分が入る。
+
+ファイル名は「ID ＋業務キー＋日時」で一意にする。失敗時は接頭辞を付けると探しやすい。
+
+```
+<ID>__<業務キー>__yyyyMMdd_HHmmss.png
+fail__<ID>__<業務キー>__yyyyMMdd_HHmmss.png
+```
+
+出力フォルダの変数（`BaseDir` / `OutDir`）**末尾に `\` を付けないこと**（パスが二重区切りになる）。
+
+---
+
+---
 
 # 第 2 部　実機で分かったこと
 

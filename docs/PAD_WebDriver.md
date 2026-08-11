@@ -1,5 +1,9 @@
 # Power Automate Desktop 無料版 (PAD) と WebDriver だけでバッチ実行する（ブラウザ拡張機能は不要）
 
+> **PAD 版は手動ログイン方式専用。**
+> ログインは人が画面で行い、繰り返しの起点画面まで人が進めてから開始させる。
+> **ID・パスワードは一切扱わない安心・安全設計。**
+
 Power Automate Desktop 無料版（PAD）の Web 自動化アクションは専用のブラウザ拡張機能を必要とするが、
 **WebDriver はブラウザ拡張機能が無くても動作する。** `msedgedriver.exe` 自体がローカルの HTTP サーバーとして動く。
 つまり **HTTP リクエストを送れれば、拡張機能なしでブラウザを完全に操作できる**。
@@ -31,13 +35,12 @@ PAD の「Web サービスの呼び出し」がまさにそれに当たる。
 
 ## 📖 目次
 
-**はじめに**　[💡Power Automate Desktop 無料版 (PAD) 標準の録画機能との違い](#power-automate-desktop-無料版-pad-標準の録画機能との違い) / [🧭 全体像](#-全体像) <br>
-**準備**　[🛠️ 事前準備](#-事前準備) / [🌐 プロキシ経由でインターネットへ出る環境（企業のネット環境に多い）](#-プロキシ経由でインターネットへ出る環境企業のネット環境に多い) / [🔄 自動 WebDriver 取得更新機能　(`selenium-manager-windows.exe` 必要)](#-自動-webdriver-取得更新機能-selenium-manager-windowsexe-必要) <br>
-**使い方**　[🤖 録画JSONファイルをPADコード(Robin)へ変換する](#-録画jsonファイルをpadコードrobinへ変換する) <br>
-**運用**　[🔐 資格情報の扱い](#-資格情報の扱い) / [📊 結果 CSV と再実行](#-結果-csv-と再実行) / [📸 エビデンス（スクリーンショット）](#-エビデンススクリーンショット) / [📥 ファイルのダウンロード（エビデンスが画面に出ない場合）](#-ファイルのダウンロードエビデンスが画面に出ない場合) / [🕒 日時とファイル名](#-日時とファイル名) <br>
-**練習**　[🧪 実環境が無くても練習できる](#-実環境が無くても練習できる) / [📦 サンプル](#-サンプル) <br>
+**はじめに**　[💡Power Automate Desktop 無料版 (PAD) 標準の録画機能との違い](#power-automate-desktop-無料版-pad-標準の録画機能との違い) / [🧭 全体像](#-全体像)
+**準備**　[🛠️ 事前準備](#-事前準備) / [🔄 自動 WebDriver 取得更新機能](#-自動-webdriver-取得更新機能) / [🌐 プロキシ経由でインターネットへ出る環境（企業のネット環境に多い）](#-プロキシ経由でインターネットへ出る環境企業のネット環境に多い)
+**使い方**　[🤖 録画JSONファイルをPADコード(Robin)へ変換する](#-録画jsonファイルをpadコードrobinへ変換する)
+**運用**　[🔐 資格情報の扱い](#-資格情報の扱い) / [手動ログイン](#手動ログイン) / [📊 結果 CSV と再実行](#-結果-csv-と再実行) / [📸 エビデンス（スクリーンショット）](#-エビデンススクリーンショット)
+**練習**　[🧪 実環境が無くても練習できる](#-実環境が無くても練習できる) / [📦 サンプル](#-サンプル)
 **困ったとき**　[❓ うまくいかないとき](#-うまくいかないとき) / [⚠️ 制約](#-制約)
-
 ---
 
 ## 💡Power Automate Desktop 無料版 (PAD) 標準の録画機能との違い
@@ -145,6 +148,19 @@ WAIT 3
 
 ---
 
+## 🔄 自動 WebDriver 取得更新機能
+
+**通常は、入っているブラウザーに合わせて WebDriver を自動で取得・更新する。**
+ブラウザーが更新されても入れ替え作業は要らない。取得したものは
+`C:\temp\driver\<版>\` に置かれ、版が変わると自動的に取り直しになる。
+
+使うのは Windows に最初から入っている `curl.exe` / `tar.exe` / `powershell.exe` だけで、
+落ちてくる WebDriver もベンダー署名付き。**持ち込みの実行ファイルを止める環境でも動く。**
+
+> **ネットワークの制限で自動取得が働かない場合は、手作業で WebDriver を置く必要がある。**
+> 手順と、取得先の切り替え（`DriverSource`）は
+> [PAD_WebDriver_internals.md](PAD_WebDriver_internals.md#-webdriver-の自動取得) を参照。
+
 ## 🌐 プロキシ経由でインターネットへ出る環境（企業のネット環境に多い）
 
 **WebDriver が起動するブラウザーは素のプロファイル**で立ち上がり、Windows のプロキシ設定を
@@ -179,166 +195,6 @@ curl -x http://proxy.example.com:8080 https://example.com -I
 > **⚠️ 認証プロキシの場合**
 > ユーザー名・パスワードを要求するプロキシでは `proxyType: manual` だけでは通らないことがある。
 > まず認証なしで試し、通らなければネットワーク管理者に方式を確認する。
-
-
-
----
-
----
-
-## 🔄 自動 WebDriver 取得更新機能　(`selenium-manager-windows.exe` 必要)
-
-**Edge と Chromeブラウザ は自動更新される。** そのたびに `msedgedriver.exe` を同じバージョンに入れ替えないと
-`session not created` で止まる。　これを手作業で追いかけるのは現実的でない。
-
-自動にするため **Selenium Manager**（Selenium 公式の単体実行ファイルで、Python も Node.js も要らない）
-を使用し、インストール済みブラウザーに対応するバージョンのWebDriverを自動で取得し更新する。
-
--⚠️`selenium-manager-windows.exe` をダウンロードし実行環境の `BaseDir`（例 `C:\temp`）に置いておく必要がある。 <br>
-　　入手先: <https://github.com/SeleniumHQ/selenium_manager_artifacts/releases>
-
-```
-selenium-manager-windows.exe --browser edge --browser-version stable --output json
-```
-
-```json
-{
-  "logs": [ … ],
-  "result": {
-    "code": 0,
-    "message": "",
-    "driver_path": "C:\\Users\\…\\.cache\\selenium\\msedgedriver\\win64\\150.0.4078.105\\msedgedriver.exe",
-    "browser_path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
-  }
-}
-```
-
-⚠️**置き場所がバージョン番号を含むフォルダになる**点に注意。固定パスを `DriverExe` に書くと
-更新のたびに壊れるので、この  `result.driver_path` をフローが読み取って使う。
-
-**Chrome でも同じ仕組みが使える。** 生成物の冒頭にある `Browser` を `chrome` に変えるだけで、
-WebDriver へ渡すブラウザー名（`MicrosoftEdge` → `chrome`）、終了させるプロセス名
-（`msedgedriver` → `chromedriver`）、Selenium Manager が取得するドライバーの 3 つが同時に切り替わる。
-
-```
-SET Browser TO $'''edge'''
-SET BrowserName TO $'''MicrosoftEdge'''
-SET DriverProc TO $'''msedgedriver'''
-IF Browser = $'''chrome''' THEN
-    SET BrowserName TO $'''chrome'''
-    SET DriverProc TO $'''chromedriver'''
-END
-```
-
-💡対象サイトがブラウザー判定で表示を変える場合や、片方で不具合が出たときの逃げ道としても使える。
-生成時に決めておくなら `--pad-browser chrome` を付ける。
-
-生成器に `--auto-driver` を付けると次の仕組みが入る。**スイッチは冒頭の設定にまとめてあり、
-実際に取得を走らせる処理だけがドライバー起動の直前に置かれる。**
-
-```
-# --- ドライバーの入手方法 ---（冒頭の設定）
-SET AutoDriver TO True
-SET SmExe TO $'''selenium-manager-windows.exe'''
-```
-
-
-```
-SET AutoDriver TO True
-SET SmExe TO $'''selenium-manager-windows.exe'''
-IF AutoDriver THEN
-    SET SmArgs TO $'''%SmExe% --browser %Browser% --browser-version stable --output json'''
-    IF UseProxy THEN
-        SET SmArgs TO $'''%SmArgs% --proxy %ProxyAddr%'''
-    END
-    Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: SmArgs WorkingDirectory: BaseDir Timeout: 300 StandardOutput=> SmOutput StandardError=> SmError ExitCode=> SmExit
-    Variables.ConvertJsonToCustomObject Json: SmOutput CustomObject=> SmObj
-    IF SmObj['result']['code'] = 0 THEN
-        SET DriverExe TO SmObj['result']['driver_path']
-    END
-END
-```
-
-- **標準出力を受け取るのは「DOS コマンドの実行」**（`Scripting.RunDOSCommand`）。これまで使ってきた
-  「アプリケーションの実行」では出力を受け取れない。
-- **社内プロキシ環境ではドライバーのダウンロードもプロキシ経由**になるため、`--proxy` が要る。
-  `UseProxy` が `True` のときだけ自動で付く。
-- 初回はダウンロードが走るので `Timeout` は長め（300 秒）にしておく。2 回目以降はキャッシュから返る。
-- `ELSE` を使わず `IF code = 0` と `IF code <> 0` の 2 つに分けている（未検証の構文を避けるため）。
-- 取得に失敗したときは `Halt` を立てて**ドライバー起動そのものに入らない**。ここで止めないと、
-  更新前の古い固定パスで起動してしまい、症状が「セッション作成の失敗」に化けて原因が読めなくなる。
-
-### ドライバーとブラウザーの照合を目に見える形にする
-
-`AutoDriver` は「合っているはず」を前提にしていて、実際に何が起動したのかは出てこなかった。
-セッションを張った直後に、応答の `capabilities` から**実際に動いているもの**を取り出して
-ログとダイアログに出す。
-
-```
-SET BrowserVer TO SessionObj['value']['capabilities']['browserVersion']
-SET DriverVer TO $'''(不明)'''
-IF Browser = $'''chrome''' THEN
-    SET DriverVer TO SessionObj['value']['capabilities']['chrome']['chromedriverVersion']
-END
-IF Browser = $'''edge''' THEN
-    SET DriverVer TO SessionObj['value']['capabilities']['msedge']['msedgedriverVersion']
-END
-```
-
-出力はこの 1 行。`ShowDriverInfo` を `False` にするとダイアログは出ないが、ログには必ず残る。
-
-```
-[ドライバー] ブラウザー=chrome 151.0.7922.72 / WebDriver=chromedriver 151.0.7922.72 (…) /
-メジャー判定=一致 / 取得方法=Selenium Manager（ブラウザーのバージョンに合わせて自動取得）/ パス=…
-```
-
-- **比較するのはメジャーバージョンだけ。** Chrome とドライバーはビルド番号まで一致するとは
-  限らない（ブラウザー 115.0.5790.110 に対しドライバー 115.0.5790.102 など）。完全一致で
-  判定すると、正常な組み合わせを不一致と報告してしまう。
-- **メジャーの取り出しはページ側の JavaScript にやらせている。** PAD のテキスト分割アクションを
-  増やさずに済み、貼り付け時に黙って落ちる行を作らない。`/session/…/execute/sync` は
-  すでに使っている呼び出しなので、新しい仕組みは何も増えない。
-- `取得方法` は `AutoDriver` の結果で切り替わる。自動取得なら「ブラウザーのバージョンに
-  合わせて自動取得」、`False` なら「固定パス（ブラウザー更新時は手動で入れ替え）」と出る。
-  **ブラウザーだけ更新されて止まったときに、どちらの経路で動いていたかが後から分かる。**
-
-### 起動したブラウザーが要求どおりか確かめる ★重要
-
-**ドライバーは `browserName` の不一致を拒否する。** chromedriver に `MicrosoftEdge` を、
-msedgedriver に `chrome` を渡すと、どちらも `session not created: No matching capabilities
-found` を返した（実機確認）。ただし**バージョンの不一致は拒否しない** — msedgedriver 150 で
-Edge 151 のセッションは作れた。
-
-危ないのはフロー側の食い違いのほうである。`Browser` は capabilities のどのキーを読むかを
-決め、`BrowserName` は WebDriver へ送る値で、片方だけ書き換えると**セッションは正常に
-張れるのに版の取得だけが空振りする**。実機ではこれで「プロパティがありません」という、
-原因とは無関係な行で止まった。応答の `browserName` を見て、`BrowserName` と違えば
-そこで止める。
-
-```
-SET RealBrowser TO SessionObj['value']['capabilities']['browserName']
-IF RealBrowser <> BrowserName THEN
-    SET Halt TO True
-    SET HaltReason TO $'''要求したブラウザー(%BrowserName%)と実際に起動したブラウザー(%RealBrowser%)が違います。ドライバーの取り違えです'''
-END
-```
-
-**この判定を version の取得より前に置くこと。** `capabilities` の中でドライバーの版が入る
-キーはブラウザーごとに違う（Chrome は `chrome.chromedriverVersion`、Edge は
-`msedge.msedgedriverVersion`）ため、取り違えたまま先に進むと、こちらが想定したキーが
-存在せず「プロパティがありません」で落ちる。原因（取り違え）とは無関係な行で止まるので、
-切り分けが遠回りになる。
-
-### 中止した理由を記録する
-
-`Halt` は「ドライバー取得の失敗」「手動ログインのキャンセル」「起点画面に着けない」
-「セットアップ中のエラー」のどれでも立つ。理由を持たせないと、最後のダイアログが常に
-同じ文面になり、実際の原因と食い違う。`HaltReason` を必ずセットし、ダイアログと
-ログの両方に出す。
-
-```
-[2026/08/02 16:20:11] 中止 繰り返しの起点画面に到達できませんでした
-```
 
 
 
@@ -417,7 +273,7 @@ PAD のフローは内部的に **Robin 言語**で表現されており、フ�
 │           ▼                                               │
 │  ② recordings/<name>.json                                 │
 │           │  setup / loop / recover / teardown に分割      │
-│           │  値を {{列名}} / {{SECRET:…}} に置き換え        │
+│           │  値を {{列名}} に置き換え                       │
 │           ▼                                               │
 │  ③ バッチ定義 JSON 編集                                    │
 │           │                                               │
@@ -480,7 +336,7 @@ JSON を一度も見ずに、選ぶだけでバッチ定義を作れる。
 | 操作 | 「『検索』を押す」のように、何をする操作かが日本語で出る |
 | 録画された指定 | `aria/検索` のような、録画そのままの書き方。**見比べると読み方が分かる** |
 | 箱 | setup / loop / loop+復帰 / teardown / 使わない から選ぶ |
-| 値の扱い | そのまま / 毎回変わる値（列名を入れる）/ ユーザーID / パスワード |
+| 値の扱い | そのまま / 毎回変わる値（列名を入れる） |
 | この後にエビデンス | チェックすると、その位置でエビデンスを保存する |
 
 **「起点」を最初に確かめる。** 一覧の上にも行番号と操作名が出る。ここが違っていれば、
@@ -489,7 +345,7 @@ JSON を一度も見ずに、選ぶだけでバッチ定義を作れる。
 **箱と値は推測して選んである。** 違うところだけ直せばよい。推測の規則はこう。
 
 - ページを開く・ウィンドウサイズ → `setup`
-- ユーザー名・パスワードらしい入力欄 → `setup` で ID / パスワード扱い
+- ユーザー名・パスワードらしい入力欄 → 「使わない」（変換に含めない）
 - 「ログイン」らしいクリックまで → `setup`
 - **最後の操作と同じものが前にも出ていたら、そこが繰り返しの起点**。
   その直後から `loop`、最後の戻る操作は `loop+復帰`
@@ -528,15 +384,14 @@ JSON を一度も見ずに、選ぶだけでバッチ定義を作れる。
 
 以下は、**振り分け画面を使わず自分で書く場合**、または**画面で作ったものを手直しする場合**の説明。
 
-#### 触るのは 3 か所だけ
+#### 触るのは 2 か所だけ
 
 録画された JSON は、そのままでは「1 回ぶんの操作」でしかない。これを
-「明細を何件でも流せる形」に書き換える。**書き換えるのは次の 3 か所だけ。**
+「明細を何件でも流せる形」に書き換える。**書き換えるのは次の 2 か所だけ。**
 
 ```
 ① 操作を 4 つの箱に振り分ける
 ② 毎回変わる値を {{列名}} にする
-③ ID とパスワードを {{SECRET:…}} にする
 ```
 
 **それ以外は触らない。** とくに `selectors` の中身（`#Value_0` や `aria/検索` のような
@@ -570,15 +425,9 @@ JSON を一度も見ずに、選ぶだけでバッチ定義を作れる。
 `"900000000001"` は録画したときにたまたま入力した 1 件の番号。ここを `{{発注番号}}` に
 すると、明細 CSV の「発注番号」列の値が 1 件ずつ入る。**これが「何件でも流せる」の中身。**
 
-ログイン欄も同じ要領。
-
-```json
-"value": "yamada"      →  "value": "{{SECRET:MY_USERNAME}}"
-"value": "P@ssw0rd"    →  "value": "{{SECRET:MY_PASSWORD}}"
-```
-
-> **⚠️ 録画直後の JSON には、入力したパスワードがそのまま残っている。**
-> 保存や共有をする前に、必ず `{{SECRET:…}}` に書き換えること。
+> **⚠️ 手動ログイン方式です。** ブラウザ操作録画は、必ず手動でログインし、
+> 繰り返しの起点画面まで人が進めてから録画を開始したものを使用してください。
+> ログイン操作は変換に含めません。
 
 #### ① 操作を 4 つの箱に振り分ける
 
@@ -636,16 +485,6 @@ PM9000000002,900000000002
 ```
 
 2 つめは「一覧の中から、その発注番号の行を押す」という意味になる。
-
-#### ③ ID とパスワードを `{{SECRET:…}}` にする
-
-`{{SECRET:MY_USERNAME}}` と `{{SECRET:MY_PASSWORD}}` に書き換える。名前は何でもよいが、
-**`USER` を含む名前をユーザー欄に**使うと生成器が正しく振り分ける。
-
-生成されたフローは**手動ログインが既定**で、人が画面でログインしてから[OK]を押す方式になる。
-**生成物にパスワードは一切入らない。**
-
----
 
 #### JSON の書き方（3 分で分かる分だけ）
 
@@ -721,7 +560,7 @@ PM9000000002,900000000002
 
 - [ ] 全体が `{` で始まり `}` で終わっている
 - [ ] `setup` と `loop` がある（`recover` も入れておくと安心）
-- [ ] 録画のときに入力した実際の値が残っていない（番号・ID・パスワード）
+- [ ] 録画のときに入力した実際の値が残っていない（番号など）
 - [ ] `{{列名}}` の名前が明細 CSV の見出しと一字一句同じ
 - [ ] `loop` の最後が、次の 1 件を始められる画面で終わっている
 - [ ] エビデンスが要るなら `loop` に `screenshot` を入れた
@@ -832,7 +671,6 @@ SET ShotDir TO $'''%BaseDir%'''
 | 録画 JSON | 生成される PADコード(Robin) |
 | --- | --- |
 | `{{列名}}` | ループ先頭で `SET Col1 TO Row['列名']` として取り出し、以降は `%Col1%` で参照 |
-| `{{SECRET:…USER…}}` / `{{SECRET:…}}` | `%IdSafe%` / `%PwSafe%`（JSON 用にエスケープ済みの変数） |
 | `xpath///*[@id="X"]` | `id/X`（リテラルに引用符を持ち込まないため） |
 | 単引用符を含むセレクタ候補 | 生成時に除外（貼り付けが無視されるため） |
 | 共通 JavaScript | 1 行 100 文字程度に分割して `SET JsAct TO $'''%JsAct%…'''` で継ぎ足し |
@@ -1000,13 +838,13 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 テストでも、録画に実際の値を入れて変換し、**生成物に一文字も現れないこと**を
 毎回確かめている。
 
-### 録画ファイルには残る
+### 録画のしかた
 
-> **⚠️ 生成物から消えても、録画 JSON にはパスワードが平文で残っている。**
-> 使い終わったら削除すること。**次回からは、ログイン後に録画を開始する。**
+> **⚠️ 手動ログイン方式です。** ブラウザ操作録画は、必ず手動でログインし、
+> 繰り返しの起点画面まで人が進めてから録画を開始したものを使用してください。
 
-ブラウザ版の変換器は、読み込んだ録画にログイン情報が含まれていると
-その場で知らせる。含まれていても変換には使わない。
+ブラウザ版の変換器は、読み込んだ録画にログイン情報が含まれているとその場で知らせる。
+含まれていても変換には使わない。
 
 ### 起点画面までは人が進める
 
@@ -1014,7 +852,7 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 人が進めるほうが確実で、修正も要らない。**起点に着いたかどうかは機械が確認する**
 ので、1 つ手前で[OK]を押しても、進めてからもう一度[OK]でやり直せる。
 
-## 推奨：手動ログイン
+## 手動ログイン
 
 **Key Vault 連携の資格情報機能はプレミアム機能である。** 無料版で最も安全なのは、フローが
 ブラウザーを開いたところで一旦止め、**人が手でログインする 手動ログイン方式。**
@@ -1133,104 +971,6 @@ END
 ---
 
 撮り方の実装（PAD の標準アクションを使わない理由、列挙型の落とし穴）は [PAD_WebDriver_internals.md](PAD_WebDriver_internals.md) を参照。
-
----
-
-## 📥 ファイルのダウンロード（エビデンスが画面に出ない場合）
-
-登録の結果が画面に表示されず、**別メニューから Excel や PDF をダウンロードして初めて
-内容が分かる**業務がある。スクリーンショットでは証跡にならないため、ファイルとして
-受け取って保存する必要がある。以下はすべて実機で確認した書式（PAD 無料版 / Windows 11 / Edge）。
-
-### 保存先を固定し、確認ダイアログを出さない
-
-WebDriver が起動するブラウザーは素のプロファイルなので、既定では「ダウンロード」
-フォルダーに落ち、場合によっては確認が出る。セッション作成時の `prefs` で 4 つとも抑える。
-
-```
-SET SessionBody TO $'''%SessionBody%, \"ms:edgeOptions\": {\"prefs\": {\"download.default_directory\": \"C:\\\\temp\\\\evidence\"'''
-SET SessionBody TO $'''%SessionBody%, \"download.prompt_for_download\": false, \"plugins.always_open_pdf_externally\": true'''
-SET SessionBody TO $'''%SessionBody%, \"profile\": {\"default_content_setting_values\": {\"automatic_downloads\": 1}}}}'''
-```
-
-| 設定 | 効果 |
-| --- | --- |
-| `download.default_directory` | 保存先。**JSON の中に Windows パスを書くのでバックスラッシュは 4 本**（Robin で `\\`→`\`、JSON で `\\`→`\`） |
-| `download.prompt_for_download: false` | 保存ダイアログを出さない |
-| `plugins.always_open_pdf_externally: true` | **PDF をビューアで開かずファイルとして落とす。** これが無いと PDF は保存されない |
-| `automatic_downloads: 1` | 「複数ファイルのダウンロードを許可しますか」を出さない |
-
-**`prompt_for_download` と `automatic_downloads` は別物。** 前者だけでは
-「ブロック / 許可」の確認が出て、押すまでダウンロードが始まらない。
-
-### 完了を待つ
-
-クリックした瞬間はまだ書き込み中で、`.crdownload` が残る。**それが消えたことだけを
-見ていると、ダウンロードが始まる前に条件を満たして先へ進んでしまう。** 目的のファイルが
-実際に現れるまで数える。
-
-```
-LOOP WHILE Pending > 0
-    Folder.GetFiles Folder: DlDir FileFilter: $'''*.crdownload''' IncludeSubfolders: False FailOnAccessDenied: True SortBy1: Folder.SortBy.Name SortDescending1: False SortBy2: Folder.SortBy.LastModified SortDescending2: False SortBy3: Folder.SortBy.LastAccessed SortDescending3: False Files=> TempFiles
-    SET Pending TO TempFiles.Count
-    …（目的のファイルがそろったか数え、そろっていなければ Pending を 1 に戻す）
-    WAIT 1
-    SET Waited TO Waited + 1
-    IF Waited >= 30 THEN
-        SET Pending TO 0
-    END
-END
-```
-
-複合条件（`AND`）は実機未確認なので使わず、打ち切りは内側の `IF` で行っている。
-
-### エビデンス名に付け替える
-
-```
-File.RenameFiles.Rename Files: SrcFile NewName: NewBase KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> RenamedFiles
-```
-
-- **`NewName` は拡張子なしの名前だけでよい。** `KeepExtension: True` なので元の拡張子が残り、
-  **Excel と PDF で処理を分ける必要がない**
-- リネームは同じフォルダー内で行われるため、パスを付ける必要はない
-- **対象が存在しないと `FileNotFoundException` で止まる。** `Folder.GetFiles` で
-  存在を確かめてから実行すること
-
-サーバーが付けるファイル名が事前に分からない場合は、クリック前にファイル数を数え、
-増えたあとで `Folder.SortBy.LastModified` の降順から一番新しいものを取る。
-
-### 落とし穴
-
-- **ドライバーを取り違えてもセッションは張れる場合がある**が、`browserName` の不一致は
-  chromedriver も msedgedriver も `session not created` で拒否する。一方
-  **バージョンの不一致は拒否しない**（msedgedriver 150 で Edge 151 のセッションが張れた）
-- **単体のスクリプトファイルはウイルス対策に誤ブロックされる。** `.js` でも `.txt` でも同じで、
-  拡張子ではなく中身が検知される。共通 JavaScript はコピーで受け渡すこと
-
----
-
-## 🕒 日時とファイル名
-
-`DateTime.DateTimeFormat.DateAndTime` は `2026/07/23 8:41:00` のような値を返し、`/` と `:` は
-Windows のファイル名に使えない。テキストに整形してから使う。
-
-```
-DateTime.GetCurrentDateTime.Local DateTimeFormat: DateTime.DateTimeFormat.DateAndTime CurrentDateTime=> NowDt
-Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt CustomFormat: $'''yyyyMMdd_HHmmss''' Result=> Stamp
-```
-
-**`MM` は月、`mm` は分。** `yyyymmdd` と書くと月の位置に分が入る。
-
-ファイル名は「ID ＋業務キー＋日時」で一意にする。失敗時は接頭辞を付けると探しやすい。
-
-```
-<ID>__<業務キー>__yyyyMMdd_HHmmss.png
-fail__<ID>__<業務キー>__yyyyMMdd_HHmmss.png
-```
-
-出力フォルダの変数（`BaseDir` / `OutDir`）**末尾に `\` を付けないこと**（パスが二重区切りになる）。
-
----
 
 ---
 
