@@ -337,6 +337,21 @@ function folderGet(folderVar, filterVar, outVar) {
     "Files=> " + outVar;
 }
 
+// 起点画面の目印を、人が読める形にする。aria/ や text/ があればその名前を使う。
+// 「#POS_ORDERS が見つかりません」では利用者が何を探せばよいか分からない。
+function originHint(cands) {
+  for (var i = 0; i < cands.length; i++) {
+    var pres = ["aria/", "text/"];
+    for (var k = 0; k < pres.length; k++) {
+      if (cands[i].indexOf(pres[k]) === 0) {
+        var name = cands[i].slice(pres[k].length).split("[")[0].trim();
+        if (name) { return "「" + name + "」"; }
+      }
+    }
+  }
+  return cands.length ? cands[0] : "";
+}
+
 var WEB_FLAGS = "EncodeRequestBody: False FailOnErrorStatus: False";
 
 function web(url, method, body, resp, status, indent) {
@@ -770,6 +785,19 @@ function buildRobin(batch, opt) {
 
   var setup = batch.setup || [];
   var loopSteps = batch.loop || [];
+  // 起点画面の判定に使う「ループ最初の操作対象」。手動ログインの案内でも
+  // 「何が見える画面まで進むのか」を出したいので、ここで先に求めておく。
+  var firstTarget = null;
+  for (var fi0 = 0; fi0 < loopSteps.length; fi0++) {
+    var fs0 = loopSteps[fi0];
+    if (fs0.type === "click" || fs0.type === "doubleClick" || fs0.type === "change") {
+      var fc0 = robinFilterCandidates(candidates(fs0));
+      var bad0 = fc0.some(function (c) { return c.indexOf("{{") >= 0; });
+      if (fc0.length && !bad0) { firstTarget = fc0; }
+      break;
+    }
+  }
+  var oHint = originHint(firstTarget || []);
   var recover = batch.recover || [];
   var teardown = batch.teardown || [];
   var lg = splitLogin(setup);
@@ -1191,7 +1219,9 @@ function buildRobin(batch, opt) {
       A("# 普段のブラウザーでログインしても、フローはそのタブを見られない。");
       A("IF LoginMode = $'''manual''' THEN");
       A("    Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' " +
-        "Message: $'''いま開いたブラウザーでログインし、繰り返しの起点画面まで進んでから[OK]を押してください。ブラウザーは閉じないでください。''' " +
+        "Message: " + robinStr("ログインし、起点画面" +
+          (oHint ? "（" + oHint + " が見える画面）" : "") +
+          "まで進んでから[OK]。ブラウザーは閉じないでください。") + " " +
         "Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel " +
         "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn");
       A("    IF LoginBtn = $'''Cancel''' THEN");
@@ -1279,30 +1309,35 @@ function buildRobin(batch, opt) {
   A("");
 
   // ---- 起点画面の確認 ----
-  var firstTarget = null;
-  for (var fi = 0; fi < loopSteps.length; fi++) {
-    var fs = loopSteps[fi];
-    if (fs.type === "click" || fs.type === "doubleClick" || fs.type === "change") {
-      var fc = robinFilterCandidates(candidates(fs));
-      var bad = fc.some(function (c) { return c.indexOf("{{") >= 0; });
-      if (fc.length && !bad) { firstTarget = fc; }
-      break;
-    }
-  }
   if (firstTarget) {
     A("# ---------- 起点画面かどうかを確認する ----------");
     A("# ループ最初の操作対象がこの画面にあるかを、クリックせずに調べる。");
+    A("# 見つからなければ、その場で進めてもらって何度でも試せるようにする。");
+    A("# 1 度きりで中止すると、画面を直してから実行し直すことになって手間が増える。");
     A("SET ActBody TO $'''{\"script\": \"%JsAct%\", \"args\": " +
       pyJson([firstTarget, "find", ""]) + "}'''");
-    A(web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus"));
-    A("Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj");
-    A("IF ActObj['value']['ok'] <> True THEN");
-    A("    SET Halt TO True");
-    A("    SET HaltReason TO " + robinStr("繰り返しの起点画面に到達できませんでした"));
-    A("    Display.ShowMessageDialog.ShowMessage Title: $'''起点画面ではありません''' " +
-      "Message: $'''繰り返しの起点画面が表示されていません。ブラウザーで起点画面まで進めてから、もう一度実行してください。''' " +
-      "Icon: Display.Icon.Warning Buttons: Display.Buttons.OK " +
+    A("SET StartOk TO False");
+    A("SET StartTry TO 0");
+    A("LOOP WHILE StartOk = False");
+    A("    " + web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus"));
+    A("    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj");
+    A("    IF ActObj['value']['ok'] = True THEN");
+    A("        SET StartOk TO True");
+    A("    END");
+    A("    IF StartOk = False THEN");
+    A("        SET StartTry TO StartTry + 1");
+    A("        Display.ShowMessageDialog.ShowMessage Title: " +
+      robinStr("起点画面ではありません") + " Message: " +
+      robinStr("起点画面が出ていません。" + oHint +
+        " が見える画面まで進めて[OK]。（%StartTry% 回目）") +
+      " Icon: Display.Icon.Warning Buttons: Display.Buttons.OKCancel " +
       "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> StartBtn");
+    A("        IF StartBtn = " + robinStr("Cancel") + " THEN");
+    A("            SET Halt TO True");
+    A("            SET HaltReason TO " + robinStr("繰り返しの起点画面に到達できませんでした"));
+    A("            SET StartOk TO True");
+    A("        END");
+    A("    END");
     A("END");
     A("");
   }
