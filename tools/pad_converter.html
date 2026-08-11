@@ -437,25 +437,6 @@ function candidates(step) {
   return out;
 }
 
-function splitLogin(setup) {
-  var idx = [];
-  for (var i = 0; i < setup.length; i++) {
-    var st = setup[i];
-    if (st.type === "change" && String(st.value === undefined ? "" : st.value).indexOf("{{SECRET:") === 0) {
-      idx.push(i);
-    }
-  }
-  if (!idx.length) { return { set: {}, has: false }; }
-  var lo = Math.min.apply(null, idx), hi = Math.max.apply(null, idx);
-  var end = hi;
-  for (var j = hi + 1; j < setup.length; j++) {
-    if (setup[j].type === "click" || setup[j].type === "doubleClick") { end = j; break; }
-  }
-  var set = {};
-  for (var k = lo; k <= end; k++) { set[k] = true; }
-  return { set: set, has: true };
-}
-
 function prescanCols(steps, cols) {
   for (var i = 0; i < steps.length; i++) {
     var st = steps[i];
@@ -506,6 +487,20 @@ function warnUnsupportedSteps(batch) {
 // 生成器が扱う種別だけを残す。録画には keyDown / keyUp が大量に入るが、
 // 変換には使わないので一覧から外す（1 件の録画で 121 件中 95 件がこれだった）。
 var USABLE_TYPES = ["setViewport", "navigate", "click", "doubleClick", "change"];
+
+// 録画にログイン情報らしきものが含まれているか。含まれていても変換には
+// 使わないが、録画ファイル自体に平文が残っているので利用者に伝える。
+function hasCredentials(obj) {
+  var steps = (obj && obj.steps) || [];
+  for (var i = 0; i < steps.length; i++) {
+    var st = steps[i];
+    if (st.type !== "change") { continue; }
+    var cs = candidates(st).join(" ");
+    var v = String(st.value === undefined ? "" : st.value);
+    if ((RE_PASS.test(cs) || RE_USER.test(cs)) && v !== "") { return true; }
+  }
+  return false;
+}
 
 function isRecording(obj) {
   return !!(obj && Array.isArray(obj.steps) && !obj.loop && !obj.setup);
@@ -607,11 +602,9 @@ function guessAssignments(steps) {
     if (st.type === "setViewport" || st.type === "navigate") {
       a[i].sec = "setup"; loginEnd = Math.max(loginEnd, i); continue;
     }
-    if (st.type === "change" && RE_PASS.test(cs)) {
-      a[i].sec = "setup"; a[i].secret = "MY_PASSWORD"; loginEnd = Math.max(loginEnd, i); continue;
-    }
-    if (st.type === "change" && RE_USER.test(cs)) {
-      a[i].sec = "setup"; a[i].secret = "MY_USERNAME"; loginEnd = Math.max(loginEnd, i); continue;
+    // 手動ログイン専用なので、ログイン欄への入力は変換に含めない
+    if (st.type === "change" && (RE_PASS.test(cs) || RE_USER.test(cs))) {
+      a[i].sec = "skip"; loginEnd = Math.max(loginEnd, i); continue;
     }
     if (st.type === "click" && RE_LOGIN.test(cs)) { loginEnd = Math.max(loginEnd, i); }
   }
@@ -638,9 +631,20 @@ function guessAssignments(steps) {
     }
   }
 
-  // 値を入れている箇所（SECRET 以外）は「毎回変わる値」の候補
+  // 手動ログイン専用なので、setup で再生するのは「ページを開く」と
+  // 「ウィンドウサイズ」だけ。ログインも起点までの移動も人がやるので、
+  // それ以外の setup 行は変換に含めない。
   for (i = 0; i < steps.length; i++) {
-    if (steps[i].type === "change" && !a[i].secret &&
+    if (a[i].sec === "setup" &&
+        steps[i].type !== "navigate" && steps[i].type !== "setViewport") {
+      a[i].sec = "skip";
+    }
+    a[i].secret = "";
+  }
+
+  // 値を入れている箇所は「毎回変わる値」の候補
+  for (i = 0; i < steps.length; i++) {
+    if (steps[i].type === "change" && a[i].sec !== "skip" &&
         String(steps[i].value === undefined ? "" : steps[i].value) !== "") {
       a[i].varCol = "?";   // 列名は利用者に選んでもらう
     }
@@ -800,8 +804,6 @@ function buildRobin(batch, opt) {
   var oHint = originHint(firstTarget || []);
   var recover = batch.recover || [];
   var teardown = batch.teardown || [];
-  var lg = splitLogin(setup);
-  var loginIdx = lg.set, hasLogin = lg.has;
 
   [setup, loopSteps, recover, teardown].forEach(function (sec) { prescanCols(sec, cols); });
 
@@ -913,11 +915,6 @@ function buildRobin(batch, opt) {
   A("SET ShowDriverInfo TO True");
   A("# 失敗分だけを再実行するとき True（読み込み元と出力先が自動で切り替わる）");
   A("SET RetryMode TO False");
-  if (hasLogin) {
-    A("# manual = 人が手でログイン（PAD はパスワードを一切扱わない）★推奨");
-    A("# auto   = 録画されたログイン手順を実行する");
-    A("SET LoginMode TO $'''manual'''");
-  }
   A("IF RetryMode THEN");
   A("    SET DetailsFile TO $'''%BaseDir%\\\\pad_result.csv'''");
   A("    SET ResultFile TO $'''%BaseDir%\\\\pad_result_retry.csv'''");
@@ -1201,111 +1198,52 @@ function buildRobin(batch, opt) {
   A("# セッションが張れていなければ、以降の URL 変数が存在しないので入らない。");
   A("IF Halt = False THEN");
   A("SET RowError TO $''''''");
-  var n = 0, emittedDialog = false, inAuto = false;
+  // 手動ログイン方式なので、setup で再生するのは「ページを開く」と
+  // 「ウィンドウサイズ」だけ。ログインも起点画面までの移動も人がやる。
+  // 資格情報を見分けて除くのではなく、そもそもその範囲を読まないので、
+  // 見分けを外して平文が残る、という事故が起きない。
+  var n = 0;
   for (var i2 = 0; i2 < setup.length; i2++) {
-    var st = setup[i2], t = st.type;
-
-    if (hasLogin && loginIdx[i2] && !emittedDialog) {
-      emittedDialog = true;
-      inAuto = true;
-      A("");
-      A("# ---------- 手動ログイン（既定）----------");
-      A("# フローを止めて人がログインする。PAD はパスワードを一度も受け取らないので、");
-      A("# 変数ペイン・実行ログ・エラーメッセージのどこにも残らない。");
-      A("# ★ ログインだけでなく、繰り返しの起点画面まで人が進めてから[OK]を押す。");
-      A("#   ログイン後の画面構成はサイト側の都合で変わることがあり、機械的に");
-      A("#   辿らせるより確実で、修正も要らない。");
-      A("# WebDriver は自分が起動したブラウザーしか操作できない。別に開いてある");
-      A("# 普段のブラウザーでログインしても、フローはそのタブを見られない。");
-      A("IF LoginMode = $'''manual''' THEN");
-      A("    Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' " +
-        "Message: " + robinStr("ログインし、起点画面" +
-          (oHint ? "（" + oHint + " が見える画面）" : "") +
-          "まで進んでから[OK]。ブラウザーは閉じないでください。") + " " +
-        "Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel " +
-        "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn");
-      A("    IF LoginBtn = $'''Cancel''' THEN");
-      A("        SET Halt TO True");
-      A("        SET HaltReason TO " + robinStr("手動ログインがキャンセルされました"));
-      A("    END");
-      A("END");
-      A("");
-      A("# ---------- 自動ログイン（LoginMode = auto のときだけ）----------");
-      A("# ★ 資格情報はフローに直書きしない。下の 2 行は、デザイナーから");
-      A("#   ［入力ダイアログを表示］を 2 つ置き（パスワード側は入力の種類を");
-      A("#   「パスワード」にする）、生成変数を EdiUser / EdiPassword に");
-      A("#   リネームしたものに置き換えること。");
-      A("# ★ ログイン部分の範囲は SECRET プレースホルダの位置から機械的に判定している。");
-      A("#   録画の形によっては境界がずれるので、貼り付け後に目で確認すること。");
-      A("IF LoginMode = $'''auto''' THEN");
-      A("    SET EdiUser TO $''''''");
-      A("    SET EdiPassword TO $''''''");
-      A("    # JSON 本文を壊さないよう \\ → \\\\ 、\" → \\\" の順でエスケープする。");
-      A("    # 順序を守ること（逆にすると 1 段目で入れた \\\\ を 2 段目が書き換える）。");
-      A("    # ActivateEscapeSequences: False が重要（True だと \\\\ が 1 個に戻る）。");
-      var BS = String.fromCharCode(92), DQ = String.fromCharCode(34);
-      ["EdiUser", "EdiPassword"].forEach(function (v) {
-        var tmp = v + "Esc";
-        A("    Text.Replace.ReplaceText Text: " + v +
-          " TextToFind: $'''" + BS + BS + "''' IgnoreCase: False" +
-          " ReplaceWith: $'''" + BS + BS + BS + BS + "'''" +
-          " ActivateEscapeSequences: False" +
-          " ComparisonType: Text.TextComparisonType.CultureSensitive" +
-          " Result=> " + tmp);
-        A("    Text.Replace.ReplaceText Text: " + tmp +
-          " TextToFind: $'''" + DQ + "''' IgnoreCase: False" +
-          " ReplaceWith: $'''" + BS + BS + DQ + "'''" +
-          " ActivateEscapeSequences: False" +
-          " ComparisonType: Text.TextComparisonType.CultureSensitive" +
-          " Result=> " + v);
-      });
-    }
-
-    var ind = inAuto ? "    " : "";
-
-    if (t === "comment") { A(ind + "# 💬 " + safeComment(st.text || "", cols)); continue; }
-    if (t === "setViewport") {
+    var st = setup[i2], t2 = st.type;
+    if (t2 === "setViewport") {
       n += 1;
       var w = parseInt(st.width, 10) || 1920;
       var h = parseInt(st.height, 10) || 1080;
-      A(ind + "# [" + n + "] ウィンドウサイズ " + w + "x" + h);
-      A(ind + "# エビデンスに写る範囲はこのサイズで決まる。複数の PC に配布する場合は");
-      A(ind + "# 一番小さい画面に収まる値にそろえること。");
-      A(ind + "SET RectBody TO $'''{\"width\": " + w + ", \"height\": " + h + "}'''");
-      A(web("RectUrl", "Post", "RectBody", "RectResp", "RectStatus", ind));
+      A("# [" + n + "] ウィンドウサイズ " + w + "x" + h);
+      A("# エビデンスに写る範囲はこのサイズで決まる。複数の PC に配布する場合は");
+      A("# 一番小さい画面に収まる値にそろえること。");
+      A("SET RectBody TO $'''{\"width\": " + w + ", \"height\": " + h + "}'''");
+      A(web("RectUrl", "Post", "RectBody", "RectResp", "RectStatus"));
       continue;
     }
-    if (t === "navigate") {
+    if (t2 === "navigate") {
       n += 1;
-      A(ind + "# [" + n + "] ページを開く（URL は冒頭の TargetUrl で設定）");
-      A(ind + "SET UrlBody TO $'''{\"url\": \"%TargetUrl%\"}'''");
-      A(web("GoUrl", "Post", "UrlBody", "UrlResp", "UrlStatus", ind));
-      A(ind + "WAIT 2");
-      continue;
-    }
-    if (t === "click" || t === "doubleClick" || t === "change") {
-      n += 1;
-      var cands = candidates(st);
-      var action = t === "change" ? "fill" : "click";
-      var value = st.value === undefined ? "" : st.value;
-      if (String(value).indexOf("{{SECRET:") === 0) {
-        var nm = String(value).slice("{{SECRET:".length, -2);
-        value = nm.toUpperCase().indexOf("USER") >= 0 ? "%EdiUser%" : "%EdiPassword%";
-      }
-      L = L.concat(robinAct(cands, action, value, ind,
-                            action + " " + (cands.length ? cands[0] : ""), n, cols));
-      A(ind + "WAIT 1");
+      A("# [" + n + "] ページを開く（URL は冒頭の TargetUrl で設定）");
+      A("SET UrlBody TO $'''{\"url\": \"%TargetUrl%\"}'''");
+      A(web("GoUrl", "Post", "UrlBody", "UrlResp", "UrlStatus"));
+      A("WAIT 2");
       continue;
     }
   }
-
-  if (inAuto) {
-    A("END");
-    A("");
-    A("# ---------- 使い終わったパスワードは即座に消す ----------");
-    A("SET EdiPassword TO $''''''");
-    A("SET EdiPasswordEsc TO $''''''");
-  }
+  A("");
+  A("# ---------- 手動ログイン ----------");
+  A("# フローを止めて人がログインし、繰り返しの起点画面まで進める。");
+  A("# PAD はパスワードを一度も受け取らないので、変数ペイン・実行ログ・");
+  A("# エラーメッセージのどこにも残らない。生成物にも入らない。");
+  A("# ログイン後の画面構成はサイト側の都合で変わることがあり、機械的に");
+  A("# 辿らせるより人が進めるほうが確実で、修正も要らない。");
+  A("# WebDriver は自分が起動したブラウザーしか操作できない。別に開いてある");
+  A("# 普段のブラウザーでログインしても、フローはそのタブを見られない。");
+  A("Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' " +
+    "Message: " + robinStr("ログインし、起点画面" +
+      (oHint ? "（" + oHint + " が見える画面）" : "") +
+      "まで進んでから[OK]。ブラウザーは閉じないでください。") + " " +
+    "Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel " +
+    "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn");
+  A("IF LoginBtn = " + robinStr("Cancel") + " THEN");
+  A("    SET Halt TO True");
+  A("    SET HaltReason TO " + robinStr("手動ログインがキャンセルされました"));
+  A("END");
   A("");
 
   // ---- 起点画面の確認 ----
@@ -1594,6 +1532,7 @@ function csvHeaders(text) {
 }
 
 root.PadConvert = {
+  hasCredentials: hasCredentials,
   isRecording: isRecording,
   usableSteps: usableSteps,
   describeStep: describeStep,
@@ -1647,8 +1586,17 @@ root.PadConvert = {
         recSteps = PadConvert.usableSteps(obj);
         recAssign = PadConvert.guessAssignments(recSteps);
         renderAssign((obj.steps || []).length);
-        show("ok", "録画 JSON として読み込みました。下の「1-2. 操作の振り分け」で" +
-             "箱と値を確かめてください。");
+        if (hasCredentials(obj)) {
+          show("warn",
+            "手動ログイン方式専用です。ログイン操作は変換に含めません。<br>" +
+            "この録画にはログイン情報が含まれています。<br>" +
+            "<strong>録画JSONファイル自体にパスワードが平文で残っている</strong>ので、" +
+            "使い終わったら削除してください。<br>" +
+            "次回からは、ログイン後に録画を開始してください。");
+        } else {
+          show("ok", "録画 JSON として読み込みました。下の「1-2. 操作の振り分け」で" +
+               "箱と値を確かめてください。");
+        }
       } else if (obj.setup || obj.loop) {
         var n = (obj.loop || []).length;
         show("ok", "バッチ定義 JSON として読み込みました（loop " + n + " 手順）。" +
@@ -1694,13 +1642,11 @@ root.PadConvert = {
               '<br><span class="hint">録画時の値「' + as.selLit + '」を置き換えます。' +
               'この値を含まない候補（一覧の何行目、という指定）は捨てます</span>';
       } else if (recSteps[i].type === "change") {
+        // 手動ログイン専用なので、ユーザーIDやパスワードの選択肢は置かない
         val = '<select data-i="' + i + '" class="valSel"' + off + ">" +
               '<option value="">そのまま</option>' +
               '<option value="col"' + (as.varCol ? " selected" : "") + ">毎回変わる値</option>" +
-              '<option value="MY_USERNAME"' + (as.secret === "MY_USERNAME" ? " selected" : "") +
-              ">ユーザーID</option>" +
-              '<option value="MY_PASSWORD"' + (as.secret === "MY_PASSWORD" ? " selected" : "") +
-              ">パスワード</option></select>" +
+              "</select>" +
               ' <input type="text" class="colTxt" data-i="' + i + '" placeholder="列名"' +
               ' value="' + (as.varCol && as.varCol !== "?" ? as.varCol : "") + '"' + off +
               (as.varCol && as.sec !== "skip" ? "" : " hidden") + ">";

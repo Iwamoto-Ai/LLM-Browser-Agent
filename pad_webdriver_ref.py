@@ -586,26 +586,6 @@ def _robin_act_best_effort(cands: list, action: str, value: str, indent: str,
     ]
 
 
-def _split_login(setup: list) -> tuple:
-    """setup を「ログイン部分」と「それ以外」に分ける。
-
-    {{SECRET:…}} を入力するステップが 1 つでもあれば、そこから
-    「最後の SECRET ステップの直後の click」までをログイン部分とみなす。
-    録画の形によっては境界がずれるので、生成物にその旨のコメントを入れる。
-    戻り値: (login_indices:set, has_login:bool)"""
-    idx = [i for i, st in enumerate(setup)
-           if st.get("type") == "change" and str(st.get("value", "")).startswith("{{SECRET:")]
-    if not idx:
-        return set(), False
-    lo, hi = min(idx), max(idx)
-    end = hi
-    for j in range(hi + 1, len(setup)):
-        if setup[j].get("type") in ("click", "doubleClick"):
-            end = j
-            break
-    return set(range(lo, end + 1)), True
-
-
 def _prescan_cols(steps: list, cols: list) -> None:
     """{{列名}} の参照を先に全部拾って cols を確定させる。
 
@@ -726,7 +706,6 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     origin_hint = _origin_hint(first_target or [])
     recover = batch.get("recover", [])
     teardown = batch.get("teardown", [])
-    login_idx, has_login = _split_login(setup)
 
     # 列名を先に確定させる（結果 CSV のヘッダーで業務キーの列名が必要）
     for _sec in (setup, loop_steps, recover, teardown):
@@ -840,10 +819,6 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("SET ShowDriverInfo TO True")
     A("# 失敗分だけを再実行するとき True（読み込み元と出力先が自動で切り替わる）")
     A("SET RetryMode TO False")
-    if has_login:
-        A("# manual = 人が手でログイン（PAD はパスワードを一切扱わない）★推奨")
-        A("# auto   = 録画されたログイン手順を実行する")
-        A("SET LoginMode TO $'''manual'''")
     A("IF RetryMode THEN")
     A("    SET DetailsFile TO $'''%BaseDir%\\\\pad_result.csv'''")
     A("    SET ResultFile TO $'''%BaseDir%\\\\pad_result_retry.csv'''")
@@ -1145,126 +1120,52 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# セッションが張れていなければ、以降の URL 変数が存在しないので入らない。")
     A("IF Halt = False THEN")
     A("SET RowError TO $''''''")
+    # 手動ログイン方式なので、setup で再生するのは「ページを開く」と
+    # 「ウィンドウサイズ」だけ。ログインも起点画面までの移動も人がやる。
+    # 資格情報を見分けて除くのではなく、そもそもその範囲を読まないので、
+    # 見分けを外して平文が残る、という事故が起きない。
     n = 0
-    emitted_dialog = False
-    in_auto = False           # IF LoginMode = auto THEN … の中にいるか
-    for i, st in enumerate(setup):
-        t = st.get("type")
-
-        # ログイン部分は auto ブロックに入れる。その手前で手動ログインのダイアログを出す。
-        if has_login and i in login_idx and not emitted_dialog:
-            emitted_dialog = True
-            in_auto = True
-            A("")
-            A("# ---------- 手動ログイン（既定）----------")
-            A("# フローを止めて人がログインする。PAD はパスワードを一度も受け取らないので、")
-            A("# 変数ペイン・実行ログ・エラーメッセージのどこにも残らない。")
-            A("# ★ ログインだけでなく、繰り返しの起点画面まで人が進めてから[OK]を押す。")
-            A("#   ログイン後の画面構成はサイト側の都合で変わることがあり、機械的に")
-            A("#   辿らせるより確実で、修正も要らない。")
-            A("# WebDriver は自分が起動したブラウザーしか操作できない。別に開いてある")
-            A("# 普段のブラウザーでログインしても、フローはそのタブを見られない。")
-            A("IF LoginMode = $'''manual''' THEN")
-            _lmsg = _robin_str(
-                "ログインし、起点画面"
-                + (f"（{origin_hint} が見える画面）" if origin_hint else "")
-                + "まで進んでから[OK]。ブラウザーは閉じないでください。")
-            A("    Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' "
-              f"Message: {_lmsg} "
-              "Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel "
-              "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True "
-              "ButtonPressed=> LoginBtn")
-            A("    IF LoginBtn = $'''Cancel''' THEN")
-            A("        SET Halt TO True")
-            A(f"        SET HaltReason TO "
-              f"{_robin_str('手動ログインがキャンセルされました')}")
-            A("    END")
-            A("END")
-            A("")
-            A("# ---------- 自動ログイン（LoginMode = auto のときだけ）----------")
-            A("# ★ 資格情報はフローに直書きしない。下の 2 行は、デザイナーから")
-            A("#   ［入力ダイアログを表示］を 2 つ置き（パスワード側は入力の種類を")
-            A("#   「パスワード」にする）、生成変数を EdiUser / EdiPassword に")
-            A("#   リネームしたものに置き換えること。")
-            A("# ★ ログイン部分の範囲は SECRET プレースホルダの位置から機械的に判定している。")
-            A("#   録画の形によっては境界がずれるので、貼り付け後に目で確認すること。")
-            A("IF LoginMode = $'''auto''' THEN")
-            A("    SET EdiUser TO $''''''")
-            A("    SET EdiPassword TO $''''''")
-            A("    # JSON 本文を壊さないよう \\ → \\\\ 、\" → \\\" の順でエスケープする。")
-            A("    # 順序を守ること（逆にすると 1 段目で入れた \\\\ を 2 段目が書き換える）。")
-            A("    # ActivateEscapeSequences: False が重要（True だと \\\\ が 1 個に戻る）。")
-            # 生成物の他の箇所と同じく、二重引用符は素のまま書く（Robin では
-            # " も \" も同じ意味だが、パス以外に単独のバックスラッシュを残さない）。
-            BS, DQ = chr(92), chr(34)
-            # 一時変数へ往復させる。1段目は var → varEsc、2段目は varEsc → var。
-            # どちらの行も入力と出力が別変数なので、同一変数への書き戻し
-            # （自己代入）が PAD で許されるかどうかに依存しない。
-            # 最終的にエスケープ済みの値が元の変数に入るため、本文では
-            # そのまま %EdiUser% / %EdiPassword% を参照できる。
-            for var in ("EdiUser", "EdiPassword"):
-                tmp = var + "Esc"
-                A(f"    Text.Replace.ReplaceText Text: {var} "
-                  f"TextToFind: $'''{BS}{BS}''' IgnoreCase: False "
-                  f"ReplaceWith: $'''{BS}{BS}{BS}{BS}''' "
-                  f"ActivateEscapeSequences: False "
-                  f"ComparisonType: Text.TextComparisonType.CultureSensitive "
-                  f"Result=> {tmp}")
-                A(f"    Text.Replace.ReplaceText Text: {tmp} "
-                  f"TextToFind: $'''{DQ}''' IgnoreCase: False "
-                  f"ReplaceWith: $'''{BS}{BS}{DQ}''' "
-                  f"ActivateEscapeSequences: False "
-                  f"ComparisonType: Text.TextComparisonType.CultureSensitive "
-                  f"Result=> {var}")
-
-        # ★ 手動ログイン時は、ログイン以降のセットアップ手順（起点画面への移動）も
-        #   人が進める前提にする。実サイトはログイン後の画面構成が録画時と変わる
-        #   ことがあり、機械的に辿らせると起点に着けず Halt するため。
-        #   よって auto ブロックはここでは閉じず、setup の最後まで続ける。
-
-        ind = "    " if in_auto else ""
-
-        if t == "comment":
-            A(f"{ind}# 💬 {_safe_comment(st.get('text', ''), cols)}")
-            continue
-        if t == "setViewport":
+    for st in setup:
+        t_ = st.get("type")
+        if t_ == "setViewport":
             n += 1
             w = int(st.get("width", 1920) or 1920)
             h = int(st.get("height", 1080) or 1080)
-            A(f"{ind}# [{n}] ウィンドウサイズ {w}x{h}")
-            A(f"{ind}# エビデンスに写る範囲はこのサイズで決まる。複数の PC に配布する場合は")
-            A(f"{ind}# 一番小さい画面に収まる値にそろえること。")
-            A(f"{ind}SET RectBody TO $'''{{\"width\": {w}, \"height\": {h}}}'''")
-            A(_web("RectUrl", "Post", "RectBody", "RectResp", "RectStatus", ind))
+            A(f"# [{n}] ウィンドウサイズ {w}x{h}")
+            A("# エビデンスに写る範囲はこのサイズで決まる。複数の PC に配布する場合は")
+            A("# 一番小さい画面に収まる値にそろえること。")
+            A(f"SET RectBody TO $'''{{\"width\": {w}, \"height\": {h}}}'''")
+            A(_web("RectUrl", "Post", "RectBody", "RectResp", "RectStatus"))
             continue
-        if t == "navigate":
+        if t_ == "navigate":
             n += 1
-            A(f"{ind}# [{n}] ページを開く（URL は冒頭の TargetUrl で設定）")
-            A(f"{ind}SET UrlBody TO $'''{{\"url\": \"%TargetUrl%\"}}'''")
-            A(_web("GoUrl", "Post", "UrlBody", "UrlResp", "UrlStatus", ind))
-            A(f"{ind}WAIT 2")
+            A(f"# [{n}] ページを開く（URL は冒頭の TargetUrl で設定）")
+            A("SET UrlBody TO $'''{\"url\": \"%TargetUrl%\"}'''")
+            A(_web("GoUrl", "Post", "UrlBody", "UrlResp", "UrlStatus"))
+            A("WAIT 2")
             continue
-        if t in ("click", "doubleClick", "change"):
-            n += 1
-            cands = _candidates(st)
-            action = "fill" if t == "change" else "click"
-            value = st.get("value", "")
-            if str(value).startswith("{{SECRET:"):
-                name = value[len("{{SECRET:"):-2]
-                # エスケープ済み（上の Text.Replace で同変数に上書きしてある）
-                value = "%EdiUser%" if "USER" in name.upper() else "%EdiPassword%"
-            L.extend(_robin_act(cands, action, value, ind,
-                                f"{action} {cands[0] if cands else ''}", n, cols))
-            A(f"{ind}WAIT 1")
-            continue
-
-    if in_auto:
-        # ログイン手順で setup が終わっている場合（後続のステップが無い場合）
-        A("END")
-        A("")
-        A("# ---------- 使い終わったパスワードは即座に消す ----------")
-        A("SET EdiPassword TO $''''''")
-        A("SET EdiPasswordEsc TO $''''''")
+    A("")
+    A("# ---------- 手動ログイン ----------")
+    A("# フローを止めて人がログインし、繰り返しの起点画面まで進める。")
+    A("# PAD はパスワードを一度も受け取らないので、変数ペイン・実行ログ・")
+    A("# エラーメッセージのどこにも残らない。生成物にも入らない。")
+    A("# ログイン後の画面構成はサイト側の都合で変わることがあり、機械的に")
+    A("# 辿らせるより人が進めるほうが確実で、修正も要らない。")
+    A("# WebDriver は自分が起動したブラウザーしか操作できない。別に開いてある")
+    A("# 普段のブラウザーでログインしても、フローはそのタブを見られない。")
+    _lmsg = _robin_str(
+        "ログインし、起点画面"
+        + (f"（{origin_hint} が見える画面）" if origin_hint else "")
+        + "まで進んでから[OK]。ブラウザーは閉じないでください。")
+    A("Display.ShowMessageDialog.ShowMessage Title: $\'\'\'手動ログイン\'\'\' "
+      f"Message: {_lmsg} "
+      "Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel "
+      "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True "
+      "ButtonPressed=> LoginBtn")
+    A(f"IF LoginBtn = {_robin_str('Cancel')} THEN")
+    A("    SET Halt TO True")
+    A(f"    SET HaltReason TO {_robin_str('手動ログインがキャンセルされました')}")
+    A("END")
     A("")
     # ---- 起点画面の確認 ----
     # 手動ログイン運用では、人がどこまで進めて[OK]を押したかで結果が変わる。

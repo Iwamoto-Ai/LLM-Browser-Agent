@@ -11,7 +11,7 @@
 
 ## 📖 目次
 
-**設計**　[🔌 使う HTTP 呼び出しは 6 種類だけ](#-使う-http-呼び出しは-6-種類だけ) / [📜 共通 JavaScript（変数 `%JsAct%` に入れておく）](#-共通-javascript変数-jsact-に入れておく) / [🔁 フローの組み立て](#-フローの組み立て) / [📸 エビデンスの撮り方](#-エビデンスの撮り方) / [🔐 自動ログインへの設計変更](#-自動ログインへの設計変更) <br>
+**設計**　[🔌 使う HTTP 呼び出しは 6 種類だけ](#-使う-http-呼び出しは-6-種類だけ) / [📜 共通 JavaScript（変数 `%JsAct%` に入れておく）](#-共通-javascript変数-jsact-に入れておく) / [🔁 フローの組み立て](#-フローの組み立て) / [📸 エビデンスの撮り方](#-エビデンスの撮り方) / [🔐 資格情報を「読まない」設計](#-資格情報を読まない設計) <br>
 **実機で分かったこと**　[⚠️ Web.InvokeWebService の引数（最重要）](#-webinvokewebservice-の引数最重要) / [📌 Robin リテラルのエスケープ（実機で判明）](#-robin-リテラルのエスケープ実機で判明) / [✅ 実機で確認できたアクション書式（PAD 無料版 / Windows 11）](#-実機で確認できたアクション書式pad-無料版--windows-11) <br>
 **Python 版限定**　[📄 手順書の自動生成（Pythonが使える環境で使う）](#-手順書の自動生成pythonが使える環境で使う)
 
@@ -304,57 +304,22 @@ File.ConvertFromBase64    … IfFileExists: File.IfExists.DoNothing / Overwrite
 
 ---
 
-## 🔐 自動ログインへの設計変更
+## 🔐 資格情報を「読まない」設計
 
-### 後で自動ログインに設計変更したくなった時の注意点
+手動ログイン専用にしているので、生成器は `setup` から「ページを開く」と
+「ウィンドウサイズ」しか再生しない。ログイン操作も起点までの移動も生成しない。
 
-やむを得ず自動化を考える場合は・・・
+以前は `{{SECRET:…}}` の位置からログイン範囲を機械的に判定し、`Text.Replace` で
+JSON 用にエスケープして自動ログインのブロックに入れていた。生成物にパスワードは
+入らない作りだったが、**判定を外したときに気づけない**という弱さがあった。
+入力欄が `#txt1` のように名前を持たない録画では素通りする。
 
-- フローに直書きしない（`SET Pw TO $'''abc123'''` は作らない）
-- 入力ダイアログの［入力の種類］を「パスワード」にする
-- 結果 CSV とログに変数を出さない
-- ログイン失敗時の理由は固定文字列にする（エラー本文には送信した JSON = パスワードが
-  含まれることがある）
-- 使い終わったら `SET Pw TO $''''''` で消す
-- `"` と `\` を含むパスワードは JSON 本文を壊すため、`\` → `\\`、`"` → `\"` の順で
-  エスケープする
+いまは範囲を読まないので、その余地がない。テストは「録画に実際の値を入れて
+変換し、生成物に一文字も現れないこと」を確かめる形にしてある。守りたいことが
+そのままテストになっている。
 
-エスケープの書式は実機で確認済み。**アクション名は `Text.Replace.ReplaceText`**（`Text.Replace`
-では通らない）。`ComparisonType` が必須で、正規表現を使わない場合は `IsRegEx:` を書かない。
-
-```
-Text.Replace.ReplaceText Text: EdiPassword TextToFind: $'''\\''' IgnoreCase: False ReplaceWith: $'''\\\\''' ActivateEscapeSequences: False ComparisonType: Text.TextComparisonType.CultureSensitive Result=> PwSafe
-Text.Replace.ReplaceText Text: PwSafe TextToFind: $'''\"''' IgnoreCase: False ReplaceWith: $'''\\\"''' ActivateEscapeSequences: False ComparisonType: Text.TextComparisonType.CultureSensitive Result=> PwSafe
-```
-
-**バックスラッシュを先に処理する順序を守ること。** 逆にすると、1 段目で入れた `\\` を
-2 段目がさらに書き換えてしまう。
-
-**`ActivateEscapeSequences: False` が重要。** `True` にすると置き換え先の `\\` が
-エスケープ列として解釈されてバックスラッシュ 1 個に戻り、意図が反転する。
-
-上の例は PAD から取り出した正規形なので二重引用符が `\"` になっているが、**リテラル内では
-`"` と `\"` は同じ意味**なので、素の `"` で書いても等価。生成器は後者（素の `"`）で出力する。
-そのほうがパス以外に単独のバックスラッシュが残らず、「バックスラッシュは必ず二重化する」
-という規則を機械的に検査できる。
-
-ダイアログとの対応:
-
-| ダイアログ | Robin |
-| --- | --- |
-| 解析するテキスト | `Text:` |
-| 検索するテキスト | `TextToFind:` |
-| 検索と置換に正規表現を使う | `IsRegEx:`（オフなら省略される） |
-| 大文字と小文字を区別しない | `IgnoreCase:` |
-| 置き換え先のテキスト | `ReplaceWith:` |
-| エスケープ シーケンスをアクティブ化 | `ActivateEscapeSequences:` |
-| 比較の種類 | `ComparisonType:`（既定 `Text.TextComparisonType.CultureSensitive`） |
-| 生成された変数 | `Result=>`（既定名 `Replaced`） |
-
-
----
-
----
+無人実行はできなくなるが、PAD 版はエビデンスを取りながら人が見守る用途なので
+問題にならない、という判断。
 
 # 第 2 部　実機で分かったこと
 

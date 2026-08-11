@@ -241,10 +241,37 @@ def test_robin_blocks_balanced(tmp_path):
     assert opens == ends
 
 
-def test_robin_keeps_credentials_as_variables(tmp_path):
-    txt = _robin_text(tmp_path)
+def test_robin_never_contains_credentials(tmp_path):
+    """PAD 版は手動ログイン専用。資格情報は生成物に一切現れない。
+
+    録画に残っている実際の値も、SECRET のプレースホルダも、
+    それを受け取るための変数も出てはいけない。ログイン部分そのものを
+    生成しないので、見分けを外して平文が残る余地がない。"""
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    batch = load_recording(os.path.join(here, "recordings", "edi2_practice_batch.json"))
+    # 録画に実際の値が残っていた場合を模す
+    for st in batch.get("setup", []):
+        if str(st.get("value", "")).startswith("{{SECRET:"):
+            st["value"] = "P@ssw0rd-should-not-appear"
+    out = pad.write_robin(batch, r"C:\PAD\d.csv", "プロジェクト番号",
+                          str(tmp_path / "flow.robin.txt"))
+    txt = open(out, encoding="utf-8").read()
+    assert "P@ssw0rd-should-not-appear" not in txt
     assert "{{SECRET:" not in txt
-    assert "%EdiUser%" in txt and "%EdiPassword%" in txt
+    for name in ("EdiUser", "EdiPassword", "LoginMode"):
+        assert name not in txt, name
+
+
+def test_robin_setup_is_open_and_size_only(tmp_path):
+    """setup で再生するのは「ページを開く」と「ウィンドウサイズ」だけ。
+
+    ログインも起点画面までの移動も人がやるので、機械が再生する必要がない。"""
+    txt = _robin_text(tmp_path)
+    head = txt.split("# ---------- 手動ログイン ----------")[0]
+    setup_part = head.split("セットアップ（最初に 1 回）")[1]
+    assert "SET RectBody" in setup_part
+    assert "SET UrlBody" in setup_part
+    assert "SET ActBody" not in setup_part
 
 
 def test_robin_escapes_backslash_in_literals():

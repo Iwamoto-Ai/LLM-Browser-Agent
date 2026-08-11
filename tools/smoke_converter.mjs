@@ -31,7 +31,8 @@ if (typeof dom.window.PadConvert?.buildRobin !== "function") {
 }
 
 // 振り分け画面の部品が公開されているか
-for (const fn of ["isRecording", "usableSteps", "describeStep", "guessAssignments", "buildBatch"]) {
+for (const fn of ["isRecording", "usableSteps", "describeStep", "guessAssignments",
+                  "buildBatch", "hasCredentials"]) {
   if (typeof dom.window.PadConvert?.[fn] !== "function") {
     errors.push("PadConvert." + fn + " が公開されていない");
   }
@@ -58,11 +59,14 @@ if (!P.isRecording(rec)) { errors.push("録画として判定されない"); }
 const steps = P.usableSteps(rec);
 if (steps.length !== 7) { errors.push("keyDown が除外されていない: " + steps.length); }
 const as = P.guessAssignments(steps);
-if (as[1].secret !== "MY_USERNAME" || as[2].secret !== "MY_PASSWORD") {
-  errors.push("ID/パスワードを推測できていない");
+// 手動ログイン専用。ログイン欄は「使わない」に倒し、変換に含めない
+if (as[1].sec !== "skip" || as[2].sec !== "skip") {
+  errors.push("ログイン欄が「使わない」になっていない");
 }
+if (!P.hasCredentials(rec)) { errors.push("ログイン情報の混入を検出できていない"); }
 if (as[steps.length - 1].sec !== "loop+recover") { errors.push("戻る操作を復帰に割り当てていない"); }
 as[5].varCol = "発注番号";
+as[5].sec = "loop";
 const batch = P.buildBatch(steps, as, "t");
 if (!batch.loop.length || !batch.recover.length) { errors.push("バッチ定義の組み立てに失敗"); }
 const j = JSON.stringify(batch);
