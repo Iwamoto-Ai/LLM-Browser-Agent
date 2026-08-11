@@ -82,9 +82,6 @@ SET MaxItems TO 1
 SET ShowDriverInfo TO True
 # 失敗分だけを再実行するとき True（読み込み元と出力先が自動で切り替わる）
 SET RetryMode TO False
-# manual = 人が手でログイン（PAD はパスワードを一切扱わない）★推奨
-# auto   = 録画されたログイン手順を実行する
-SET LoginMode TO $'''manual'''
 IF RetryMode THEN
     SET DetailsFile TO $'''%BaseDir%\\pad_result.csv'''
     SET ResultFile TO $'''%BaseDir%\\pad_result_retry.csv'''
@@ -364,76 +361,19 @@ SET UrlBody TO $'''{"url": "%TargetUrl%"}'''
 Web.InvokeWebService.InvokeWebService Url: GoUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: UrlBody EncodeRequestBody: False FailOnErrorStatus: False Response=> UrlResp StatusCode=> UrlStatus
 WAIT 2
 
-# ---------- 手動ログイン（既定）----------
-# フローを止めて人がログインする。PAD はパスワードを一度も受け取らないので、
-# 変数ペイン・実行ログ・エラーメッセージのどこにも残らない。
-# ★ ログインだけでなく、繰り返しの起点画面まで人が進めてから[OK]を押す。
-#   ログイン後の画面構成はサイト側の都合で変わることがあり、機械的に
-#   辿らせるより確実で、修正も要らない。
+# ---------- 手動ログイン ----------
+# フローを止めて人がログインし、繰り返しの起点画面まで進める。
+# PAD はパスワードを一度も受け取らないので、変数ペイン・実行ログ・
+# エラーメッセージのどこにも残らない。生成物にも入らない。
+# ログイン後の画面構成はサイト側の都合で変わることがあり、機械的に
+# 辿らせるより人が進めるほうが確実で、修正も要らない。
 # WebDriver は自分が起動したブラウザーしか操作できない。別に開いてある
 # 普段のブラウザーでログインしても、フローはそのタブを見られない。
-IF LoginMode = $'''manual''' THEN
-    Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' Message: $'''ログインし、起点画面（「Order key」 が見える画面）まで進んでから[OK]。ブラウザーは閉じないでください。''' Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn
-    IF LoginBtn = $'''Cancel''' THEN
-        SET Halt TO True
-        SET HaltReason TO $'''手動ログインがキャンセルされました'''
-    END
+Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' Message: $'''ログインし、起点画面（「Order key」 が見える画面）まで進んでから[OK]。ブラウザーは閉じないでください。''' Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn
+IF LoginBtn = $'''Cancel''' THEN
+    SET Halt TO True
+    SET HaltReason TO $'''手動ログインがキャンセルされました'''
 END
-
-# ---------- 自動ログイン（LoginMode = auto のときだけ）----------
-# ★ 資格情報はフローに直書きしない。下の 2 行は、デザイナーから
-#   ［入力ダイアログを表示］を 2 つ置き（パスワード側は入力の種類を
-#   「パスワード」にする）、生成変数を EdiUser / EdiPassword に
-#   リネームしたものに置き換えること。
-# ★ ログイン部分の範囲は SECRET プレースホルダの位置から機械的に判定している。
-#   録画の形によっては境界がずれるので、貼り付け後に目で確認すること。
-IF LoginMode = $'''auto''' THEN
-    SET EdiUser TO $''''''
-    SET EdiPassword TO $''''''
-    # JSON 本文を壊さないよう \ → \\ 、" → \" の順でエスケープする。
-    # 順序を守ること（逆にすると 1 段目で入れた \\ を 2 段目が書き換える）。
-    # ActivateEscapeSequences: False が重要（True だと \\ が 1 個に戻る）。
-    Text.Replace.ReplaceText Text: EdiUser TextToFind: $'''\\''' IgnoreCase: False ReplaceWith: $'''\\\\''' ActivateEscapeSequences: False ComparisonType: Text.TextComparisonType.CultureSensitive Result=> EdiUserEsc
-    Text.Replace.ReplaceText Text: EdiUserEsc TextToFind: $'''"''' IgnoreCase: False ReplaceWith: $'''\\"''' ActivateEscapeSequences: False ComparisonType: Text.TextComparisonType.CultureSensitive Result=> EdiUser
-    Text.Replace.ReplaceText Text: EdiPassword TextToFind: $'''\\''' IgnoreCase: False ReplaceWith: $'''\\\\''' ActivateEscapeSequences: False ComparisonType: Text.TextComparisonType.CultureSensitive Result=> EdiPasswordEsc
-    Text.Replace.ReplaceText Text: EdiPasswordEsc TextToFind: $'''"''' IgnoreCase: False ReplaceWith: $'''\\"''' ActivateEscapeSequences: False ComparisonType: Text.TextComparisonType.CultureSensitive Result=> EdiPassword
-    # [3] fill #login-user
-    SET ActBody TO $'''{"script": "%JsAct%", "args": [["#login-user", "aria/User"], "fill", "%EdiUser%"]}'''
-    Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
-    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
-    IF ActObj['value']['ok'] <> True THEN
-        SET RowError TO $'''ステップ3（fill #login-user）で要素が見つかりません'''
-    END
-    WAIT 1
-    # [4] fill #login-pass
-    SET ActBody TO $'''{"script": "%JsAct%", "args": [["#login-pass", "aria/Password"], "fill", "%EdiPassword%"]}'''
-    Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
-    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
-    IF ActObj['value']['ok'] <> True THEN
-        SET RowError TO $'''ステップ4（fill #login-pass）で要素が見つかりません'''
-    END
-    WAIT 1
-    # [5] click #btn-signin
-    SET ActBody TO $'''{"script": "%JsAct%", "args": [["#btn-signin", "aria/Sign in"], "click", ""]}'''
-    Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
-    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
-    IF ActObj['value']['ok'] <> True THEN
-        SET RowError TO $'''ステップ5（click #btn-signin）で要素が見つかりません'''
-    END
-    WAIT 1
-    # [6] click #menu-orders
-    SET ActBody TO $'''{"script": "%JsAct%", "args": [["#menu-orders", "aria/Orders"], "click", ""]}'''
-    Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
-    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
-    IF ActObj['value']['ok'] <> True THEN
-        SET RowError TO $'''ステップ6（click #menu-orders）で要素が見つかりません'''
-    END
-    WAIT 1
-END
-
-# ---------- 使い終わったパスワードは即座に消す ----------
-SET EdiPassword TO $''''''
-SET EdiPasswordEsc TO $''''''
 
 # ---------- 起点画面かどうかを確認する ----------
 # ループ最初の操作対象がこの画面にあるかを、クリックせずに調べる。
