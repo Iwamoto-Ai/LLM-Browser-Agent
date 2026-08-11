@@ -6,7 +6,7 @@
 # 処理内容：明細 1 件につき 6 操作を繰り返す（ID列: ID ／ 業務キー: KEY）
 #           開始URL: file:///C:/temp/sample.html
 #           明細CSV: sample_batch.csv
-# 備考：2026/08/10 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
+# 備考：2026/08/11 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
 # ============================================================
 # LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
 # Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).
@@ -373,7 +373,7 @@ WAIT 2
 # WebDriver は自分が起動したブラウザーしか操作できない。別に開いてある
 # 普段のブラウザーでログインしても、フローはそのタブを見られない。
 IF LoginMode = $'''manual''' THEN
-    Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' Message: $'''いま開いたブラウザーでログインし、繰り返しの起点画面まで進んでから[OK]を押してください。ブラウザーは閉じないでください。''' Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn
+    Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' Message: $'''ログインし、起点画面（「Order key」 が見える画面）まで進んでから[OK]。ブラウザーは閉じないでください。''' Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn
     IF LoginBtn = $'''Cancel''' THEN
         SET Halt TO True
         SET HaltReason TO $'''手動ログインがキャンセルされました'''
@@ -437,13 +437,26 @@ SET EdiPasswordEsc TO $''''''
 
 # ---------- 起点画面かどうかを確認する ----------
 # ループ最初の操作対象がこの画面にあるかを、クリックせずに調べる。
+# 見つからなければ、その場で進めてもらって何度でも試せるようにする。
+# 1 度きりで中止すると、画面を直してから実行し直すことになって手間が増える。
 SET ActBody TO $'''{"script": "%JsAct%", "args": [["#search-key", "aria/Order key"], "find", ""]}'''
-Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
-Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
-IF ActObj['value']['ok'] <> True THEN
-    SET Halt TO True
-    SET HaltReason TO $'''繰り返しの起点画面に到達できませんでした'''
-    Display.ShowMessageDialog.ShowMessage Title: $'''起点画面ではありません''' Message: $'''繰り返しの起点画面が表示されていません。ブラウザーで起点画面まで進めてから、もう一度実行してください。''' Icon: Display.Icon.Warning Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> StartBtn
+SET StartOk TO False
+SET StartTry TO 0
+LOOP WHILE StartOk = False
+    Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+    IF ActObj['value']['ok'] = True THEN
+        SET StartOk TO True
+    END
+    IF StartOk = False THEN
+        SET StartTry TO StartTry + 1
+        Display.ShowMessageDialog.ShowMessage Title: $'''起点画面ではありません''' Message: $'''起点画面が出ていません。「Order key」 が見える画面まで進めて[OK]。（%StartTry% 回目）''' Icon: Display.Icon.Warning Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> StartBtn
+        IF StartBtn = $'''Cancel''' THEN
+            SET Halt TO True
+            SET HaltReason TO $'''繰り返しの起点画面に到達できませんでした'''
+            SET StartOk TO True
+        END
+    END
 END
 
 # ---------- セットアップ失敗を検知して止める ----------

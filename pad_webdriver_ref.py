@@ -713,6 +713,17 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
 
     setup = batch.get("setup", [])
     loop_steps = batch.get("loop", [])
+    # 起点画面の判定に使う「ループ最初の操作対象」。手動ログインの案内でも
+    # 「何が見える画面まで進むのか」を出したいので、ここで先に求めておく。
+    # 明細の値を含む候補は、1 件目の値が分からないので判定に使えない。
+    first_target = None
+    for _st in loop_steps:
+        if _st.get("type") in ("click", "doubleClick", "change"):
+            _cands = _robin_filter_candidates(_candidates(_st))
+            if _cands and not any("{{" in c for c in _cands):
+                first_target = _cands
+            break
+    origin_hint = _origin_hint(first_target or [])
     recover = batch.get("recover", [])
     teardown = batch.get("teardown", [])
     login_idx, has_login = _split_login(setup)
@@ -1154,9 +1165,12 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             A("# WebDriver は自分が起動したブラウザーしか操作できない。別に開いてある")
             A("# 普段のブラウザーでログインしても、フローはそのタブを見られない。")
             A("IF LoginMode = $'''manual''' THEN")
+            _lmsg = _robin_str(
+                "ログインし、起点画面"
+                + (f"（{origin_hint} が見える画面）" if origin_hint else "")
+                + "まで進んでから[OK]。ブラウザーは閉じないでください。")
             A("    Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' "
-              "Message: $'''いま開いたブラウザーでログインし、繰り返しの起点画面まで"
-              "進んでから[OK]を押してください。ブラウザーは閉じないでください。''' "
+              f"Message: {_lmsg} "
               "Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel "
               "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True "
               "ButtonPressed=> LoginBtn")
@@ -1254,33 +1268,40 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("")
     # ---- 起点画面の確認 ----
     # 手動ログイン運用では、人がどこまで進めて[OK]を押したかで結果が変わる。
-    # 1 つ手前の画面で[OK]を押すと「ステップ1で要素が見つかりません」が全件に出て
-    # 原因が分かりにくいので、ここで起点かどうかを判定して明示的に伝える。
-    # 判定にはループ最初の操作対象を使う（明細の値を含む場合は判定できないので省く）。
-    first_target = None
-    for st in loop_steps:
-        if st.get("type") in ("click", "doubleClick", "change"):
-            cands = _robin_filter_candidates(_candidates(st))
-            if cands and not any("{{" in c for c in cands):
-                first_target = cands
-            break
     if first_target:
         A("# ---------- 起点画面かどうかを確認する ----------")
         A("# ループ最初の操作対象がこの画面にあるかを、クリックせずに調べる。")
+        A("# 見つからなければ、その場で進めてもらって何度でも試せるようにする。")
+        A("# 1 度きりで中止すると、画面を直してから実行し直すことになって手間が増える。")
         body_args = json.dumps([first_target, "find", ""], ensure_ascii=False)
+        hint = _origin_hint(first_target)
         A(f"SET ActBody TO $'''{{\"script\": \"%JsAct%\", \"args\": {body_args}}}'''")
-        A(_web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus"))
-        A("Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj")
-        A("IF ActObj['value']['ok'] <> True THEN")
-        A("    SET Halt TO True")
-        A(f"    SET HaltReason TO "
+        A("SET StartOk TO False")
+        A("SET StartTry TO 0")
+        A("LOOP WHILE StartOk = False")
+        A("    " + _web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus"))
+        A("    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj")
+        A("    IF ActObj['value']['ok'] = True THEN")
+        A("        SET StartOk TO True")
+        A("    END")
+        A("    IF StartOk = False THEN")
+        A("        SET StartTry TO StartTry + 1")
+        _msg = _robin_str(
+            "起点画面が出ていません。" + hint +
+            " が見える画面まで進めて[OK]。（%StartTry% 回目）")
+        A("        Display.ShowMessageDialog.ShowMessage Title: "
+          + _robin_str("起点画面ではありません")
+          + f" Message: {_msg} Icon: Display.Icon.Warning "
+            "Buttons: Display.Buttons.OKCancel "
+            "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True "
+            "ButtonPressed=> StartBtn")
+        A(f"        IF StartBtn = {_robin_str('Cancel')} THEN")
+        A("            SET Halt TO True")
+        A(f"            SET HaltReason TO "
           f"{_robin_str('繰り返しの起点画面に到達できませんでした')}")
-        A("    Display.ShowMessageDialog.ShowMessage Title: $'''起点画面ではありません''' "
-          "Message: $'''繰り返しの起点画面が表示されていません。ブラウザーで起点画面まで"
-          "進めてから、もう一度実行してください。''' "
-          "Icon: Display.Icon.Warning Buttons: Display.Buttons.OK "
-          "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True "
-          "ButtonPressed=> StartBtn")
+        A("            SET StartOk TO True")
+        A("        END")
+        A("    END")
         A("END")
         A("")
 
@@ -1548,6 +1569,20 @@ def _folder_get(folder_var: str, filter_var: str, out_var: str) -> str:
             "SortBy2: Folder.SortBy.LastModified SortDescending2: False "
             "SortBy3: Folder.SortBy.LastAccessed SortDescending3: False "
             f"Files=> {out_var}")
+
+
+def _origin_hint(cands: list) -> str:
+    """起点画面の目印を、人が読める形にする。
+
+    aria/ や text/ の候補があればその名前を使う。無ければ生の指定をそのまま出す。
+    「#POS_ORDERS が見つかりません」では利用者が何を探せばよいか分からないため。"""
+    for c in cands:
+        for pre in ("aria/", "text/"):
+            if c.startswith(pre):
+                name = c[len(pre):].split("[")[0].strip()
+                if name:
+                    return "「" + name + "」"
+    return cands[0] if cands else ""
 
 
 def _warn_exec_paths(args) -> None:
