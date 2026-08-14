@@ -102,6 +102,12 @@ function viewHattyuTab() {
   document.getElementById('POS_PURCHASE_ORDERS').addEventListener('click', viewPoList);
 }
 
+/* 受理済みにした発注番号を覚えておく。実サイトと同じく、受理したあとに
+   もう一度検索して開くとステータスが「受理済」に変わる。 */
+var accepted = {};
+
+function poStatus(po) { return accepted[po] ? '受理済' : '要確認'; }
+
 function viewPoList() {
   app.innerHTML = header('iSupplier Portal') +
     '<div class="tabs"><a>仕入先ホーム</a><a><b>発注</b></a><a>納入</a><a>財務</a><a>管理</a></div>' +
@@ -127,23 +133,37 @@ function viewAdvSearch() {
     var r = document.getElementById('results');
     if (!po) { r.innerHTML = '<p>検索基準を少なくとも 1 つ入力してください。</p>'; return; }
     r.innerHTML = '<table class="grid"><tr><th>選択</th><th>発注番号</th><th>件名</th>' +
-      '<th>金額</th><th>ステータス</th></tr>' +
+      '<th>発注日</th><th>金額</th><th>通貨</th><th>ステータス</th></tr>' +
       '<tr><td><input type="radio"></td>' +
       '<td><a class="polink" id="N58:PosPoNumber:0">' + po + '</a></td>' +
-      '<td>練習サンプル株式会社／Ａ００００００</td><td>16,600</td><td>要確認</td></tr></table>';
+      '<td>更新／練習サンプル株式会社／Ａ００３２２１８０９－Ｊ５００</td>' +
+      '<td>2026/07/06 12:34:05</td><td>16,600</td><td>JPY</td>' +
+      '<td>' + poStatus(po) + '</td></tr></table>';
     document.getElementById('N58:PosPoNumber:0').addEventListener('click', function () {
       currentPo = po; viewPoDetail();
     });
   });
 }
 
+/* 発注情報の画面。受理したあとにここを開くとステータスが「受理済」になる。
+   注文受諾のエビデンスは、この画面を撮る。 */
 function viewPoDetail() {
   app.innerHTML = header('iSupplier Portal') +
     '<div class="crumb">発注: 発注 &gt;</div>' +
     '<div class="main"><h2>標準発注: ' + currentPo + ', 0 (合計 JPY 16,600)</h2>' +
+    '<p>通貨= JPY</p>' +
     '<p>処理 <select><option>確認</option></select> ' +
     '<button id="ActionGoBtn">進む</button> <button>エクスポート</button></p>' +
-    '<p class="note">発注情報（練習ダミー）: 支払条件 検収翌々月15日支払 / ステータス 要確認</p></div>';
+    '<h3>発注情報</h3>' +
+    '<table class="grid">' +
+    '<tr><th>合計</th><td>16,600</td></tr>' +
+    '<tr><th>仕入先</th><td>練習サンプル株式会社</td></tr>' +
+    '<tr><th>購買担当</th><td>- - / 法人発注代行 A</td></tr>' +
+    '<tr><th>発注日</th><td>2026/07/06 12:34:05</td></tr>' +
+    '<tr><th>件名</th><td>更新／練習サンプル株式会社／Ａ００３２２１８０９－Ｊ５００</td></tr>' +
+    '<tr><th>ステータス</th><td id="poStatus">' + poStatus(currentPo) + '</td></tr>' +
+    '<tr><th>支払条件</th><td>検収翌々月15日支払</td></tr>' +
+    '</table></div>';
   bindHome();
   document.getElementById('ActionGoBtn').addEventListener('click', viewPoConfirm);
 }
@@ -167,7 +187,10 @@ function viewPoNotify() {
     '<tr><th>処理</th><td>受理</td></tr></table>' +
     '<p><button>取消</button> <button id="PosSubmitBtn">発行</button></p></div>';
   bindHome();
-  document.getElementById('PosSubmitBtn').addEventListener('click', viewPoDone);
+  document.getElementById('PosSubmitBtn').addEventListener('click', function () {
+    accepted[currentPo] = true;
+    viewPoDone();
+  });
 }
 
 function viewPoDone() {
