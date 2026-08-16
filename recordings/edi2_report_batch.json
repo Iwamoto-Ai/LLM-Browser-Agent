@@ -1,0 +1,147 @@
+// ============================================================
+// 練習EDI2 検収状況一覧（エビデンス取得）バッチ定義
+//  明細CSVに「納入日」列が要る
+//  ファイルのダウンロードまで。保存先の固定とリネームは生成器では未対応
+//  ・行の先頭が // または # の行はコメント（読み飛ばされる）
+//  ・{{列名}} は明細 CSV の列に置き換わる
+// ============================================================
+{
+  "title": "練習EDI2 検収状況一覧 バッチ — 条件を入れて発行し、Excel をダウンロードする",
+  "setup": [
+    {
+      "type": "setViewport",
+      "width": 1366,
+      "height": 900
+    },
+    {
+      "type": "navigate",
+      "url": "file:///C:/temp/index.html"
+    }
+  ],
+  "loop": [
+    {
+      "type": "comment",
+      "text": "発注 {{発注番号}}（{{プロジェクト番号}}）のエビデンスを取得"
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI帳票出力"
+        ],
+        [
+          "text/検収状況一覧"
+        ]
+      ]
+    },
+    {
+      "type": "change",
+      "value": "{{発注番号}}",
+      "selectors": [
+        [
+          "#PoFromField"
+        ]
+      ]
+    },
+    {
+      "type": "change",
+      "value": "{{発注番号}}",
+      "selectors": [
+        [
+          "#PoToField"
+        ]
+      ]
+    },
+    {
+      "type": "change",
+      "value": "{{納入日}}",
+      "selectors": [
+        [
+          "#DateFromField"
+        ]
+      ]
+    },
+    {
+      "type": "change",
+      "value": "{{納入日}}",
+      "selectors": [
+        [
+          "#DateToField"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#ContinueBtn"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#ReportSubmitBtn"
+        ]
+      ]
+    },
+    {
+      "type": "assertText",
+      "text": "を発行しました"
+    },
+    {
+      "type": "comment",
+      "text": "要求IDのポップアップ。実サイトではここで番号を控える"
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#OkBtn"
+        ]
+      ]
+    },
+    {
+      "type": "comment",
+      "text": "実サイトでは出力できるまで 1〜5 時間かかるため、ここで一度切る運用になる"
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#OutputIcon0"
+        ],
+        [
+          "text/出力"
+        ]
+      ]
+    },
+    {
+      "type": "comment",
+      "text": "Excel がダウンロードされる。保存先とリネームは生成器では未対応（手作業）"
+    },
+    {
+      "type": "screenshot",
+      "name": "検収状況一覧"
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#homeIcon"
+        ]
+      ]
+    }
+  ],
+  "recover": [
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#homeIcon"
+        ]
+      ]
+    }
+  ]
+}

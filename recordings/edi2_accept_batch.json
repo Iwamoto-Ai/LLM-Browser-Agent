@@ -1,0 +1,238 @@
+// ============================================================
+// 練習EDI2 注文受諾 バッチ定義
+//  ・行の先頭が // または # の行はコメント（読み飛ばされる）
+//  ・{{列名}} は明細 CSV の列に置き換わる
+//
+// 受諾したあと、一度ホームへ戻って同じ発注番号をもう一度開き、
+// ステータスが「受理済」になった発注情報の画面をエビデンスにする。
+// 発行直後の「発注確認」画面では受理済であることが読み取れないため。
+// ============================================================
+{
+  "title": "練習EDI2 注文受諾 バッチ — 受諾後にもう一度開いて発注情報をエビデンスにする",
+  "setup": [
+    {
+      "type": "setViewport",
+      "width": 1366,
+      "height": 900
+    },
+    {
+      "type": "navigate",
+      "url": "file:///C:/temp/index.html"
+    }
+  ],
+  "loop": [
+    {
+      "type": "comment",
+      "text": "発注 {{発注番号}}（{{プロジェクト番号}}）の受諾を開始"
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#POS_ORDERS"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#POS_PURCHASE_ORDERS"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#SrchBtn"
+        ],
+        [
+          "text/拡張検索"
+        ]
+      ]
+    },
+    {
+      "type": "change",
+      "value": "{{発注番号}}",
+      "selectors": [
+        [
+          "#Value_0"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#AdvGoBtn"
+        ],
+        [
+          "text/進む"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "text/{{発注番号}}"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#ActionGoBtn"
+        ],
+        [
+          "text/進む"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#ActionGoBtn"
+        ],
+        [
+          "text/進む"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#PosSubmitBtn"
+        ],
+        [
+          "text/発行"
+        ]
+      ]
+    },
+    {
+      "type": "comment",
+      "text": "ここまでで受諾は完了。ステータスを反映した画面を撮るため、一度ホームへ戻って開き直す"
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#homeIcon"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI取引情報入力・照会"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#POS_ORDERS"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#POS_PURCHASE_ORDERS"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#SrchBtn"
+        ],
+        [
+          "text/拡張検索"
+        ]
+      ]
+    },
+    {
+      "type": "change",
+      "value": "{{発注番号}}",
+      "selectors": [
+        [
+          "#Value_0"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#AdvGoBtn"
+        ],
+        [
+          "text/進む"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "text/{{発注番号}}"
+        ]
+      ]
+    },
+    {
+      "type": "assertText",
+      "text": "受理済"
+    },
+    {
+      "type": "comment",
+      "text": "発注情報（ステータス 受理済）をエビデンスとして保存"
+    },
+    {
+      "type": "screenshot",
+      "name": "注文受諾"
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#homeIcon"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI取引情報入力・照会"
+        ]
+      ]
+    }
+  ],
+  "recover": [
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#homeIcon"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI取引情報入力・照会"
+        ]
+      ]
+    }
+  ]
+}

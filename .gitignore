@@ -39,6 +39,9 @@ recordings/*.json
 !recordings/edi_practice_named.json
 !recordings/edi_practice_batch.json
 !recordings/edi2_practice_batch.json
+!recordings/edi2_accept_batch.json
+!recordings/edi2_delivery_batch.json
+!recordings/edi2_report_batch.json
 
 # 実環境用の値ファイル（社内固有の値が入りうる）。example はサンプルなので追跡する。
 data/edi_values.json
