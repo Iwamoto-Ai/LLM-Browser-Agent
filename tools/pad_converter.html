@@ -383,6 +383,11 @@ function robinFail(indent) {
   out.push(ind2 + "File.WriteText File: LogFile " +
     "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' " +
     "AppendNewLine: True IfFileExists: File.IfFileExists.Append");
+  // WebDriver の生の応答も残す。error と message に理由がそのまま入るので、
+  //「要素が見つかりません」だけでは分からないときの手がかりになる。
+  out.push(ind2 + "File.WriteText File: LogFile " +
+    "TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' " +
+    "AppendNewLine: True IfFileExists: File.IfFileExists.Append");
   out.push(ind2 + "NEXT LOOP");
   out.push(indent + "END");
   return out;
@@ -403,9 +408,18 @@ function robinAct(cands, action, value, indent, note, stepNo, cols) {
     indent + "# [" + stepNo + "] " + nt,
     indent + "SET ActBody TO $'''{\"script\": \"%JsAct%\", \"args\": " + bodyArgs + "}'''",
     web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent),
-    indent + "Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj",
-    indent + "IF ActObj['value']['ok'] <> True THEN",
-    indent + "    SET RowError TO $'''" + reason + "'''",
+    // 応答コードを先に見る。WebDriver がエラーを返すと value の中身が
+    // error/message に入れ替わり、ok が無くなる。そのまま読みに行くと
+    //「プロパティがありません」という、原因の分からないエラーになる。
+    indent + "IF ActStatus <> 200 THEN",
+    indent + "    SET RowError TO $'''ステップ" + stepNo + "（" + nt +
+      "）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''",
+    indent + "END",
+    indent + "IF ActStatus = 200 THEN",
+    indent + "    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj",
+    indent + "    IF ActObj['value']['ok'] <> True THEN",
+    indent + "        SET RowError TO $'''" + reason + "'''",
+    indent + "    END",
     indent + "END"
   ];
 }
@@ -1258,9 +1272,13 @@ function buildRobin(batch, opt) {
     A("SET StartTry TO 0");
     A("LOOP WHILE StartOk = False");
     A("    " + web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus"));
-    A("    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj");
-    A("    IF ActObj['value']['ok'] = True THEN");
-    A("        SET StartOk TO True");
+    A("    # 応答コードを先に見る。エラー応答には ok が無いので、そのまま");
+    A("    # 読みに行くと「プロパティがありません」で止まる。");
+    A("    IF ActStatus = 200 THEN");
+    A("        Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj");
+    A("        IF ActObj['value']['ok'] = True THEN");
+    A("            SET StartOk TO True");
+    A("        END");
     A("    END");
     A("    IF StartOk = False THEN");
     A("        SET StartTry TO StartTry + 1");

@@ -542,6 +542,11 @@ def _robin_fail(indent: str) -> list:
         f"{ind2}File.WriteText File: LogFile "
         f"TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' "
         f"AppendNewLine: True IfFileExists: File.IfFileExists.Append",
+        # WebDriver の生の応答も残す。error と message に理由がそのまま入るので、
+        # 「要素が見つかりません」だけでは分からないときの手がかりになる。
+        f"{ind2}File.WriteText File: LogFile "
+        f"TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' "
+        f"AppendNewLine: True IfFileExists: File.IfFileExists.Append",
         f"{ind2}NEXT LOOP",
         f"{indent}END",
     ]
@@ -564,9 +569,18 @@ def _robin_act(cands: list, action: str, value: str, indent: str, note: str,
         f"{indent}# [{step_no}] {note}",
         f"{indent}SET ActBody TO $'''{{\"script\": \"%JsAct%\", \"args\": {body_args}}}'''",
         _web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent),
-        f"{indent}Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj",
-        f"{indent}IF ActObj['value']['ok'] <> True THEN",
-        f"{indent}    SET RowError TO $'''{reason}'''",
+        # 応答コードを先に見る。WebDriver がエラーを返すと value の中身が
+        # error/message に入れ替わり、ok が無くなる。そのまま読みに行くと
+        #「プロパティがありません」という、原因の分からないエラーになる。
+        f"{indent}IF ActStatus <> 200 THEN",
+        f"{indent}    SET RowError TO $'''ステップ{step_no}（{note}）で WebDriver が"
+        f"エラーを返しました（HTTP %ActStatus%）'''",
+        f"{indent}END",
+        f"{indent}IF ActStatus = 200 THEN",
+        f"{indent}    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj",
+        f"{indent}    IF ActObj['value']['ok'] <> True THEN",
+        f"{indent}        SET RowError TO $'''{reason}'''",
+        f"{indent}    END",
         f"{indent}END",
     ]
 
@@ -1181,9 +1195,13 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
         A("SET StartTry TO 0")
         A("LOOP WHILE StartOk = False")
         A("    " + _web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus"))
-        A("    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj")
-        A("    IF ActObj['value']['ok'] = True THEN")
-        A("        SET StartOk TO True")
+        A("    # 応答コードを先に見る。エラー応答には ok が無いので、そのまま")
+        A("    # 読みに行くと「プロパティがありません」で止まる。")
+        A("    IF ActStatus = 200 THEN")
+        A("        Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj")
+        A("        IF ActObj['value']['ok'] = True THEN")
+        A("            SET StartOk TO True")
+        A("        END")
         A("    END")
         A("    IF StartOk = False THEN")
         A("        SET StartTry TO StartTry + 1")

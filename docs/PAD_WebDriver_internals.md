@@ -12,7 +12,7 @@
 ## 📖 目次
 
 **設計**　[🔌 使う HTTP 呼び出しは 6 種類だけ](#-使う-http-呼び出しは-6-種類だけ) / [📜 共通 JavaScript（変数 `%JsAct%` に入れておく）](#-共通-javascript変数-jsact-に入れておく) / [🔁 フローの組み立て](#-フローの組み立て) / [📸 エビデンスの撮り方](#-エビデンスの撮り方) / [🔐 資格情報を「読まない」設計](#-資格情報を読まない設計) / [🔄 WebDriver の自動取得](#-webdriver-の自動取得) / [📥 ファイルのダウンロード（エビデンスが画面に出ない場合）](#-ファイルのダウンロードエビデンスが画面に出ない場合) / [🕒 日時とファイル名](#-日時とファイル名)
-**実機で分かったこと**　[⚠️ Web.InvokeWebService の引数（最重要）](#-webinvokewebservice-の引数最重要) / [📌 Robin リテラルのエスケープ（実機で判明）](#-robin-リテラルのエスケープ実機で判明) / [✅ 実機で確認できたアクション書式（PAD 無料版 / Windows 11）](#-実機で確認できたアクション書式pad-無料版--windows-11)
+**実機で分かったこと**　[⚠️ Web.InvokeWebService の引数（最重要）](#-webinvokewebservice-の引数最重要) / [🩺 WebDriver の応答を先に見る](#-webdriver-の応答を先に見る) / [📌 Robin リテラルのエスケープ（実機で判明）](#-robin-リテラルのエスケープ実機で判明) / [✅ 実機で確認できたアクション書式（PAD 無料版 / Windows 11）](#-実機で確認できたアクション書式pad-無料版--windows-11)
 **Python 版限定**　[📄 手順書の自動生成（Pythonが使える環境で使う）](#-手順書の自動生成pythonが使える環境で使う)
 ---
 
@@ -621,6 +621,45 @@ WebDriver は要素が見つからない等で 4xx/5xx を返す。既定のま�
 > 日本語は既定で正しく送れている。
 
 ---
+
+---
+
+## 🩺 WebDriver の応答を先に見る
+
+`Web.InvokeWebService` は `FailOnErrorStatus: False` で呼んでいるので、HTTP が
+エラーでもフローは止まらない。**応答コードを見ないまま中身を読むと、原因の
+分からないエラーになる。**
+
+正常なら `{"value":{"ok":true,…}}` だが、失敗すると `value` の中身が
+`{"error":"…","message":"…"}` に入れ替わる。`ok` が存在しないので、
+そのまま参照して「プロパティ `ok` がありません」で止まる。**本当の原因は
+`message` に書いてあるのに、そこへたどり着けない。**
+
+```
+IF ActStatus <> 200 THEN
+    SET RowError TO $'''ステップN（…）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+END
+IF ActStatus = 200 THEN
+    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+    IF ActObj['value']['ok'] <> True THEN
+        SET RowError TO $'''ステップN（…）で要素が見つかりません'''
+    END
+END
+```
+
+**変換を `IF ActStatus = 200` の中に入れるのが要点。** 外に置くと、
+エラー応答でも変換しようとして同じところで止まる。
+
+失敗したときは進捗ログに生の応答も残す。`error` と `message` がそのまま読める。
+
+```
+[2026/08/14 10:41:29] PM9000000001 / 900000000001 失敗 ステップ3（…）で要素が見つかりません
+[2026/08/14 10:41:29] 応答 {"value":{"error":"invalid argument","message":"…"}}
+```
+
+同じ手当てはセッション作成にも入れてある（`SessionStatus <> 200`）。
+そちらは実機で確認済みで、`session not created: No matching capabilities found`
+がそのまま表示されることを確かめた。
 
 ---
 
