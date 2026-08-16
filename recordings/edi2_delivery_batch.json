@@ -1,0 +1,194 @@
+// ============================================================
+// 練習EDI2 納入登録 バッチ定義
+//  明細CSVに「納入日」列が要る（例: 2026-08-14）
+//  ・行の先頭が // または # の行はコメント（読み飛ばされる）
+//  ・{{列名}} は明細 CSV の列に置き換わる
+// ============================================================
+{
+  "title": "練習EDI2 納入登録 バッチ — 発注番号で検索し、納入番号と納入日を入れて発行",
+  "setup": [
+    {
+      "type": "setViewport",
+      "width": 1366,
+      "height": 900
+    },
+    {
+      "type": "navigate",
+      "url": "file:///C:/temp/index.html"
+    }
+  ],
+  "loop": [
+    {
+      "type": "comment",
+      "text": "発注 {{発注番号}}（{{プロジェクト番号}}）の納入登録を開始"
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#POS_SHIPMENTS"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#POS_DELIVERY"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#PosHpgGenericUrl3c"
+        ],
+        [
+          "text/納入登録"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#ShipSrchBtn"
+        ],
+        [
+          "text/拡張検索"
+        ]
+      ]
+    },
+    {
+      "type": "change",
+      "value": "{{発注番号}}",
+      "selectors": [
+        [
+          "#ShipPoField"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#ShipGoBtn"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#M__Idb"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#AddToShipBtn"
+        ],
+        [
+          "text/納入に追加"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#ShipHeaderBtn"
+        ],
+        [
+          "text/納入ヘッダー"
+        ]
+      ]
+    },
+    {
+      "type": "change",
+      "value": "{{プロジェクト番号}}",
+      "selectors": [
+        [
+          "#ShipNumField"
+        ]
+      ]
+    },
+    {
+      "type": "change",
+      "value": "{{納入日}}",
+      "selectors": [
+        [
+          "#ShipDateField"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#ShipConfirmBtn"
+        ],
+        [
+          "text/発行確認"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#ShipSubmitBtn"
+        ]
+      ]
+    },
+    {
+      "type": "assertText",
+      "text": "納入登録完了"
+    },
+    {
+      "type": "comment",
+      "text": "納入登録の完了画面をエビデンスとして保存"
+    },
+    {
+      "type": "screenshot",
+      "name": "納入登録"
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#homeIcon"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI取引情報入力・照会"
+        ]
+      ]
+    }
+  ],
+  "recover": [
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#homeIcon"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI取引情報入力・照会"
+        ]
+      ]
+    }
+  ]
+}
