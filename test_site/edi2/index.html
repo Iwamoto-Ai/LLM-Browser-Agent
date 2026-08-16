@@ -77,20 +77,27 @@ function viewEbsHome() {
     '<div style="margin-left:16px">📄 納入一括登録（練習では未実装）<br>' +
     '📁 取引情報入力・照会<br>' +
     '<div style="margin-left:16px"><a id="LI取引情報入力・照会" class="polink">' +
-    '<div class="textdiv">取引情報入力・照会</div></a></div></div></div></div>';
+    '<div class="textdiv">取引情報入力・照会</div></a></div>' +
+    '📁 帳票出力<br>' +
+    '<div style="margin-left:16px"><a id="LI帳票出力" class="polink">' +
+    '<div class="textdiv">検収状況一覧</div></a></div>' +
+    '</div></div></div>';
   bindHome();
   document.getElementById('LI取引情報入力・照会')
     .addEventListener('click', viewIspHome);
+  document.getElementById('LI帳票出力')
+    .addEventListener('click', viewKenshuJoken);
 }
 
 function viewIspHome() {
   app.innerHTML = header('iSupplier Portal') +
     '<div class="tabs"><a>仕入先ホーム</a><a id="POS_ORDERS">発注</a>' +
-    '<a>納入</a><a>財務</a><a>管理</a></div>' +
+    '<a id="POS_SHIPMENTS">納入</a><a>財務</a><a>管理</a></div>' +
     '<div class="main"><h2>仕入先ホーム（練習）</h2>' +
-    '<p>通知・発注一覧・納入一覧のダミー表示。上のタブ「発注」から進みます。</p></div>';
+    '<p>通知・発注一覧・納入一覧のダミー表示。上のタブ「発注」または「納入」から進みます。</p></div>';
   bindHome();
   document.getElementById('POS_ORDERS').addEventListener('click', viewHattyuTab);
+  document.getElementById('POS_SHIPMENTS').addEventListener('click', viewNounyuTab);
 }
 
 function viewHattyuTab() {
@@ -201,6 +208,209 @@ function viewPoDone() {
     '<p><a class="polink" id="backToList">発注要約に戻る</a></p></div>';
   bindHome();
   document.getElementById('backToList').addEventListener('click', viewPoList);
+}
+
+
+/* ============================================================
+   納入登録（フロー2の練習）
+   実サイトの流れ:
+     納入タブ → 納入登録 → 拡張検索 → 発注番号 → 進む
+     → 検索結果を選択 → 納入に追加 → 納入ヘッダー
+     → 納入番号・納入日を入力 → 発行確認 → 発行 → 完了
+   ============================================================ */
+var shipNo = '';          /* 入力された納入番号 */
+var shipDate = '';        /* 入力された納入日 */
+var shipPo = '';          /* 対象の発注番号 */
+var registered = {};      /* 納入登録済みの発注番号 */
+
+function viewNounyuTab() {
+  app.innerHTML = header('iSupplier Portal') +
+    '<div class="tabs"><a>仕入先ホーム</a><a>発注</a><a><b>納入</b></a><a>財務</a><a>管理</a></div>' +
+    '<div class="tabs"><a id="POS_DELIVERY">納入</a><a>納入予定</a><a>納期遅延受入</a></div>' +
+    '<div class="main"><p>サブタブ「納入」から納入登録へ進みます。</p></div>';
+  bindHome();
+  document.getElementById('POS_DELIVERY').addEventListener('click', viewNounyuMenu);
+}
+
+function viewNounyuMenu() {
+  app.innerHTML = header('iSupplier Portal') +
+    '<div class="tabs"><a>仕入先ホーム</a><a>発注</a><a><b>納入</b></a><a>財務</a><a>管理</a></div>' +
+    '<div class="tabs"><a><b>納入</b></a><a>納入予定</a><a>納期遅延受入</a></div>' +
+    '<div class="main"><h2>納入</h2>' +
+    '<p><a class="polink" id="PosHpgGenericUrl3c">納入登録</a></p>' +
+    '<p class="note">練習では「納入登録」から発注番号を検索して登録します。</p></div>';
+  bindHome();
+  document.getElementById('PosHpgGenericUrl3c')
+    .addEventListener('click', viewNounyuSearch);
+}
+
+function viewNounyuSearch() {
+  app.innerHTML = header('iSupplier Portal') +
+    '<div class="crumb">納入: 納入登録 &gt;</div>' +
+    '<div class="main"><h2>納入登録</h2>' +
+    '<p><button id="ShipSrchBtn">拡張検索</button></p>' +
+    '<div id="shipResults"><p class="note">「拡張検索」から発注番号で検索します。</p></div></div>';
+  bindHome();
+  document.getElementById('ShipSrchBtn').addEventListener('click', viewNounyuAdv);
+}
+
+function viewNounyuAdv() {
+  app.innerHTML = header('iSupplier Portal') +
+    '<div class="crumb">納入: 納入登録 &gt;</div>' +
+    '<div class="main"><h2>納入登録 — 拡張検索</h2>' +
+    '<p>発注番号 <select><option>等しい</option></select> ' +
+    '<input id="ShipPoField" size="16" autocomplete="off"> ' +
+    '<button id="ShipGoBtn">進む</button></p>' +
+    '<div id="shipResults"><p class="note">発注番号を入力して「進む」。</p></div></div>';
+  bindHome();
+  document.getElementById('ShipGoBtn').addEventListener('click', function () {
+    var po = document.getElementById('ShipPoField').value.trim();
+    var r = document.getElementById('shipResults');
+    if (!po) { r.innerHTML = '<p>検索基準を少なくとも 1 つ入力してください。</p>'; return; }
+    shipPo = po;
+    r.innerHTML = '<table class="grid"><tr><th>選択</th><th>発注番号</th><th>明細</th>' +
+      '<th>品名</th><th>数量</th><th>単位</th></tr>' +
+      '<tr><td><input type="checkbox" id="M__Idb"></td><td>' + po + '</td><td>1</td>' +
+      '<td>練習サンプル品</td><td>1</td><td>式</td></tr></table>' +
+      '<p><button id="AddToShipBtn">納入に追加</button></p>';
+    document.getElementById('AddToShipBtn')
+      .addEventListener('click', viewNounyuMeisai);
+  });
+}
+
+function viewNounyuMeisai() {
+  app.innerHTML = header('iSupplier Portal') +
+    '<div class="crumb">納入: 納入登録 &gt; 納入明細 &gt;</div>' +
+    '<div class="main"><h2>納入明細</h2>' +
+    '<table class="grid"><tr><th>発注番号</th><th>品名</th><th>数量</th></tr>' +
+    '<tr><td>' + shipPo + '</td><td>練習サンプル品</td><td>1</td></tr></table>' +
+    '<p><button id="ShipHeaderBtn">納入ヘッダー</button></p></div>';
+  bindHome();
+  document.getElementById('ShipHeaderBtn')
+    .addEventListener('click', viewNounyuHeader);
+}
+
+function viewNounyuHeader() {
+  app.innerHTML = header('iSupplier Portal') +
+    '<div class="crumb">納入: 納入登録 &gt; 納入明細 &gt; 納入ヘッダー &gt;</div>' +
+    '<div class="main"><h2>納入ヘッダー</h2>' +
+    '<p>納入番号 <input id="ShipNumField" size="20" autocomplete="off"></p>' +
+    '<p>納入日 <input id="ShipDateField" size="20" autocomplete="off"></p>' +
+    '<p><button id="ShipConfirmBtn">発行確認</button></p>' +
+    '<p class="note">納入番号にはプロジェクト番号を入れます。</p></div>';
+  bindHome();
+  document.getElementById('ShipConfirmBtn').addEventListener('click', function () {
+    shipNo = document.getElementById('ShipNumField').value.trim();
+    shipDate = document.getElementById('ShipDateField').value.trim();
+    viewNounyuConfirm();
+  });
+}
+
+function viewNounyuConfirm() {
+  app.innerHTML = header('iSupplier Portal') +
+    '<div class="crumb">納入: 納入登録 &gt; 納入明細 &gt; 納入ヘッダー &gt;</div>' +
+    '<div class="main"><h2>納入登録の確認</h2>' +
+    '<table class="grid"><tr><th>発注番号</th><td>' + shipPo + '</td></tr>' +
+    '<tr><th>納入番号</th><td>' + shipNo + '</td></tr>' +
+    '<tr><th>納入日</th><td>' + shipDate + '</td></tr></table>' +
+    '<p><button>取消</button> <button id="ShipSubmitBtn">発行</button></p></div>';
+  bindHome();
+  document.getElementById('ShipSubmitBtn').addEventListener('click', function () {
+    registered[shipPo] = shipNo;
+    viewNounyuDone();
+  });
+}
+
+function viewNounyuDone() {
+  app.innerHTML = header('iSupplier Portal') +
+    '<div class="crumb">納入: 納入登録 &gt;</div>' +
+    '<div class="main"><h2>納入登録完了</h2>' +
+    '<p>納入番号 <b>' + shipNo + '</b> で登録しました。</p>' +
+    '<p class="note">エビデンスは「検収状況一覧」（EBS ホーム → 帳票出力）から取得します。</p></div>';
+  bindHome();
+}
+
+/* ============================================================
+   検収状況一覧（フロー3の練習・ファイルのダウンロードまで）
+   実サイトの流れ:
+     帳票出力 → 検収状況一覧 → 条件入力 → 続行 → 発行
+     → 要求IDがポップアップで出る → OK
+     → 要求一覧で出力アイコン → Excel がダウンロードされる
+   実サイトでは発行から出力まで 1〜5 時間かかるが、練習ではすぐ落とせる。
+   ============================================================ */
+var requestId = '';
+var reqPo = '';
+
+/* 練習用の Excel（xlsx）。中身は検収状況一覧を模した 1 行だけの表。 */
+var XLSX_B64 = "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";
+
+function viewKenshuJoken() {
+  app.innerHTML = header('E-Business Suite') +
+    '<div class="crumb">帳票出力 &gt;</div>' +
+    '<div class="main"><h2>検収状況一覧</h2>' +
+    '<p>ステータス <input id="StatusField" size="10" value="ALL"></p>' +
+    '<p>発注番号(From) <input id="PoFromField" size="16" autocomplete="off"> ' +
+    '発注番号(To) <input id="PoToField" size="16" autocomplete="off"></p>' +
+    '<p>納入日(From) <input id="DateFromField" size="16" autocomplete="off"> ' +
+    '納入日(To) <input id="DateToField" size="16" autocomplete="off"></p>' +
+    '<p><button id="ContinueBtn">続行(C)</button></p>' +
+    '<div id="reportArea"></div></div>';
+  bindHome();
+  document.getElementById('ContinueBtn').addEventListener('click', function () {
+    reqPo = document.getElementById('PoFromField').value.trim();
+    document.getElementById('reportArea').innerHTML =
+      '<table class="grid"><tr><th>発注番号</th><th>納入日</th><th>検収状況</th></tr>' +
+      '<tr><td>' + reqPo + '</td><td>' +
+      document.getElementById('DateFromField').value + '</td><td>検収済</td></tr></table>' +
+      '<p><button id="ReportSubmitBtn">発行</button></p>';
+    document.getElementById('ReportSubmitBtn')
+      .addEventListener('click', viewRequestPopup);
+  });
+}
+
+function viewRequestPopup() {
+  /* 要求 ID を発番する。実サイトと同じく、この番号でエビデンスを探す。 */
+  requestId = String(9000000 + Math.floor(Math.random() * 999999));
+  app.innerHTML = header('E-Business Suite') +
+    '<div class="crumb">帳票出力 &gt; 検収状況一覧 &gt;</div>' +
+    '<div class="main"><h2>要求の発行</h2>' +
+    '<div style="border:1px solid #b7cfe3;background:#eef4fa;padding:14px;width:420px">' +
+    '<p>要求 <b id="reqId">' + requestId + '</b> を発行しました。</p>' +
+    '<p><button id="OkBtn">OK</button></p></div>' +
+    '<p class="note">実サイトでは、出力できるようになるまで 1〜5 時間かかります。' +
+    '練習ではすぐ取得できます。</p></div>';
+  bindHome();
+  document.getElementById('OkBtn').addEventListener('click', viewRequestList);
+}
+
+function viewRequestList() {
+  app.innerHTML = header('E-Business Suite') +
+    '<div class="crumb">帳票出力 &gt; 要求 &gt;</div>' +
+    '<div class="main"><h2>要求</h2>' +
+    '<table class="grid" id="RequestSummarySearchVO:Content">' +
+    '<tr><th>出力</th><th>要求ID</th><th>名称</th><th>フェーズ</th><th>ステータス</th></tr>' +
+    '<tr><td><a class="polink" id="OutputIcon0">出力</a></td>' +
+    '<td>' + requestId + '</td><td>検収状況一覧</td>' +
+    '<td>完了</td><td>正常</td></tr></table>' +
+    '<p class="note">「出力」を押すと Excel がダウンロードされます。</p></div>';
+  bindHome();
+  document.getElementById('OutputIcon0').addEventListener('click', downloadReport);
+}
+
+/* base64 の xlsx を Blob にしてダウンロードさせる。実サイトでサーバーが
+   Content-Disposition で返すのと同じく、ブラウザーの保存先に落ちる。 */
+function downloadReport() {
+  var bin = atob(XLSX_B64);
+  var arr = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) { arr[i] = bin.charCodeAt(i); }
+  var mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  var url = URL.createObjectURL(new Blob([arr], { type: mime }));
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'XXPO_検収状況一覧_' + requestId + '.xlsx';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 2000);
 }
 
 function bindHome() {
