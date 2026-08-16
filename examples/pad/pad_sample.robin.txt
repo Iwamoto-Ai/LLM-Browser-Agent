@@ -6,7 +6,7 @@
 # 処理内容：明細 1 件につき 6 操作を繰り返す（ID列: ID ／ 業務キー: KEY）
 #           開始URL: file:///C:/temp/sample.html
 #           明細CSV: sample_batch.csv
-# 備考：2026/08/11 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
+# 備考：2026/08/16 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
 # ============================================================
 # LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
 # Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).
@@ -384,9 +384,13 @@ SET StartOk TO False
 SET StartTry TO 0
 LOOP WHILE StartOk = False
     Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
-    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
-    IF ActObj['value']['ok'] = True THEN
-        SET StartOk TO True
+    # 応答コードを先に見る。エラー応答には ok が無いので、そのまま
+    # 読みに行くと「プロパティがありません」で止まる。
+    IF ActStatus = 200 THEN
+        Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+        IF ActObj['value']['ok'] = True THEN
+            SET StartOk TO True
+        END
     END
     IF StartOk = False THEN
         SET StartTry TO StartTry + 1
@@ -489,9 +493,14 @@ IF Halt = False THEN
         # [1] fill #search-key
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#search-key", "aria/Order key"], "fill", "%Col2%"]}'''
         Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
-        Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
-        IF ActObj['value']['ok'] <> True THEN
-            SET RowError TO $'''ステップ1（fill #search-key）で要素が見つかりません'''
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ1（fill #search-key）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ1（fill #search-key）で要素が見つかりません'''
+            END
         END
         IF RowError <> $'''''' THEN
             SET NgCount TO NgCount + 1
@@ -501,6 +510,7 @@ IF Halt = False THEN
             File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.DoNothing
             File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             NEXT LOOP
         END
         WAIT 1
@@ -508,9 +518,14 @@ IF Halt = False THEN
         # [2] click #btn-search
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#btn-search", "aria/Search"], "click", ""]}'''
         Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
-        Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
-        IF ActObj['value']['ok'] <> True THEN
-            SET RowError TO $'''ステップ2（click #btn-search）で要素が見つかりません'''
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ2（click #btn-search）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ2（click #btn-search）で要素が見つかりません'''
+            END
         END
         IF RowError <> $'''''' THEN
             SET NgCount TO NgCount + 1
@@ -520,6 +535,7 @@ IF Halt = False THEN
             File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.DoNothing
             File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             NEXT LOOP
         END
         WAIT 1
@@ -527,9 +543,14 @@ IF Halt = False THEN
         # [3] click aria/%Col2%
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["aria/%Col2%", "#result-link"], "click", ""]}'''
         Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
-        Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
-        IF ActObj['value']['ok'] <> True THEN
-            SET RowError TO $'''ステップ3（click aria/%Col2%）で要素が見つかりません'''
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ3（click aria/%Col2%）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ3（click aria/%Col2%）で要素が見つかりません'''
+            END
         END
         IF RowError <> $'''''' THEN
             SET NgCount TO NgCount + 1
@@ -539,6 +560,7 @@ IF Halt = False THEN
             File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.DoNothing
             File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             NEXT LOOP
         END
         WAIT 1
@@ -546,9 +568,14 @@ IF Halt = False THEN
         # [4] click #btn-confirm
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#btn-confirm", "aria/Confirm", "text/Confirm"], "click", ""]}'''
         Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
-        Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
-        IF ActObj['value']['ok'] <> True THEN
-            SET RowError TO $'''ステップ4（click #btn-confirm）で要素が見つかりません'''
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ4（click #btn-confirm）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ4（click #btn-confirm）で要素が見つかりません'''
+            END
         END
         IF RowError <> $'''''' THEN
             SET NgCount TO NgCount + 1
@@ -558,6 +585,7 @@ IF Halt = False THEN
             File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.DoNothing
             File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             NEXT LOOP
         END
         WAIT 1
@@ -566,9 +594,14 @@ IF Halt = False THEN
         # [5] click #home-link
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#home-link", "aria/Home"], "click", ""]}'''
         Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
-        Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
-        IF ActObj['value']['ok'] <> True THEN
-            SET RowError TO $'''ステップ5（click #home-link）で要素が見つかりません'''
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ5（click #home-link）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ5（click #home-link）で要素が見つかりません'''
+            END
         END
         IF RowError <> $'''''' THEN
             SET NgCount TO NgCount + 1
@@ -578,6 +611,7 @@ IF Halt = False THEN
             File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.DoNothing
             File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             NEXT LOOP
         END
         WAIT 1
@@ -585,9 +619,14 @@ IF Halt = False THEN
         # [6] click #menu-orders
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#menu-orders", "aria/Orders"], "click", ""]}'''
         Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
-        Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
-        IF ActObj['value']['ok'] <> True THEN
-            SET RowError TO $'''ステップ6（click #menu-orders）で要素が見つかりません'''
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ6（click #menu-orders）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ6（click #menu-orders）で要素が見つかりません'''
+            END
         END
         IF RowError <> $'''''' THEN
             SET NgCount TO NgCount + 1
@@ -597,6 +636,7 @@ IF Halt = False THEN
             File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.DoNothing
             File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             NEXT LOOP
         END
         WAIT 1
