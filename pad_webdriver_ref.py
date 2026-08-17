@@ -717,7 +717,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             if _cands and not any("{{" in c for c in _cands):
                 first_target = _cands
             break
-    origin_hint = _origin_hint(first_target or [])
+    origin_hint = _origin_hint(batch, first_target or [])
     recover = batch.get("recover", [])
     teardown = batch.get("teardown", [])
 
@@ -1169,7 +1169,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# 普段のブラウザーでログインしても、フローはそのタブを見られない。")
     _lmsg = _robin_str(
         "ログインし、起点画面"
-        + (f"（{origin_hint} が見える画面）" if origin_hint else "")
+        + (f"（{origin_hint}）" if origin_hint else "")
         + "まで進んでから[OK]。ブラウザーは閉じないでください。")
     A("Display.ShowMessageDialog.ShowMessage Title: $\'\'\'手動ログイン\'\'\' "
       f"Message: {_lmsg} "
@@ -1189,7 +1189,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
         A("# 見つからなければ、その場で進めてもらって何度でも試せるようにする。")
         A("# 1 度きりで中止すると、画面を直してから実行し直すことになって手間が増える。")
         body_args = json.dumps([first_target, "find", ""], ensure_ascii=False)
-        hint = _origin_hint(first_target)
+        hint = origin_hint
         A(f"SET ActBody TO $'''{{\"script\": \"%JsAct%\", \"args\": {body_args}}}'''")
         A("SET StartOk TO False")
         A("SET StartTry TO 0")
@@ -1207,7 +1207,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
         A("        SET StartTry TO StartTry + 1")
         _msg = _robin_str(
             "起点画面が出ていません。" + hint +
-            " が見える画面まで進めて[OK]。（%StartTry% 回目）")
+            "まで進めて[OK]。（%StartTry% 回目）")
         A("        Display.ShowMessageDialog.ShowMessage Title: "
           + _robin_str("起点画面ではありません")
           + f" Message: {_msg} Icon: Display.Icon.Warning "
@@ -1490,18 +1490,26 @@ def _folder_get(folder_var: str, filter_var: str, out_var: str) -> str:
             f"Files=> {out_var}")
 
 
-def _origin_hint(cands: list) -> str:
-    """起点画面の目印を、人が読める形にする。
+def _origin_hint(batch: dict, cands: list) -> str:
+    """起点画面の案内文を、人が読める形で作る。
 
-    aria/ や text/ の候補があればその名前を使う。無ければ生の指定をそのまま出す。
-    「#POS_ORDERS が見つかりません」では利用者が何を探せばよいか分からないため。"""
+    「#POS_SHIPMENTS が見える画面まで進めて」では、その ID が画面のどこを
+    指すのか利用者には分からない。次の順で探す。
+
+      1. バッチ定義の originHint（例: "納入"）。人が書いたものが一番確実
+      2. 候補の aria/ や text/ の名前。画面に出ている文字なので目で探せる
+      3. どちらも無ければ、ID は出さずに文言だけで案内する
+    """
+    named = str(batch.get("originHint", "")).strip()
+    if named:
+        return "「" + named + "」が見える画面"
     for c in cands:
         for pre in ("aria/", "text/"):
             if c.startswith(pre):
                 name = c[len(pre):].split("[")[0].strip()
                 if name:
-                    return "「" + name + "」"
-    return cands[0] if cands else ""
+                    return "「" + name + "」が見える画面"
+    return "繰り返しの最初の操作ができる画面"
 
 
 def _warn_exec_paths(args) -> None:

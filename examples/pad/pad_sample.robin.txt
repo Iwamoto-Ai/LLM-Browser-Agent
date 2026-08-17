@@ -6,7 +6,7 @@
 # 処理内容：明細 1 件につき 6 操作を繰り返す（ID列: ID ／ 業務キー: KEY）
 #           開始URL: file:///C:/temp/sample.html
 #           明細CSV: sample_batch.csv
-# 備考：2026/08/16 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
+# 備考：2026/08/17 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
 # ============================================================
 # LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
 # Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).
@@ -369,7 +369,7 @@ WAIT 2
 # 辿らせるより人が進めるほうが確実で、修正も要らない。
 # WebDriver は自分が起動したブラウザーしか操作できない。別に開いてある
 # 普段のブラウザーでログインしても、フローはそのタブを見られない。
-Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' Message: $'''ログインし、起点画面（「Order key」 が見える画面）まで進んでから[OK]。ブラウザーは閉じないでください。''' Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn
+Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' Message: $'''ログインし、起点画面（「Order key」が見える画面）まで進んでから[OK]。ブラウザーは閉じないでください。''' Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn
 IF LoginBtn = $'''Cancel''' THEN
     SET Halt TO True
     SET HaltReason TO $'''手動ログインがキャンセルされました'''
@@ -394,7 +394,7 @@ LOOP WHILE StartOk = False
     END
     IF StartOk = False THEN
         SET StartTry TO StartTry + 1
-        Display.ShowMessageDialog.ShowMessage Title: $'''起点画面ではありません''' Message: $'''起点画面が出ていません。「Order key」 が見える画面まで進めて[OK]。（%StartTry% 回目）''' Icon: Display.Icon.Warning Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> StartBtn
+        Display.ShowMessageDialog.ShowMessage Title: $'''起点画面ではありません''' Message: $'''起点画面が出ていません。「Order key」が見える画面まで進めて[OK]。（%StartTry% 回目）''' Icon: Display.Icon.Warning Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> StartBtn
         IF StartBtn = $'''Cancel''' THEN
             SET Halt TO True
             SET HaltReason TO $'''繰り返しの起点画面に到達できませんでした'''
