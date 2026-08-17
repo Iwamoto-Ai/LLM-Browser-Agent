@@ -685,6 +685,7 @@ def _lint_robin(lines: list, log=print) -> list:
 Q_ = "'''"   # Robin のリテラル区切り
 
 def write_robin(batch: dict, details_path: str, id_col: str, path: str,
+                shot_name: str = "%RowId%__%RowKey%__%Stamp%",
                 driver_exe: str = r"C:\temp\msedgedriver.exe",
                 out_dir: str = r"C:\temp", proxy: str = "",
                 auto_driver: bool = False,
@@ -1343,8 +1344,11 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
       "CustomFormat: $'''yyyyMMdd_HHmmss''' Result=> Stamp")
     A(f"{inner}Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt "
       "CustomFormat: $'''yyyy/MM/dd HH:mm:ss''' Result=> RecStamp")
-    A(f"{inner}SET ShotPath TO $'''%ShotDir%\\\\%RowId%__%RowKey%__%Stamp%.png'''")
-    A(f"{inner}SET FailShot TO $'''%ShotDir%\\\\fail__%RowId%__%RowKey%__%Stamp%.png'''")
+    A(f"{inner}# エビデンスのファイル名。ここ 1 行を直せば命名が変わる。")
+    A(f"{inner}# 使える差し込み: %RowId%（ID列）/ %RowKey%（業務キー）/ %Stamp%（日時）")
+    A(f"{inner}SET ShotName TO {_robin_str(shot_name)}")
+    A(f"{inner}SET ShotPath TO $'''%ShotDir%\\\\%ShotName%.png'''")
+    A(f"{inner}SET FailShot TO $'''%ShotDir%\\\\fail_%ShotName%.png'''")
     A(f"{inner}File.WriteText File: LogFile "
       "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 開始''' AppendNewLine: True "
       "IfFileExists: File.IfFileExists.Append")
@@ -1597,6 +1601,10 @@ def main() -> None:
     p.add_argument("--pad-browser", choices=["edge", "chrome"], default="edge",
                    help="生成する Robin が使うブラウザー（既定 edge）。"
                         "生成後も Robin 冒頭の Browser を書き換えれば切り替えられる")
+    p.add_argument("--shot-name", default="%RowId%__%RowKey%__%Stamp%",
+                   help="エビデンスのファイル名（拡張子なし）。"
+                        "%RowId% / %RowKey% / %Stamp% を差し込める。"
+                        "例: 【注文受諾】%RowId%_〇〇株式会社")
     p.add_argument("--auto-driver", action="store_true",
                    help="Selenium Manager でドライバーを自動取得する行を入れる"
                         "（selenium-manager-windows.exe を実行環境の BaseDir に置くこと）")
@@ -1624,6 +1632,7 @@ def main() -> None:
 
     if args.robin:
         out = write_robin(batch, args.details, id_col, args.robin,
+                          args.shot_name,
                           args.driver_exe, args.pad_out_dir, args.proxy,
                           args.auto_driver, args.pad_browser)
         js_out = out[:-len(".robin.txt")] + ".jsact.js" if out.endswith(".robin.txt") \

@@ -105,6 +105,9 @@
   <legend>3. オプション</legend>
   <div><label for="browser">ブラウザー (--pad-browser)</label>
     <select id="browser"><option value="edge">edge</option><option value="chrome">chrome</option></select></div>
+  <div><label for="shotName">エビデンスのファイル名</label>
+    <input type="text" id="shotName" value="%RowId%__%RowKey%__%Stamp%">
+    <span class="hint">%RowId% / %RowKey% / %Stamp% を差し込める</span></div>
   <div><label for="proxy">プロキシ (--proxy)</label>
     <input type="text" id="proxy" value="" placeholder="proxy.example.com:8080"></div>
   <div><label for="autodrv">ドライバー自動取得</label>
@@ -800,7 +803,8 @@ function buildRobin(batch, opt) {
   var proxy = opt.proxy || "";
   var autoDriver = !!opt.autoDriver;
   var browser = opt.browser || "edge";
-  var today = opt.today;   // {y,m,d}（テスト用に固定できるようにする）
+  var today = opt.today;
+  var shotName = opt.shotName || "%RowId%__%RowKey%__%Stamp%";   // {y,m,d}（テスト用に固定できるようにする）
 
   var jsOne = jsActOneline();
   var cols = [idCol];
@@ -1421,8 +1425,11 @@ function buildRobin(batch, opt) {
     "CustomFormat: $'''yyyyMMdd_HHmmss''' Result=> Stamp");
   A(inner + "Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt " +
     "CustomFormat: $'''yyyy/MM/dd HH:mm:ss''' Result=> RecStamp");
-  A(inner + "SET ShotPath TO $'''%ShotDir%\\\\%RowId%__%RowKey%__%Stamp%.png'''");
-  A(inner + "SET FailShot TO $'''%ShotDir%\\\\fail__%RowId%__%RowKey%__%Stamp%.png'''");
+  A(inner + "# エビデンスのファイル名。ここ 1 行を直せば命名が変わる。");
+  A(inner + "# 使える差し込み: %RowId%（ID列）/ %RowKey%（業務キー）/ %Stamp%（日時）");
+  A(inner + "SET ShotName TO " + robinStr(shotName));
+  A(inner + "SET ShotPath TO $'''%ShotDir%\\\\%ShotName%.png'''");
+  A(inner + "SET FailShot TO $'''%ShotDir%\\\\fail_%ShotName%.png'''");
   A(inner + "File.WriteText File: LogFile " +
     "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 開始''' AppendNewLine: True " +
     "IfFileExists: File.IfFileExists.Append");
@@ -1819,6 +1826,7 @@ root.PadConvert = {
         idCol: idCol,
         driverExe: $("driver").value.trim(),
         outDir: $("outdir").value.trim(),
+        shotName: $("shotName").value.trim(),
         proxy: $("proxy").value.trim(),
         autoDriver: $("autodrv").checked,
         browser: $("browser").value

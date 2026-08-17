@@ -485,8 +485,11 @@ IF Halt = False THEN
         DateTime.GetCurrentDateTime.Local DateTimeFormat: DateTime.DateTimeFormat.DateAndTime CurrentDateTime=> NowDt
         Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt CustomFormat: $'''yyyyMMdd_HHmmss''' Result=> Stamp
         Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt CustomFormat: $'''yyyy/MM/dd HH:mm:ss''' Result=> RecStamp
-        SET ShotPath TO $'''%ShotDir%\\%RowId%__%RowKey%__%Stamp%.png'''
-        SET FailShot TO $'''%ShotDir%\\fail__%RowId%__%RowKey%__%Stamp%.png'''
+        # エビデンスのファイル名。ここ 1 行を直せば命名が変わる。
+        # 使える差し込み: %RowId%（ID列）/ %RowKey%（業務キー）/ %Stamp%（日時）
+        SET ShotName TO $'''%RowId%__%RowKey%__%Stamp%'''
+        SET ShotPath TO $'''%ShotDir%\\%ShotName%.png'''
+        SET FailShot TO $'''%ShotDir%\\fail_%ShotName%.png'''
         File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 開始''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
 
         # 💬 注文 %Col2%（%Col1%）の確認を開始
