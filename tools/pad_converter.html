@@ -105,6 +105,9 @@
   <legend>3. オプション</legend>
   <div><label for="browser">ブラウザー (--pad-browser)</label>
     <select id="browser"><option value="edge">edge</option><option value="chrome">chrome</option></select></div>
+  <div><label for="shotName">エビデンスのファイル名</label>
+    <input type="text" id="shotName" value="%RowId%__%RowKey%__%Stamp%">
+    <span class="hint">%RowId% / %RowKey% / %Stamp% を差し込める</span></div>
   <div><label for="proxy">プロキシ (--proxy)</label>
     <input type="text" id="proxy" value="" placeholder="proxy.example.com:8080"></div>
   <div><label for="autodrv">ドライバー自動取得</label>
@@ -337,19 +340,25 @@ function folderGet(folderVar, filterVar, outVar) {
     "Files=> " + outVar;
 }
 
-// 起点画面の目印を、人が読める形にする。aria/ や text/ があればその名前を使う。
-// 「#POS_ORDERS が見つかりません」では利用者が何を探せばよいか分からない。
-function originHint(cands) {
+// 起点画面の案内文を、人が読める形で作る。
+// 「#POS_SHIPMENTS が見える画面まで進めて」では、その ID が画面のどこを
+// 指すのか利用者には分からない。次の順で探す。
+//   1. バッチ定義の originHint（例: "納入"）。人が書いたものが一番確実
+//   2. 候補の aria/ や text/ の名前。画面に出ている文字なので目で探せる
+//   3. どちらも無ければ、ID は出さずに文言だけで案内する
+function originHint(batch, cands) {
+  var named = String((batch && batch.originHint) || "").trim();
+  if (named) { return "「" + named + "」が見える画面"; }
   for (var i = 0; i < cands.length; i++) {
     var pres = ["aria/", "text/"];
     for (var k = 0; k < pres.length; k++) {
       if (cands[i].indexOf(pres[k]) === 0) {
         var name = cands[i].slice(pres[k].length).split("[")[0].trim();
-        if (name) { return "「" + name + "」"; }
+        if (name) { return "「" + name + "」が見える画面"; }
       }
     }
   }
-  return cands.length ? cands[0] : "";
+  return "繰り返しの最初の操作ができる画面";
 }
 
 var WEB_FLAGS = "EncodeRequestBody: False FailOnErrorStatus: False";
@@ -794,7 +803,8 @@ function buildRobin(batch, opt) {
   var proxy = opt.proxy || "";
   var autoDriver = !!opt.autoDriver;
   var browser = opt.browser || "edge";
-  var today = opt.today;   // {y,m,d}（テスト用に固定できるようにする）
+  var today = opt.today;
+  var shotName = opt.shotName || "%RowId%__%RowKey%__%Stamp%";   // {y,m,d}（テスト用に固定できるようにする）
 
   var jsOne = jsActOneline();
   var cols = [idCol];
@@ -815,7 +825,7 @@ function buildRobin(batch, opt) {
       break;
     }
   }
-  var oHint = originHint(firstTarget || []);
+  var oHint = originHint(batch, firstTarget || []);
   var recover = batch.recover || [];
   var teardown = batch.teardown || [];
 
@@ -1250,7 +1260,7 @@ function buildRobin(batch, opt) {
   A("# 普段のブラウザーでログインしても、フローはそのタブを見られない。");
   A("Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' " +
     "Message: " + robinStr("ログインし、起点画面" +
-      (oHint ? "（" + oHint + " が見える画面）" : "") +
+      (oHint ? "（" + oHint + "）" : "") +
       "まで進んでから[OK]。ブラウザーは閉じないでください。") + " " +
     "Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel " +
     "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn");
@@ -1285,7 +1295,7 @@ function buildRobin(batch, opt) {
     A("        Display.ShowMessageDialog.ShowMessage Title: " +
       robinStr("起点画面ではありません") + " Message: " +
       robinStr("起点画面が出ていません。" + oHint +
-        " が見える画面まで進めて[OK]。（%StartTry% 回目）") +
+        "まで進めて[OK]。（%StartTry% 回目）") +
       " Icon: Display.Icon.Warning Buttons: Display.Buttons.OKCancel " +
       "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> StartBtn");
     A("        IF StartBtn = " + robinStr("Cancel") + " THEN");
@@ -1415,8 +1425,11 @@ function buildRobin(batch, opt) {
     "CustomFormat: $'''yyyyMMdd_HHmmss''' Result=> Stamp");
   A(inner + "Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt " +
     "CustomFormat: $'''yyyy/MM/dd HH:mm:ss''' Result=> RecStamp");
-  A(inner + "SET ShotPath TO $'''%ShotDir%\\\\%RowId%__%RowKey%__%Stamp%.png'''");
-  A(inner + "SET FailShot TO $'''%ShotDir%\\\\fail__%RowId%__%RowKey%__%Stamp%.png'''");
+  A(inner + "# エビデンスのファイル名。ここ 1 行を直せば命名が変わる。");
+  A(inner + "# 使える差し込み: %RowId%（ID列）/ %RowKey%（業務キー）/ %Stamp%（日時）");
+  A(inner + "SET ShotName TO " + robinStr(shotName));
+  A(inner + "SET ShotPath TO $'''%ShotDir%\\\\%ShotName%.png'''");
+  A(inner + "SET FailShot TO $'''%ShotDir%\\\\fail_%ShotName%.png'''");
   A(inner + "File.WriteText File: LogFile " +
     "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 開始''' AppendNewLine: True " +
     "IfFileExists: File.IfFileExists.Append");
@@ -1813,6 +1826,7 @@ root.PadConvert = {
         idCol: idCol,
         driverExe: $("driver").value.trim(),
         outDir: $("outdir").value.trim(),
+        shotName: $("shotName").value.trim(),
         proxy: $("proxy").value.trim(),
         autoDriver: $("autodrv").checked,
         browser: $("browser").value

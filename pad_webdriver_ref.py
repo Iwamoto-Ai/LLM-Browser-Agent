@@ -685,6 +685,7 @@ def _lint_robin(lines: list, log=print) -> list:
 Q_ = "'''"   # Robin のリテラル区切り
 
 def write_robin(batch: dict, details_path: str, id_col: str, path: str,
+                shot_name: str = "%RowId%__%RowKey%__%Stamp%",
                 driver_exe: str = r"C:\temp\msedgedriver.exe",
                 out_dir: str = r"C:\temp", proxy: str = "",
                 auto_driver: bool = False,
@@ -717,7 +718,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             if _cands and not any("{{" in c for c in _cands):
                 first_target = _cands
             break
-    origin_hint = _origin_hint(first_target or [])
+    origin_hint = _origin_hint(batch, first_target or [])
     recover = batch.get("recover", [])
     teardown = batch.get("teardown", [])
 
@@ -1169,7 +1170,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# 普段のブラウザーでログインしても、フローはそのタブを見られない。")
     _lmsg = _robin_str(
         "ログインし、起点画面"
-        + (f"（{origin_hint} が見える画面）" if origin_hint else "")
+        + (f"（{origin_hint}）" if origin_hint else "")
         + "まで進んでから[OK]。ブラウザーは閉じないでください。")
     A("Display.ShowMessageDialog.ShowMessage Title: $\'\'\'手動ログイン\'\'\' "
       f"Message: {_lmsg} "
@@ -1189,7 +1190,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
         A("# 見つからなければ、その場で進めてもらって何度でも試せるようにする。")
         A("# 1 度きりで中止すると、画面を直してから実行し直すことになって手間が増える。")
         body_args = json.dumps([first_target, "find", ""], ensure_ascii=False)
-        hint = _origin_hint(first_target)
+        hint = origin_hint
         A(f"SET ActBody TO $'''{{\"script\": \"%JsAct%\", \"args\": {body_args}}}'''")
         A("SET StartOk TO False")
         A("SET StartTry TO 0")
@@ -1207,7 +1208,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
         A("        SET StartTry TO StartTry + 1")
         _msg = _robin_str(
             "起点画面が出ていません。" + hint +
-            " が見える画面まで進めて[OK]。（%StartTry% 回目）")
+            "まで進めて[OK]。（%StartTry% 回目）")
         A("        Display.ShowMessageDialog.ShowMessage Title: "
           + _robin_str("起点画面ではありません")
           + f" Message: {_msg} Icon: Display.Icon.Warning "
@@ -1343,8 +1344,11 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
       "CustomFormat: $'''yyyyMMdd_HHmmss''' Result=> Stamp")
     A(f"{inner}Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt "
       "CustomFormat: $'''yyyy/MM/dd HH:mm:ss''' Result=> RecStamp")
-    A(f"{inner}SET ShotPath TO $'''%ShotDir%\\\\%RowId%__%RowKey%__%Stamp%.png'''")
-    A(f"{inner}SET FailShot TO $'''%ShotDir%\\\\fail__%RowId%__%RowKey%__%Stamp%.png'''")
+    A(f"{inner}# エビデンスのファイル名。ここ 1 行を直せば命名が変わる。")
+    A(f"{inner}# 使える差し込み: %RowId%（ID列）/ %RowKey%（業務キー）/ %Stamp%（日時）")
+    A(f"{inner}SET ShotName TO {_robin_str(shot_name)}")
+    A(f"{inner}SET ShotPath TO $'''%ShotDir%\\\\%ShotName%.png'''")
+    A(f"{inner}SET FailShot TO $'''%ShotDir%\\\\fail_%ShotName%.png'''")
     A(f"{inner}File.WriteText File: LogFile "
       "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 開始''' AppendNewLine: True "
       "IfFileExists: File.IfFileExists.Append")
@@ -1490,18 +1494,26 @@ def _folder_get(folder_var: str, filter_var: str, out_var: str) -> str:
             f"Files=> {out_var}")
 
 
-def _origin_hint(cands: list) -> str:
-    """起点画面の目印を、人が読める形にする。
+def _origin_hint(batch: dict, cands: list) -> str:
+    """起点画面の案内文を、人が読める形で作る。
 
-    aria/ や text/ の候補があればその名前を使う。無ければ生の指定をそのまま出す。
-    「#POS_ORDERS が見つかりません」では利用者が何を探せばよいか分からないため。"""
+    「#POS_SHIPMENTS が見える画面まで進めて」では、その ID が画面のどこを
+    指すのか利用者には分からない。次の順で探す。
+
+      1. バッチ定義の originHint（例: "納入"）。人が書いたものが一番確実
+      2. 候補の aria/ や text/ の名前。画面に出ている文字なので目で探せる
+      3. どちらも無ければ、ID は出さずに文言だけで案内する
+    """
+    named = str(batch.get("originHint", "")).strip()
+    if named:
+        return "「" + named + "」が見える画面"
     for c in cands:
         for pre in ("aria/", "text/"):
             if c.startswith(pre):
                 name = c[len(pre):].split("[")[0].strip()
                 if name:
-                    return "「" + name + "」"
-    return cands[0] if cands else ""
+                    return "「" + name + "」が見える画面"
+    return "繰り返しの最初の操作ができる画面"
 
 
 def _warn_exec_paths(args) -> None:
@@ -1589,6 +1601,10 @@ def main() -> None:
     p.add_argument("--pad-browser", choices=["edge", "chrome"], default="edge",
                    help="生成する Robin が使うブラウザー（既定 edge）。"
                         "生成後も Robin 冒頭の Browser を書き換えれば切り替えられる")
+    p.add_argument("--shot-name", default="%RowId%__%RowKey%__%Stamp%",
+                   help="エビデンスのファイル名（拡張子なし）。"
+                        "%RowId% / %RowKey% / %Stamp% を差し込める。"
+                        "例: 【注文受諾】%RowId%_〇〇株式会社")
     p.add_argument("--auto-driver", action="store_true",
                    help="Selenium Manager でドライバーを自動取得する行を入れる"
                         "（selenium-manager-windows.exe を実行環境の BaseDir に置くこと）")
@@ -1616,6 +1632,7 @@ def main() -> None:
 
     if args.robin:
         out = write_robin(batch, args.details, id_col, args.robin,
+                          args.shot_name,
                           args.driver_exe, args.pad_out_dir, args.proxy,
                           args.auto_driver, args.pad_browser)
         js_out = out[:-len(".robin.txt")] + ".jsact.js" if out.endswith(".robin.txt") \
