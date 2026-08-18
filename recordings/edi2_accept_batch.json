@@ -19,6 +19,17 @@
     {
       "type": "navigate",
       "url": "file:///C:/temp/index.html"
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI取引情報入力・照会"
+        ],
+        [
+          "text/取引情報入力・照会"
+        ]
+      ]
     }
   ],
   "loop": [

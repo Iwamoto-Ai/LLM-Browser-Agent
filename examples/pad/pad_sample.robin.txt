@@ -6,7 +6,7 @@
 # 処理内容：明細 1 件につき 6 操作を繰り返す（ID列: ID ／ 業務キー: KEY）
 #           開始URL: file:///C:/temp/sample.html
 #           明細CSV: sample_batch.csv
-# 備考：2026/08/17 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
+# 備考：2026/08/18 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
 # ============================================================
 # LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
 # Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).
@@ -362,18 +362,33 @@ Web.InvokeWebService.InvokeWebService Url: GoUrl Method: Web.Method.Post Accept:
 WAIT 2
 
 # ---------- 手動ログイン ----------
-# フローを止めて人がログインし、繰り返しの起点画面まで進める。
+# フローを止めて人がログインする。ここで止めるのはログインだけで、
+# 起点画面までの移動は[OK]のあと機械が行う。
 # PAD はパスワードを一度も受け取らないので、変数ペイン・実行ログ・
 # エラーメッセージのどこにも残らない。生成物にも入らない。
-# ログイン後の画面構成はサイト側の都合で変わることがあり、機械的に
-# 辿らせるより人が進めるほうが確実で、修正も要らない。
 # WebDriver は自分が起動したブラウザーしか操作できない。別に開いてある
 # 普段のブラウザーでログインしても、フローはそのタブを見られない。
-Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' Message: $'''ログインし、起点画面（「Order key」が見える画面）まで進んでから[OK]。ブラウザーは閉じないでください。''' Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn
+Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' Message: $'''ログインしたら[OK]。そのあと自動で起点画面まで進みます。ブラウザーは閉じないでください。''' Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn
 IF LoginBtn = $'''Cancel''' THEN
     SET Halt TO True
     SET HaltReason TO $'''手動ログインがキャンセルされました'''
 END
+
+IF Halt = False THEN
+# ---------- 起点画面まで進む ----------
+# ログイン直後の画面から、繰り返しの起点までメニューを辿る。
+# ここは通らなくても構わない（すでに起点にいる場合など）。
+# 起点に着いたかどうかは次の確認で見る。
+    # click #btn-signin
+    SET ActBody TO $'''{"script": "%JsAct%", "args": [["#btn-signin", "aria/Sign in"], "click", ""]}'''
+    Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+    WAIT 1
+    # click #menu-orders
+    SET ActBody TO $'''{"script": "%JsAct%", "args": [["#menu-orders", "aria/Orders"], "click", ""]}'''
+    Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+    WAIT 1
+END
+
 
 # ---------- 起点画面かどうかを確認する ----------
 # ループ最初の操作対象がこの画面にあるかを、クリックせずに調べる。
