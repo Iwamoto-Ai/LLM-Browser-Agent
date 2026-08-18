@@ -1135,10 +1135,11 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# セッションが張れていなければ、以降の URL 変数が存在しないので入らない。")
     A("IF Halt = False THEN")
     A("SET RowError TO $''''''")
-    # 手動ログイン方式なので、setup で再生するのは「ページを開く」と
-    # 「ウィンドウサイズ」だけ。ログインも起点画面までの移動も人がやる。
-    # 資格情報を見分けて除くのではなく、そもそもその範囲を読まないので、
-    # 見分けを外して平文が残る、という事故が起きない。
+    # 手動ログイン方式。パスワードは PAD が一度も受け取らない。
+    # ただし「起点画面まで進む」のは機械にやらせる。ログイン直後から録画を
+    # 始めてもらえば、録画にはメニュー移動だけが入り、資格情報は現れない。
+    # 起点が分かりにくいサイトでは、人に「起点まで進んでください」と言うより
+    # 機械が辿るほうが確実で、説明も要らない。
     n = 0
     for st in setup:
         t_ = st.get("type")
@@ -1161,17 +1162,15 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             continue
     A("")
     A("# ---------- 手動ログイン ----------")
-    A("# フローを止めて人がログインし、繰り返しの起点画面まで進める。")
+    A("# フローを止めて人がログインする。ここで止めるのはログインだけで、")
+    A("# 起点画面までの移動は[OK]のあと機械が行う。")
     A("# PAD はパスワードを一度も受け取らないので、変数ペイン・実行ログ・")
     A("# エラーメッセージのどこにも残らない。生成物にも入らない。")
-    A("# ログイン後の画面構成はサイト側の都合で変わることがあり、機械的に")
-    A("# 辿らせるより人が進めるほうが確実で、修正も要らない。")
     A("# WebDriver は自分が起動したブラウザーしか操作できない。別に開いてある")
     A("# 普段のブラウザーでログインしても、フローはそのタブを見られない。")
     _lmsg = _robin_str(
-        "ログインし、起点画面"
-        + (f"（{origin_hint}）" if origin_hint else "")
-        + "まで進んでから[OK]。ブラウザーは閉じないでください。")
+        "ログインしたら[OK]。そのあと自動で起点画面まで進みます。"
+        "ブラウザーは閉じないでください。")
     A("Display.ShowMessageDialog.ShowMessage Title: $\'\'\'手動ログイン\'\'\' "
       f"Message: {_lmsg} "
       "Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel "
@@ -1181,6 +1180,32 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("    SET Halt TO True")
     A(f"    SET HaltReason TO {_robin_str('手動ログインがキャンセルされました')}")
     A("END")
+    A("")
+
+    # ---- ログイン後、起点画面まで進む ----
+    # 録画に残っているメニュー移動をそのまま再生する。失敗しても止めない。
+    # 起点に着いたかどうかは、このあとの確認で見るので、ここで判定する必要はない。
+    # 画面がすでに進んでいる場合に「見つかりません」で止めるほうが困る。
+    # クリックだけを再生する。入力（change）は扱わない。
+    # SECRET に置き換えていない録画では、入力値にパスワードがそのまま
+    # 残っている。値を読まなければ、生成物に出る余地がない。
+    # 起点までの移動は普通メニューのクリックだけで足りる。
+    move = [st for st in setup if st.get("type") in ("click", "doubleClick")]
+    if move:
+        A("IF Halt = False THEN")
+        A("# ---------- 起点画面まで進む ----------")
+        A("# ログイン直後の画面から、繰り返しの起点までメニューを辿る。")
+        A("# ここは通らなくても構わない（すでに起点にいる場合など）。")
+        A("# 起点に着いたかどうかは次の確認で見る。")
+        for st in move:
+            cands = _candidates(st)
+            if not _robin_filter_candidates(cands):
+                continue
+            for ln in _robin_act_best_effort(cands, "click", "", "    ",
+                                             f"click {cands[0]}", cols):
+                A(ln)
+        A("END")
+        A("")
     A("")
     # ---- 起点画面の確認 ----
     # 手動ログイン運用では、人がどこまで進めて[OK]を押したかで結果が変わる。
@@ -1569,6 +1594,14 @@ SECTION_STEPS = {
 def _warn_unsupported_steps(batch: dict) -> list:
     """バッチ定義の中で、そのセクションでは無視される種別を拾う。"""
     warns = []
+    # 手動ログイン専用なので、ログイン操作は変換に含めない。録画に混ざって
+    # いたら知らせる。生成物には入らないが、録画ファイル自体に平文が残る。
+    if any(st.get("type") == "change" for st in batch.get("setup") or []):
+        warns.append(
+            "setup の入力操作は変換に含めません（PAD 版は手動ログイン専用）。"
+            "起点までの移動はクリックだけを再生します。"
+            "録画はログイン直後から始めてください。"
+            "録画 JSON にパスワードが残っている場合は削除を")
     for sec, allowed in SECTION_STEPS.items():
         for i, st in enumerate(batch.get(sec) or [], 1):
             t = st.get("type", "")
