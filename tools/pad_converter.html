@@ -1603,6 +1603,8 @@ function csvHeaders(text) {
 
 root.PadConvert = {
   hasCredentials: hasCredentials,
+  // 共通 JavaScript の本文。練習サイトでの再生テストから使う
+  jsAct: function () { return JS_ACT.join(" "); },
   isRecording: isRecording,
   usableSteps: usableSteps,
   describeStep: describeStep,
