@@ -17,6 +17,39 @@
     {
       "type": "navigate",
       "url": "file:///C:/temp/index.html"
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI仕入先"
+        ],
+        [
+          "text/📁 仕入先（練習）"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI取引情報入力・照会"
+        ],
+        [
+          "text/📁 取引情報入力・照会"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#PosHpgGenericUrl3c"
+        ],
+        [
+          "text/ホームページ"
+        ]
+      ]
     }
   ],
   "loop": [
@@ -31,7 +64,7 @@
           "#LI帳票出力"
         ],
         [
-          "text/検収状況一覧"
+          "text/帳票出力"
         ]
       ]
     },
@@ -131,6 +164,42 @@
       "selectors": [
         [
           "#homeIcon"
+        ],
+        [
+          "text/ホーム"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI仕入先"
+        ],
+        [
+          "text/📁 仕入先（練習）"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI取引情報入力・照会"
+        ],
+        [
+          "text/📁 取引情報入力・照会"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#PosHpgGenericUrl3c"
+        ],
+        [
+          "text/ホームページ"
         ]
       ]
     }
@@ -141,6 +210,42 @@
       "selectors": [
         [
           "#homeIcon"
+        ],
+        [
+          "text/ホーム"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI仕入先"
+        ],
+        [
+          "text/📁 仕入先（練習）"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI取引情報入力・照会"
+        ],
+        [
+          "text/📁 取引情報入力・照会"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#PosHpgGenericUrl3c"
+        ],
+        [
+          "text/ホームページ"
         ]
       ]
     }

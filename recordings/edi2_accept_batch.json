@@ -24,10 +24,32 @@
       "type": "click",
       "selectors": [
         [
+          "#LI仕入先"
+        ],
+        [
+          "text/📁 仕入先（練習）"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
           "#LI取引情報入力・照会"
         ],
         [
-          "text/取引情報入力・照会"
+          "text/📁 取引情報入力・照会"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#PosHpgGenericUrl3c"
+        ],
+        [
+          "text/ホームページ"
         ]
       ]
     }
@@ -217,6 +239,20 @@
       "selectors": [
         [
           "#homeIcon"
+        ],
+        [
+          "text/ホーム"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI仕入先"
+        ],
+        [
+          "text/📁 仕入先（練習）"
         ]
       ]
     },
@@ -225,6 +261,20 @@
       "selectors": [
         [
           "#LI取引情報入力・照会"
+        ],
+        [
+          "text/📁 取引情報入力・照会"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#PosHpgGenericUrl3c"
+        ],
+        [
+          "text/ホームページ"
         ]
       ]
     }
@@ -235,6 +285,20 @@
       "selectors": [
         [
           "#homeIcon"
+        ],
+        [
+          "text/ホーム"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI仕入先"
+        ],
+        [
+          "text/📁 仕入先（練習）"
         ]
       ]
     },
@@ -243,6 +307,20 @@
       "selectors": [
         [
           "#LI取引情報入力・照会"
+        ],
+        [
+          "text/📁 取引情報入力・照会"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#PosHpgGenericUrl3c"
+        ],
+        [
+          "text/ホームページ"
         ]
       ]
     }
