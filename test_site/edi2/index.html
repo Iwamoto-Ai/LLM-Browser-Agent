@@ -38,6 +38,7 @@
 <script>
 /* 練習用ダミーサイト（Oracle iSupplier Portal 風）。実在のシステム・データとは無関係。
    実 EBS の録画と同じ要素 ID（usernameField / POS_ORDERS / SrchBtn / Value_0 /
+   PosHpgGenericUrl3c /
    ActionGoBtn / PosSubmitBtn / N58:PosPoNumber:0 …）を持たせ、
    発注確認（注文受諾）バッチの検証を実環境なしで行えるようにしている。
    画面ごとに #app を描画し直すことで、実サイトの「別ページ遷移」を模倣する。 */
@@ -69,24 +70,38 @@ function viewLogin(msg) {
   });
 }
 
+/* ログイン直後の画面。実サイトと同じく、ナビゲータのフォルダを開いてから
+   「取引情報入力・照会」へ進む。 */
 function viewEbsHome() {
   app.innerHTML = header('E-Business Suite') +
     '<div class="main"><h2>ホーム</h2>' +
     '<div style="border:1px solid #ddd;width:320px;padding:10px">' +
-    '<b>ナビゲータ</b><br><br>📁 仕入先（練習）<br>' +
-    '<div style="margin-left:16px">📄 納入一括登録（練習では未実装）<br>' +
-    '📁 取引情報入力・照会<br>' +
-    '<div style="margin-left:16px"><a id="LI取引情報入力・照会" class="polink">' +
-    '<div class="textdiv">取引情報入力・照会</div></a></div>' +
-    '📁 帳票出力<br>' +
-    '<div style="margin-left:16px"><a id="LI帳票出力" class="polink">' +
-    '<div class="textdiv">検収状況一覧</div></a></div>' +
-    '</div></div></div>';
+    '<b>ナビゲータ</b><br><br>' +
+    '<a id="LI仕入先" class="polink"><div class="textdiv">📁 仕入先（練習）</div></a>' +
+    '<div id="naviTree"></div>' +
+    '</div></div>';
   bindHome();
-  document.getElementById('LI取引情報入力・照会')
+  document.getElementById('LI仕入先').addEventListener('click', function () {
+    document.getElementById('naviTree').innerHTML =
+      '<div style="margin-left:16px">📄 納入一括登録（練習では未実装）<br>' +
+      '<a id="LI取引情報入力・照会" class="polink">' +
+      '<div class="textdiv">📁 取引情報入力・照会</div></a></div>';
+    document.getElementById('LI取引情報入力・照会')
+      .addEventListener('click', viewPosHpg);
+  });
+}
+
+/* 取引情報入力・照会。ここから「ホームページ」で仕入先ホームへ入る。
+   実サイトでも #PosHpgGenericUrl3c を 1 回押す必要がある。 */
+function viewPosHpg() {
+  app.innerHTML = header('E-Business Suite') +
+    '<div class="crumb">取引情報入力・照会 &gt;</div>' +
+    '<div class="main"><h2>取引情報入力・照会</h2>' +
+    '<p><a class="polink" id="PosHpgGenericUrl3c">ホームページ</a></p>' +
+    '<p class="note">「ホームページ」から仕入先ホーム（繰り返しの起点）へ進みます。</p></div>';
+  bindHome();
+  document.getElementById('PosHpgGenericUrl3c')
     .addEventListener('click', viewIspHome);
-  document.getElementById('LI帳票出力')
-    .addEventListener('click', viewKenshuJoken);
 }
 
 function viewIspHome() {
@@ -94,10 +109,12 @@ function viewIspHome() {
     '<div class="tabs"><a>仕入先ホーム</a><a id="POS_ORDERS">発注</a>' +
     '<a id="POS_SHIPMENTS">納入</a><a>財務</a><a>管理</a></div>' +
     '<div class="main"><h2>仕入先ホーム（練習）</h2>' +
-    '<p>通知・発注一覧・納入一覧のダミー表示。上のタブ「発注」または「納入」から進みます。</p></div>';
+    '<p>通知・発注一覧・納入一覧のダミー表示。上のタブ「発注」または「納入」から進みます。</p>' +
+    '<p><a class="polink" id="LI帳票出力">帳票出力</a>（検収状況一覧）</p></div>';
   bindHome();
   document.getElementById('POS_ORDERS').addEventListener('click', viewHattyuTab);
   document.getElementById('POS_SHIPMENTS').addEventListener('click', viewNounyuTab);
+  document.getElementById('LI帳票出力').addEventListener('click', viewKenshuJoken);
 }
 
 function viewHattyuTab() {
@@ -237,10 +254,10 @@ function viewNounyuMenu() {
     '<div class="tabs"><a>仕入先ホーム</a><a>発注</a><a><b>納入</b></a><a>財務</a><a>管理</a></div>' +
     '<div class="tabs"><a><b>納入</b></a><a>納入予定</a><a>納期遅延受入</a></div>' +
     '<div class="main"><h2>納入</h2>' +
-    '<p><a class="polink" id="PosHpgGenericUrl3c">納入登録</a></p>' +
+    '<p><a class="polink" id="PosShipCreate">納入登録</a></p>' +
     '<p class="note">練習では「納入登録」から発注番号を検索して登録します。</p></div>';
   bindHome();
-  document.getElementById('PosHpgGenericUrl3c')
+  document.getElementById('PosShipCreate')
     .addEventListener('click', viewNounyuSearch);
 }
 
