@@ -44,6 +44,8 @@ jobs:
         run: npm install --no-save jsdom
       - name: Smoke test the converter page
         run: node tools/smoke_converter.mjs
+      - name: Replay practice batches against the practice site
+        run: node tools/replay_practice.mjs
 
   # 2) 配管テスト: 実ブラウザ(Edge)でローカルテストサイトを操作（LLM 不要）
   selftest-windows:
