@@ -18,6 +18,24 @@
   .hdr .brand { font-weight: bold; }
   .hdr a { color: #fff; text-decoration: none; }
   .hdr .right { margin-left: auto; font-size: 12px; }
+  .hdr .ham { font-size: 18px; }
+  .hdr .prod { font-weight: normal; }
+  .hdr .icons { margin-left: 40px; display: flex; gap: 16px; align-items: center; }
+  .hdr .icons a { cursor: pointer; font-size: 15px; }
+  .hdr .loginid { background: #35637e; padding: 2px 22px; border-radius: 2px; }
+  .tabs a.on { color: #000; font-weight: bold; text-decoration: none; }
+  .subtabs { border-bottom: 1px solid #ccc; padding: 6px 16px; display: flex; gap: 16px;
+             font-size: 13px; }
+  .subtabs a { color: #06c; text-decoration: none; cursor: pointer; }
+  .sect { display: flex; gap: 28px; }
+  .sect > div { flex: 1; }
+  .side { width: 300px; border: 1px solid #b7cfe3; }
+  .side h3 { background: #dfeaf4; margin: 0; padding: 5px 10px; font-size: 13px; }
+  .side ul { margin: 6px 0 10px; padding-left: 26px; font-size: 13px; }
+  .side li { margin: 3px 0; }
+  .secthead { display: flex; align-items: center; gap: 8px; margin-top: 18px; }
+  .secthead h3 { margin: 0; font-size: 15px; }
+  .allbtn { margin-left: auto; }
   .tabs { border-bottom: 1px solid #ccc; padding: 8px 16px; display: flex; gap: 18px; }
   .tabs a { color: #06c; text-decoration: none; cursor: pointer; }
   .crumb { padding: 6px 16px; font-size: 12px; color: #06c; }
@@ -43,13 +61,44 @@
    発注確認（注文受諾）バッチの検証を実環境なしで行えるようにしている。
    画面ごとに #app を描画し直すことで、実サイトの「別ページ遷移」を模倣する。 */
 var app = document.getElementById('app');
+
+/* 練習用の発注データ。実サイトと同じく複数行あり、目的の 1 件を
+   検索して選ぶところが練習になる。900000000001〜4 は明細 CSV と対応。 */
+var PO_LIST = [
+  { no: '900000000001', name: '更新／練習サンプル株式会社／Ａ００３２２１８０９－Ｊ５００',
+    date: '2026/07/06 12:34:05', amt: '16,600', buyer: '- - / 法人発注代行 A' },
+  { no: '900000000002', name: '保守／練習サンプル株式会社／Ａ００３６９５０２２－Ｊ０３８',
+    date: '2026/07/06 11:20:41', amt: '1,005,700', buyer: '- - / 法人発注代行 A' },
+  { no: '900000000003', name: '物品／練習サンプル株式会社／Ａ００３５６４６３５－Ｊ００７',
+    date: '2026/07/05 15:34:06', amt: '33,600', buyer: '- - / 法人発注代行 B' },
+  { no: '900000000004', name: '役務／練習サンプル株式会社／Ａ００３２１０２９５－Ｊ０２１',
+    date: '2026/07/03 15:14:52', amt: '840,000', buyer: '- - / 法人発注代行 B' },
+  { no: '102001515627', name: '更新／別会社／Ａ００３３８４０７７－Ｊ０４１',
+    date: '2026/07/02 09:11:02', amt: '60,000', buyer: '- - / 法人発注代行 C' }
+];
+
+function poByNo(no) {
+  for (var i = 0; i < PO_LIST.length; i++) {
+    if (PO_LIST[i].no === no) { return PO_LIST[i]; }
+  }
+  // 明細に無い番号でも 1 件目の内容で表示する（練習用）
+  var p = { no: no, name: PO_LIST[0].name, date: PO_LIST[0].date,
+            amt: PO_LIST[0].amt, buyer: PO_LIST[0].buyer };
+  return p;
+}
 var currentPo = '';
 
+/* 実サイトのヘッダーに寄せる。右側のアイコン類は飾りだが、
+   「ホーム」がどこにあるかを実物と同じ位置に置く。 */
 function header(sub) {
   return '<div class="hdr">' +
-    '<span class="brand">ORACLE (練習) ' + (sub || 'E-Business Suite') + '</span>' +
-    '<a id="homeIcon">ホーム</a>' +
-    '<span class="right">ログイン名 demo（練習）</span></div>';
+    '<span class="ham">☰</span>' +
+    '<span class="brand">ORACLE</span> <span class="prod">' +
+    (sub || 'E-Business Suite') + '</span>' +
+    '<span class="icons"><a id="homeIcon" title="ホーム">🏠</a>' +
+    '<span title="お気に入り">★</span><span title="設定">⚙</span></span>' +
+    '<span class="right">ログイン名 <span class="loginid">demo（練習）</span>' +
+    ' <span title="ヘルプ">❓</span> <span title="ログアウト">⏻</span></span></div>';
 }
 
 /* ---------- 各画面 ---------- */
@@ -104,13 +153,42 @@ function viewPosHpg() {
     .addEventListener('click', viewIspHome);
 }
 
+/* 仕入先ホーム＝繰り返しの起点。実サイトと同じく、通知・発注一覧・納入一覧と
+   右側のメニューを並べる。どこを押すか迷う練習になるよう、情報量も寄せている。 */
 function viewIspHome() {
+  var noti = PO_LIST.slice(0, 5).map(function (p) {
+    return '<tr><td><a class="polink">発注受理依頼 ' + p.no + '、0</a></td>' +
+           '<td>' + p.date + '</td></tr>';
+  }).join('');
+  var poRows = PO_LIST.slice(0, 5).map(function (p) {
+    return '<tr><td><a class="polink">' + p.no + '</a></td><td>' + p.name +
+           '</td><td>' + p.date + '</td></tr>';
+  }).join('');
   app.innerHTML = header('iSupplier Portal') +
-    '<div class="tabs"><a>仕入先ホーム</a><a id="POS_ORDERS">発注</a>' +
+    '<div class="tabs"><a class="on">仕入先ホーム</a><a id="POS_ORDERS">発注</a>' +
     '<a id="POS_SHIPMENTS">納入</a><a>財務</a><a>管理</a></div>' +
-    '<div class="main"><h2>仕入先ホーム（練習）</h2>' +
-    '<p>通知・発注一覧・納入一覧のダミー表示。上のタブ「発注」または「納入」から進みます。</p>' +
-    '<p><a class="polink" id="LI帳票出力">帳票出力</a>（検収状況一覧）</p></div>';
+    '<div class="main"><p>検索 <select><option>発注番号</option></select> ' +
+    '<input size="20"> <button>進む</button></p>' +
+    '<div class="sect"><div>' +
+    '<div class="secthead"><h3>📋 通知</h3><button class="allbtn">全件リスト</button></div>' +
+    '<table class="grid"><tr><th>件名</th><th>日付 △</th></tr>' + noti + '</table>' +
+    '<div class="secthead"><h3>📄 発注一覧</h3><button class="allbtn">全件リスト</button></div>' +
+    '<table class="grid"><tr><th>発注番号</th><th>件名</th><th>発注日</th></tr>' +
+    poRows + '</table>' +
+    '<div class="secthead"><h3>🚚 納入一覧</h3><button class="allbtn">全件リスト</button></div>' +
+    '<table class="grid"><tr><th>納入番号</th></tr>' +
+    '<tr><td><a class="polink">333580</a></td></tr>' +
+    '<tr><td><a class="polink">333581</a></td></tr></table>' +
+    '</div><div class="side">' +
+    '<h3>注文</h3><ul><li><a class="polink">発注</a></li>' +
+    '<li><a class="polink">購買履歴</a></li></ul>' +
+    '<h3>納入</h3><ul><li><a class="polink">納入予定</a></li>' +
+    '<li><a class="polink">納期遅延受入</a></li><li><a class="polink">納入</a></li></ul>' +
+    '<h3>検収</h3><ul><li><a class="polink" id="LI帳票出力">検収状況一覧</a></li>' +
+    '<li><a class="polink">返品</a></li><li><a class="polink">納期実績</a></li></ul>' +
+    '<h3>請求書</h3><ul><li><a class="polink">請求書</a></li></ul>' +
+    '<h3>支払</h3><ul><li><a class="polink">支払</a></li></ul>' +
+    '</div></div></div>';
   bindHome();
   document.getElementById('POS_ORDERS').addEventListener('click', viewHattyuTab);
   document.getElementById('POS_SHIPMENTS').addEventListener('click', viewNounyuTab);
@@ -132,13 +210,36 @@ var accepted = {};
 
 function poStatus(po) { return accepted[po] ? '受理済' : '要確認'; }
 
+function poRow(p, sel) {
+  return '<tr>' + (sel ? '<td><input type="radio"></td>' : '') +
+    '<td><a class="polink">' + p.no + '</a></td><td>0</td><td>' + p.name + '</td>' +
+    '<td>' + p.date + '</td><td>' + p.buyer + '</td><td>' + p.amt + '</td>' +
+    '<td>JPY</td><td>' + poStatus(p.no) + '</td><td></td><td>📎1</td></tr>';
+}
+
+function poHead(sel) {
+  return '<table class="grid"><tr>' + (sel ? '<th>選択</th>' : '') +
+    '<th>発注番号 △</th><th>改訂</th><th>件名</th><th>発注日 △</th>' +
+    '<th>購買担当</th><th>金額</th><th>通貨</th><th>ステータス</th>' +
+    '<th>変更要求ステータス</th><th>添付</th></tr>';
+}
+
 function viewPoList() {
   app.innerHTML = header('iSupplier Portal') +
     '<div class="tabs"><a>仕入先ホーム</a><a><b>発注</b></a><a>納入</a><a>財務</a><a>管理</a></div>' +
-    '<div class="main"><h2>発注</h2>' +
+    '<div class="subtabs"><a><b>発注</b></a><a>購買履歴</a></div>' +
+    '<div class="crumb">仕入先ホーム &gt;</div>' +
+    '<div class="main"><div class="secthead"><h2>発注</h2>' +
+    '<button class="allbtn">エクスポート</button></div>' +
+    '<h3>表示</h3>' +
     '<p>表示 <select><option>全発注</option></select> <button>進む</button> ' +
+    '<span style="margin-left:40px"></span>' +
     '<button id="SrchBtn">拡張検索</button></p>' +
-    '<p class="note">練習では「拡張検索」から発注番号で検索します。</p></div>';
+    '<p>発注の選択: <button>確認</button> <button>変更履歴の表示</button> ' +
+    '<span class="note">行1から' + PO_LIST.length + '</span></p>' +
+    poHead(true) + PO_LIST.map(function (p) { return poRow(p, true); }).join('') +
+    '</table>' +
+    '<p class="note">練習では「拡張検索」から発注番号で 1 件に絞ります。</p></div>';
   bindHome();
   document.getElementById('SrchBtn').addEventListener('click', viewAdvSearch);
 }
@@ -146,23 +247,41 @@ function viewPoList() {
 function viewAdvSearch() {
   app.innerHTML = header('iSupplier Portal') +
     '<div class="tabs"><a>仕入先ホーム</a><a><b>発注</b></a><a>納入</a><a>財務</a><a>管理</a></div>' +
-    '<div class="main"><h2>発注 — 拡張検索</h2>' +
-    '<p>発注番号 <select><option>等しい</option></select> ' +
-    '<input id="Value_0" size="16" autocomplete="off"> ' +
-    '<button id="AdvGoBtn">進む</button></p>' +
-    '<div id="results"><p class="note">検索するには発注番号を入力して「進む」。</p></div></div>';
+    '<div class="subtabs"><a><b>発注</b></a><a>購買履歴</a></div>' +
+    '<div class="crumb">仕入先ホーム &gt;</div>' +
+    '<div class="main"><div class="secthead"><h2>発注</h2>' +
+    '<button class="allbtn">エクスポート</button></div>' +
+    '<h3>拡張検索</h3>' +
+    '<p class="note">結果セットに表示するデータをフィルタするには、' +
+    'パラメータおよび値を指定してください。</p>' +
+    '<p>一致 <input type="radio" checked> すべて <input type="radio"> いずれか</p>' +
+    '<table><tr><td>発注番号</td><td><select><option>等しい</option></select></td>' +
+    '<td><input id="Value_0" size="18" autocomplete="off"></td></tr>' +
+    '<tr><td>文書タイプ</td><td><select><option>等しい</option></select></td>' +
+    '<td><input size="18"> 🔍</td></tr>' +
+    '<tr><td>発注日</td><td><select><option>等しい</option></select></td>' +
+    '<td><input size="18" placeholder="(2026/07/26)"> 📅</td></tr>' +
+    '<tr><td>購買担当</td><td><select><option>等しい</option></select></td>' +
+    '<td><input size="18"> 🔍</td></tr></table>' +
+    '<p><button id="AdvGoBtn">進む</button> <button>消去</button> ' +
+    '<span style="margin-left:24px">追加 <select><option>オーダー有効日</option></select> ' +
+    '<button>追加</button></span></p>' +
+    '<p>発注の選択: <button>確認</button> <button>変更履歴の表示</button></p>' +
+    '<div id="results">' + poHead(true) +
+    PO_LIST.map(function (p) { return poRow(p, true); }).join('') + '</table>' +
+    '<p class="note">発注番号を入れて「進む」を押すと 1 件に絞られます。</p></div></div>';
   bindHome();
   document.getElementById('AdvGoBtn').addEventListener('click', function () {
     var po = document.getElementById('Value_0').value.trim();
     var r = document.getElementById('results');
     if (!po) { r.innerHTML = '<p>検索基準を少なくとも 1 つ入力してください。</p>'; return; }
-    r.innerHTML = '<table class="grid"><tr><th>選択</th><th>発注番号</th><th>件名</th>' +
-      '<th>発注日</th><th>金額</th><th>通貨</th><th>ステータス</th></tr>' +
+    var p = poByNo(po);
+    r.innerHTML = poHead(true) +
       '<tr><td><input type="radio"></td>' +
-      '<td><a class="polink" id="N58:PosPoNumber:0">' + po + '</a></td>' +
-      '<td>更新／練習サンプル株式会社／Ａ００３２２１８０９－Ｊ５００</td>' +
-      '<td>2026/07/06 12:34:05</td><td>16,600</td><td>JPY</td>' +
-      '<td>' + poStatus(po) + '</td></tr></table>';
+      '<td><a class="polink" id="N58:PosPoNumber:0">' + p.no + '</a></td><td>0</td>' +
+      '<td>' + p.name + '</td><td>' + p.date + '</td><td>' + p.buyer + '</td>' +
+      '<td>' + p.amt + '</td><td>JPY</td><td>' + poStatus(po) + '</td>' +
+      '<td></td><td>📎1</td></tr></table>';
     document.getElementById('N58:PosPoNumber:0').addEventListener('click', function () {
       currentPo = po; viewPoDetail();
     });
@@ -172,22 +291,53 @@ function viewAdvSearch() {
 /* 発注情報の画面。受理したあとにここを開くとステータスが「受理済」になる。
    注文受諾のエビデンスは、この画面を撮る。 */
 function viewPoDetail() {
+  var p = poByNo(currentPo);
   app.innerHTML = header('iSupplier Portal') +
+    '<div class="tabs"><a>仕入先ホーム</a><a class="on">発注</a><a>納入</a>' +
+    '<a>財務</a><a>管理</a></div>' +
+    '<div class="subtabs"><a><b>発注</b></a><a>購買履歴</a></div>' +
     '<div class="crumb">発注: 発注 &gt;</div>' +
-    '<div class="main"><h2>標準発注: ' + currentPo + ', 0 (合計 JPY 16,600)</h2>' +
+    '<div class="main"><div class="secthead">' +
+    '<h2>標準発注: ' + currentPo + ', 0 (合計 JPY ' + p.amt + ')</h2>' +
+    '<span class="allbtn">処理 <select><option>変更履歴の表示</option></select> ' +
+    '<button id="ActionGoBtn">進む</button> <button>エクスポート</button></span></div>' +
     '<p>通貨= JPY</p>' +
-    '<p>処理 <select><option>確認</option></select> ' +
-    '<button id="ActionGoBtn">進む</button> <button>エクスポート</button></p>' +
     '<h3>発注情報</h3>' +
-    '<table class="grid">' +
-    '<tr><th>合計</th><td>16,600</td></tr>' +
+    '<div class="sect"><div>' +
+    '<h4>所在地情報</h4><table class="grid">' +
+    '<tr><th>合計</th><td>' + p.amt + '</td></tr>' +
     '<tr><th>仕入先</th><td>練習サンプル株式会社</td></tr>' +
-    '<tr><th>購買担当</th><td>- - / 法人発注代行 A</td></tr>' +
-    '<tr><th>発注日</th><td>2026/07/06 12:34:05</td></tr>' +
-    '<tr><th>件名</th><td>更新／練習サンプル株式会社／Ａ００３２２１８０９－Ｊ５００</td></tr>' +
+    '<tr><th>登録番号</th><td>T1234567890123</td></tr>' +
+    '<tr><th>仕入先サイト</th><td>本社</td></tr>' +
+    '<tr><th>仕入先担当</th><td></td></tr>' +
+    '<tr><th>所在地情報</th><td>営業本部 第一営業部<br>港区, 東京都</td></tr>' +
+    '<tr><th>購買担当</th><td>' + p.buyer + '</td></tr>' +
+    '<tr><th>発注日</th><td>' + p.date + '</td></tr>' +
+    '<tr><th>件名</th><td>' + p.name + '</td></tr>' +
     '<tr><th>ステータス</th><td id="poStatus">' + poStatus(currentPo) + '</td></tr>' +
-    '<tr><th>支払条件</th><td>検収翌々月15日支払</td></tr>' +
-    '</table></div>';
+    '<tr><th>仕入先への連絡事項</th><td>見積番号：Q-0001　2026/8/1〜2027/7/31<br>' +
+    '注文内容・検収状況問合先:TEL 03-0000-0000</td></tr>' +
+    '<tr><th>見積依頼番号</th><td></td></tr>' +
+    '<tr><th>起票購買グループ</th><td>購買サービスG</td></tr>' +
+    '<tr><th>購買担当者</th><td>練習 太郎</td></tr>' +
+    '<tr><th>購買グループ</th><td>購買</td></tr>' +
+    '<tr><th>添付</th><td>なし</td></tr>' +
+    '</table></div><div>' +
+    '<h4>条件</h4><table class="grid">' +
+    '<tr><th>支払条件</th><td>検収翌々月15日支払</td></tr></table>' +
+    '<h4>要約</h4><table class="grid">' +
+    '<tr><th>合計金額</th><td>' + p.amt + '</td></tr>' +
+    '<tr><th>検収済金額</th><td>0</td></tr>' +
+    '<tr><th>請求済金額</th><td>0</td></tr></table>' +
+    '</div></div>' +
+    '<h3>発注詳細</h3>' +
+    '<table class="grid"><tr><th>詳細</th><th>明細</th><th>品目コード</th><th>品名</th>' +
+    '<th>数量</th><th>単位</th><th>単価</th><th>明細金額</th><th>ステータス</th>' +
+    '<th>取引形態</th><th>税区分</th></tr>' +
+    '<tr><td>▶</td><td>1</td><td>SS0001</td><td>練習サンプル品／' + p.name.split("／").pop() +
+    '</td><td>1</td><td>式</td><td>' + p.amt + '</td><td>' + p.amt + '</td>' +
+    '<td>オープン</td><td>通常発注</td><td>課税仕入10%外</td></tr></table>' +
+    '</div>';
   bindHome();
   document.getElementById('ActionGoBtn').addEventListener('click', viewPoConfirm);
 }
