@@ -81,6 +81,19 @@ const j = JSON.stringify(batch);
 if (j.indexOf("{{発注番号}}") < 0) { errors.push("列名の差し込みができていない"); }
 if (j.indexOf('"u"') >= 0 || j.indexOf('"p"') >= 0) { errors.push("録画時の実値が残っている"); }
 
+// バッチ定義 → 振り分け → バッチ定義 が元に戻るか（読み込んで直せること）
+const sample = JSON.parse(fs.readFileSync("recordings/edi2_accept_batch.json", "utf8")
+  .split("\n").filter((l) => !l.trim().startsWith("//")).join("\n"));
+const back = P.batchToSteps(sample);
+const rebuilt = P.buildBatch(back.steps, back.assigns, sample.title);
+const norm = (arr) => JSON.stringify((arr || []).map((s) =>
+  JSON.stringify(Object.keys(s).sort().reduce((o, k) => (o[k] = s[k], o), {}))));
+for (const key of ["setup", "loop", "recover"]) {
+  if (norm(sample[key]) !== norm(rebuilt[key])) {
+    errors.push("バッチ定義の復元で " + key + " が変わる");
+  }
+}
+
 // 背景色を固定したメッセージ欄に文字色が付いているか（ダークモードで白文字になる事故の防止）
 const css = [...d.querySelectorAll("style")].map((s) => s.textContent).join("\n");
 for (const cls of [".warn", ".err", ".ok"]) {
