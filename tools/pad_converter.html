@@ -650,6 +650,10 @@ function guessAssignments(steps) {
   // そこが繰り返しの起点。つまり「戻る操作の直後」から loop が始まる。
   //   … ホーム → 取引情報 → 検索 → 実行 → ホーム
   //              ~~~~~~~~~~~~~~~~~~~~~~~~  ここが loop
+  // 末尾の操作と同じものが前にも出ていれば、そこが繰り返しの起点。
+  //   … 仕入先 → 取引情報 → ホームページ → 検索 → 実行 → ホームページ
+  //     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~   ここまでが setup
+  // その手前までは起点までの移動なので setup、末尾は起点へ戻る操作。
   var last = steps.length - 1;
   if (last > loginEnd) {
     var tailSig = sig(steps[last]), j = -1;
@@ -666,12 +670,12 @@ function guessAssignments(steps) {
     }
   }
 
-  // 手動ログイン専用なので、setup で再生するのは「ページを開く」と
-  // 「ウィンドウサイズ」だけ。ログインも起点までの移動も人がやるので、
-  // それ以外の setup 行は変換に含めない。
+  // setup で再生できるのは「ページを開く」「ウィンドウサイズ」「クリック」。
+  // 起点までのメニュー移動はフローが辿るので、クリックは残す。
+  // 入力（change）は扱わない。SECRET に置き換えていない録画では入力値に
+  // パスワードがそのまま残っており、読まなければ生成物に出る余地がない。
   for (i = 0; i < steps.length; i++) {
-    if (a[i].sec === "setup" &&
-        steps[i].type !== "navigate" && steps[i].type !== "setViewport") {
+    if (a[i].sec === "setup" && steps[i].type === "change") {
       a[i].sec = "skip";
     }
     a[i].secret = "";
@@ -1831,6 +1835,9 @@ root.PadConvert = {
     }
     var batch = PadConvert.buildBatch(recSteps, recAssign, recTitle);
     batchText = JSON.stringify(batch, null, 2);
+    // これ以降は「バッチ定義を読み込んだ」のと同じ扱いにする。
+    // そのまま「変換する」を押せる。
+    recSteps = null;
     $("out").value = batchText;
     ["copyBatch", "saveBatch"].forEach(function (id) { $(id).disabled = false; });
     var n = function (k) { return (batch[k] || []).length; };
@@ -1845,6 +1852,14 @@ root.PadConvert = {
 
   $("run").addEventListener("click", function () {
     if (!batchText) { show("err", "録画 JSON を読み込んでください。"); return; }
+    // 録画 JSON は steps しか持っていない。そのまま変換すると setup も loop も
+    // 空のフローができ、TargetUrl が空欄のまま何も実行されないものになる。
+    if (recSteps) {
+      show("err", "先に「この振り分けでバッチ定義を作る」を押してください。<br>" +
+        "録画 JSON のままでは、開く URL も繰り返す手順も決まっていないため、" +
+        "中身の無いフローができてしまいます。");
+      return;
+    }
     var idCol = $("idcol").value.trim();
     if (!idCol && detailHeaders && detailHeaders.length) { idCol = detailHeaders[0]; }
     if (!idCol) {
