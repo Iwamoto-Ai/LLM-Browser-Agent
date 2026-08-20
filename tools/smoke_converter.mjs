@@ -63,6 +63,14 @@ const as = P.guessAssignments(steps);
 if (as[1].sec !== "skip" || as[2].sec !== "skip") {
   errors.push("ログイン欄が「使わない」になっていない");
 }
+// 起点までのメニュー移動（クリック）は setup に残す。フローが辿るため
+const menu = steps.findIndex((s, i) => i > 3 && s.type === "click" && as[i].sec === "setup");
+if (steps.some((s, i) => s.type === "click" && as[i].sec === "skip" && i < 4)) {
+  // ログインボタンは skip でも構わない
+}
+if (as.filter((x) => x.sec === "setup").length < 1) {
+  errors.push("setup が空になっている");
+}
 if (!P.hasCredentials(rec)) { errors.push("ログイン情報の混入を検出できていない"); }
 if (as[steps.length - 1].sec !== "loop+recover") { errors.push("戻る操作を復帰に割り当てていない"); }
 as[5].varCol = "発注番号";
