@@ -537,6 +537,58 @@ function hasCredentials(obj) {
   return false;
 }
 
+// バッチ定義から振り分け画面を復元する。
+// setup / loop / recover を並べ直し、箱と値の設定を逆算する。
+// 「使わない」にした行はバッチ定義に残っていないので復元できない。
+function batchToSteps(batch) {
+  var steps = [], assigns = [];
+  var sig = function (st) {
+    return st.type + "|" + JSON.stringify(st.selectors || []) +
+           "|" + String(st.value === undefined ? "" : st.value);
+  };
+  var recSigs = {};
+  (batch.recover || []).forEach(function (st) { recSigs[sig(st)] = true; });
+
+  var add = function (st, sec) {
+    // screenshot は直前の行の「この後にエビデンス」として畳む
+    if (st.type === "screenshot" && steps.length) {
+      assigns[assigns.length - 1].shot = true;
+      assigns[assigns.length - 1].shotName = st.name || "";
+      return;
+    }
+    var as = { sec: sec, secret: "", varCol: "", selLit: "", shot: false, shotName: "" };
+    if (sec === "loop" && recSigs[sig(st)]) { as.sec = "loop+recover"; }
+    var v = String(st.value === undefined ? "" : st.value);
+    var m = /\{\{([^}]+)\}\}/.exec(v);
+    if (m) { as.varCol = m[1]; }
+    // セレクタの中の {{列名}} も拾う（検索結果の行をクリックする形）
+    var cs = candidates(st);
+    for (var i = 0; i < cs.length && !as.varCol; i++) {
+      var sm = /\{\{([^}]+)\}\}/.exec(cs[i]);
+      if (sm) { as.varCol = sm[1]; as.selLit = "{{" + sm[1] + "}}"; }
+    }
+    steps.push(st);
+    assigns.push(as);
+  };
+  (batch.setup || []).forEach(function (st) { add(st, "setup"); });
+  (batch.loop || []).forEach(function (st) { add(st, "loop"); });
+  (batch.teardown || []).forEach(function (st) { add(st, "teardown"); });
+
+  // recover と同じ操作は途中にも出てくる（1 件の終わりに起点へ戻るため）。
+  // すべてを loop+復帰 にすると recover が何重にもなるので、
+  // 末尾に続く分だけを復帰扱いにする。
+  var rn = (batch.recover || []).length;
+  for (var i = 0; i < assigns.length; i++) {
+    if (assigns[i].sec === "loop+recover") { assigns[i].sec = "loop"; }
+  }
+  for (var k = 0; k < rn && assigns.length - 1 - k >= 0; k++) {
+    var at = assigns.length - 1 - k;
+    if (assigns[at].sec !== "loop") { break; }
+    assigns[at].sec = "loop+recover";
+  }
+  return { steps: steps, assigns: assigns };
+}
+
 function isRecording(obj) {
   return !!(obj && Array.isArray(obj.steps) && !obj.loop && !obj.setup);
 }
@@ -571,6 +623,12 @@ var ACTION_JP = { click: "を押す", doubleClick: "をダブルクリック", c
 function describeStep(step) {
   var cs = candidates(step);
   var raw = cs.length ? cs[0] : "";
+  if (step.type === "comment") {
+    return { jp: "メモ: " + String(step.text || ""), raw: "" };
+  }
+  if (step.type === "assertText") {
+    return { jp: "「" + String(step.text || "") + "」が出ているか確かめる", raw: "" };
+  }
   if (step.type === "setViewport") {
     return { jp: "ウィンドウサイズを " + (step.width || "") + "×" + (step.height || "") + " にする", raw: "" };
   }
@@ -708,6 +766,16 @@ function buildBatch(steps, assigns, title) {
     var st = steps[i], as = assigns[i];
     if (as.sec === "skip") { continue; }
     var copy = { type: st.type };
+    if (st.type === "assertText" || st.type === "comment") {
+      copy.text = st.text;
+      if (as.sec === "loop+recover") { out.loop.push(copy); out.recover.push(copy); }
+      else { out[as.sec].push(copy); }
+      // メモや確認のあとにもエビデンスを置けるようにする
+      if (as.shot && (as.sec === "loop" || as.sec === "loop+recover")) {
+        out.loop.push({ type: "screenshot", name: as.shotName || "エビデンス" });
+      }
+      continue;
+    }
     if (st.type === "setViewport") {
       copy.width = st.width; copy.height = st.height;
     } else if (st.type === "navigate") {
@@ -740,7 +808,7 @@ function buildBatch(steps, assigns, title) {
     if (as.sec === "loop+recover") { out.loop.push(copy); out.recover.push(copy); }
     else { out[as.sec].push(copy); }
     if (as.shot && (as.sec === "loop" || as.sec === "loop+recover")) {
-      out.loop.push({ type: "screenshot", name: "エビデンス" });
+      out.loop.push({ type: "screenshot", name: as.shotName || "エビデンス" });
     }
   }
   if (!out.teardown.length) { delete out.teardown; }
@@ -882,10 +950,16 @@ function buildRobin(batch, opt) {
   A("# 本番サイト  : https://… （実環境の URL）");
   A("SET TargetUrl TO " + robinStr(startUrl));
   A("");
-  A("# --- プロキシ：社外サイトへ出るときだけ指定する ---");
+  A("# --- プロキシ：社外へ出るときに指定する ---");
   A("# WebDriver が起動するブラウザーは素のプロファイルで、Windows のプロキシ設定を");
   A("# 引き継がない。社内プロキシ経由でしか外部に出られない環境では下を有効にする。");
-  A("# localhost と file:// はプロキシを通らないので、練習サイトは影響を受けない。");
+  A("# ※ 対象サイトだけでなく、**WebDriver の自動取得もここを通る**。");
+  A("#   練習サイトのようにローカルのファイルを開く場合でも、ドライバーは外から");
+  A("#   取ってくるので True が要る。とくに Chrome は版の問い合わせに");
+  A("#   googlechromelabs.github.io へ出るため、Edge が動いても Chrome だけ");
+  A("#   失敗することがある。");
+  A("# 対象サイトへの通信は localhost と file:// なら直結だが、それとは別に");
+  A("# ドライバーの取得で外へ出る。練習サイトでも設定が要る点に注意。");
   if (proxy) {
     A("# UseProxy を False にすると直結（練習サイト用）に戻る。");
     A("SET UseProxy TO True");
@@ -1030,7 +1104,9 @@ function buildRobin(batch, opt) {
   A(dosCmd("ReadCmd", "DrvVer", "ReadErr", "ReadExit", 120, "            "));
   A("            IF DrvVer = " + robinStr('') + " THEN");
   A("                SET Halt TO True");
-  A("                SET HaltReason TO " + robinStr('ドライバーの版を問い合わせられませんでした') + "");
+  A("                SET HaltReason TO " +
+    robinStr("ドライバーの版を問い合わせられませんでした" +
+      "（curl=%RelExit% / %RelErr%）。UseProxy の設定を確認してください"));
   A("            END");
   A("        END");
   A("    END");
@@ -1606,6 +1682,7 @@ function csvHeaders(text) {
 }
 
 root.PadConvert = {
+  batchToSteps: batchToSteps,
   hasCredentials: hasCredentials,
   // 共通 JavaScript の本文。練習サイトでの再生テストから使う
   jsAct: function () { return JS_ACT.join(" "); },
@@ -1643,6 +1720,9 @@ root.PadConvert = {
   }
 
   var recSteps = null, recAssign = null, recTitle = "", lastTotal = 0;
+  // 振り分けからバッチ定義を作ったか。作っていなければ「変換する」は止める。
+  // 振り分けを変えたら false に戻し、作り直してもらう。
+  var batchReady = false;
 
   function takeBatch(file) {
     batchName = file.name;
@@ -1653,6 +1733,7 @@ root.PadConvert = {
       try { obj = PadConvert.loadRecording(txt); }
       catch (e) { obj = null; err = e.message; }
       recSteps = null;
+      batchReady = false;
       $("assignBox").hidden = true;
       if (!obj) {
         show("err", "JSON として読めませんでした: " + err +
@@ -1675,8 +1756,18 @@ root.PadConvert = {
         }
       } else if (obj.setup || obj.loop) {
         var n = (obj.loop || []).length;
+        var restored = PadConvert.batchToSteps(obj);
+        recTitle = obj.title || batchName.replace(/\.json$/i, "");
+        recSteps = restored.steps;
+        recAssign = restored.assigns;
+        batchReady = true;          // 読み込んだ時点で変換できる
+        renderAssign(recSteps.length);
         show("ok", "バッチ定義 JSON として読み込みました（loop " + n + " 手順）。" +
-             "振り分けは済んでいるので、<strong>そのまま「変換する」</strong>を押してください。");
+             "そのまま「変換する」を押せます。<br>" +
+             "振り分けを直す場合は、下の表を変えてから" +
+             "「この振り分けでバッチ定義を作る」を押し直してください。<br>" +
+             "<strong>※「使わない」にした行はバッチ定義に残らないため、" +
+             "復元できません。</strong>元の録画 JSON からやり直してください。");
       } else {
         show("warn", "JSON は読めましたが、録画（steps）でもバッチ定義（setup / loop）でも" +
              "ありません。ファイルを確かめてください。");
@@ -1753,12 +1844,14 @@ root.PadConvert = {
     Array.prototype.forEach.call(q(".secSel"), function (el) {
       el.addEventListener("change", function () {
         recAssign[+el.dataset.i].sec = el.value;
+        batchReady = false;
         renderAssign(lastTotal);   // 起点の表示と、使わない行の無効化を反映する
       });
     });
     Array.prototype.forEach.call(q(".valSel"), function (el) {
       el.addEventListener("change", function () {
         var i = +el.dataset.i, as = recAssign[i];
+        batchReady = false;
         var txt = $("assignTable").querySelector('.colTxt[data-i="' + i + '"]');
         as.secret = ""; as.varCol = "";
         if (el.value === "col") { as.varCol = txt.value || "?"; txt.hidden = false; }
@@ -1768,11 +1861,13 @@ root.PadConvert = {
     Array.prototype.forEach.call(q(".colTxt"), function (el) {
       el.addEventListener("input", function () {
         recAssign[+el.dataset.i].varCol = el.value || "?";
+        batchReady = false;
       });
     });
     Array.prototype.forEach.call(q(".originBtn"), function (el) {
       el.addEventListener("click", function () {
         var at = +el.dataset.i;
+        batchReady = false;
         // ここより前の繰り返しは setup へ、ここから後の setup は loop へ移す。
         // 末尾の「戻る」（loop+復帰）はそのまま残す。
         for (var j = 0; j < recAssign.length; j++) {
@@ -1788,6 +1883,7 @@ root.PadConvert = {
     Array.prototype.forEach.call(q(".shotChk"), function (el) {
       el.addEventListener("change", function () {
         recAssign[+el.dataset.i].shot = el.checked;
+        batchReady = false;
       });
     });
   }
@@ -1835,9 +1931,8 @@ root.PadConvert = {
     }
     var batch = PadConvert.buildBatch(recSteps, recAssign, recTitle);
     batchText = JSON.stringify(batch, null, 2);
-    // これ以降は「バッチ定義を読み込んだ」のと同じ扱いにする。
-    // そのまま「変換する」を押せる。
-    recSteps = null;
+    // 振り分け画面はそのまま残す。実行結果を見てから直して作り直せるように。
+    batchReady = true;
     $("out").value = batchText;
     ["copyBatch", "saveBatch"].forEach(function (id) { $(id).disabled = false; });
     var n = function (k) { return (batch[k] || []).length; };
@@ -1854,7 +1949,7 @@ root.PadConvert = {
     if (!batchText) { show("err", "録画 JSON を読み込んでください。"); return; }
     // 録画 JSON は steps しか持っていない。そのまま変換すると setup も loop も
     // 空のフローができ、TargetUrl が空欄のまま何も実行されないものになる。
-    if (recSteps) {
+    if (recSteps && !batchReady) {
       show("err", "先に「この振り分けでバッチ定義を作る」を押してください。<br>" +
         "録画 JSON のままでは、開く URL も繰り返す手順も決まっていないため、" +
         "中身の無いフローができてしまいます。");
@@ -1925,6 +2020,7 @@ root.PadConvert = {
     // 読み込んだものと結果だけを消す。実行環境のパスは打ち直しになると面倒なので残す。
     batchText = null; batchName = ""; result = null;
     recSteps = null; recAssign = null; recTitle = ""; detailHeaders = null;
+    batchReady = false;
     $("batchFile").value = ""; $("detailsFile").value = "";
     $("batchInfo").textContent = ""; $("detailsInfo").textContent = "";
     $("assignBox").hidden = true; $("assignTable").innerHTML = "";
