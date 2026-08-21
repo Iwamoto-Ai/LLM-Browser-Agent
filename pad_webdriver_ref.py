@@ -430,6 +430,19 @@ def _robin_safe_selector(sel: str) -> str:
     return sel
 
 
+def _is_unique_id(sel: str) -> bool:
+    """id 1 つだけで要素を指す候補か。#foo や id/foo を指す。
+
+    #foo .bar のように他の条件が付くもの、xpath/… や pierce/… は対象外。
+    xpath///*[@id="foo"] は _robin_safe_selector が id/foo に直している。"""
+    if sel.startswith("id/"):
+        return len(sel) > 3
+    if not sel.startswith("#"):
+        return False
+    body = sel[1:]
+    return bool(body) and not any(ch in body for ch in " >+~,.:[")
+
+
 def _robin_filter_candidates(cands: list) -> list:
     """Robin リテラルや JSON 本文に入れられない候補を落とす。
 
@@ -438,6 +451,12 @@ def _robin_filter_candidates(cands: list) -> list:
       候補の中に生の " があるとそこで文字列が閉じ、WebDriver が
       「invalid argument: missing command parameters」を返す
 
+    そのうえで、**id で指す候補を先頭に寄せる**。録画は aria/名前 を先に出すが、
+    同じ名前が画面に複数あると別の要素に当たる。押しても何も起きない要素でも
+    クリックは成功するので、そのまま先へ進んで後のステップで落ちる。
+    id はページ内で一意なので、こちらを先に試すほうが確実。
+    id が動的に変わるサイトでも、当たらなければ次の候補へ落ちるだけ。
+
     すべて落ちてしまう場合は、CSS の id セレクタなど代替を残せないか呼び出し側で確認する。"""
     out = []
     for x in cands:
@@ -445,6 +464,7 @@ def _robin_filter_candidates(cands: list) -> list:
         if "'" in c or '"' in c:
             continue
         out.append(c)
+    out.sort(key=lambda c: 0 if _is_unique_id(c) else 1)
     return out
 
 

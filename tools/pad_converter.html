@@ -274,13 +274,31 @@ function robinSafeSelector(sel) {
 //  ・二重引用符 … 本文は {"script": "…", "args": […]} という JSON なので、
 //    候補に生の " があるとそこで文字列が閉じ、WebDriver が
 //    「invalid argument: missing command parameters」を返す
+// id 1 つだけで要素を指す候補か。#foo や id/foo を指す。
+// #foo .bar のように他の条件が付くもの、xpath/… や pierce/… は対象外。
+function isUniqueId(sel) {
+  if (sel.indexOf("id/") === 0) { return sel.length > 3; }
+  if (sel.charAt(0) !== "#") { return false; }
+  var body = sel.slice(1);
+  if (!body) { return false; }
+  return !/[ >+~,.:\[]/.test(body);
+}
+
 function robinFilterCandidates(cands) {
   var out = [];
   for (var i = 0; i < cands.length; i++) {
     var c = robinSafeSelector(cands[i]);
     if (c.indexOf("'") < 0 && c.indexOf('"') < 0) { out.push(c); }
   }
-  return out;
+  // id で指す候補を先頭に寄せる。録画は aria/名前 を先に出すが、同じ名前が
+  // 画面に複数あると別の要素に当たる。押しても何も起きない要素でもクリックは
+  // 成功するので、そのまま先へ進んで後のステップで落ちる。
+  // id はページ内で一意なので、こちらを先に試すほうが確実。
+  var ids = [], rest = [];
+  for (var k = 0; k < out.length; k++) {
+    if (isUniqueId(out[k])) { ids.push(out[k]); } else { rest.push(out[k]); }
+  }
+  return ids.concat(rest);
 }
 
 function robinColVar(col, cols) {
