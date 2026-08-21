@@ -6,7 +6,7 @@
 # 処理内容：明細 1 件につき 6 操作を繰り返す（ID列: ID ／ 業務キー: KEY）
 #           開始URL: file:///C:/temp/sample.html
 #           明細CSV: sample_batch.csv
-# 備考：2026/08/18 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
+# 備考：2026/08/21 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
 # ============================================================
 # LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
 # Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).
@@ -18,10 +18,16 @@
 # 本番サイト  : https://… （実環境の URL）
 SET TargetUrl TO $'''file:///C:/temp/sample.html'''
 
-# --- プロキシ：社外サイトへ出るときだけ指定する ---
+# --- プロキシ：社外へ出るときに指定する ---
 # WebDriver が起動するブラウザーは素のプロファイルで、Windows のプロキシ設定を
 # 引き継がない。社内プロキシ経由でしか外部に出られない環境では下を有効にする。
-# localhost と file:// はプロキシを通らないので、練習サイトは影響を受けない。
+# ※ 対象サイトだけでなく、**WebDriver の自動取得もここを通る**。
+#   練習サイトのようにローカルのファイルを開く場合でも、ドライバーは外から
+#   取ってくるので True が要る。とくに Chrome は版の問い合わせに
+#   googlechromelabs.github.io へ出るため、Edge が動いても Chrome だけ
+#   失敗することがある。
+# 対象サイトへの通信は localhost と file:// なら直結だが、それとは別に
+# ドライバーの取得で外へ出る。練習サイトでも設定が要る点に注意。
 # 使う場合: UseProxy を True にし、ProxyAddr にプロキシの host:port を書く。
 SET UseProxy TO False
 SET ProxyAddr TO $'''proxy.example.com:8080'''
@@ -169,7 +175,7 @@ IF DriverSource = $'''direct''' THEN
             Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: ReadCmd WorkingDirectory: BaseDir Timeout: 120 StandardOutput=> DrvVer StandardError=> ReadErr ExitCode=> ReadExit
             IF DrvVer = $'''''' THEN
                 SET Halt TO True
-                SET HaltReason TO $'''ドライバーの版を問い合わせられませんでした'''
+                SET HaltReason TO $'''ドライバーの版を問い合わせられませんでした（curl=%RelExit% / %RelErr%）。UseProxy の設定を確認してください'''
             END
         END
     END
@@ -559,7 +565,7 @@ IF Halt = False THEN
         WAIT 1
 
         # [3] click aria/%Col2%
-        SET ActBody TO $'''{"script": "%JsAct%", "args": [["aria/%Col2%", "#result-link"], "click", ""]}'''
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["#result-link", "aria/%Col2%"], "click", ""]}'''
         Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
         IF ActStatus <> 200 THEN
             SET RowError TO $'''ステップ3（click aria/%Col2%）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
