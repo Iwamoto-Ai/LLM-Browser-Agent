@@ -6,7 +6,7 @@
 # 処理内容：明細 1 件につき 6 操作を繰り返す（ID列: ID ／ 業務キー: KEY）
 #           開始URL: file:///C:/temp/sample.html
 #           明細CSV: sample_batch.csv
-# 備考：2026/08/21 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
+# 備考：2026/08/22 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
 # ============================================================
 # LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
 # Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).
@@ -79,6 +79,10 @@ SET DetailsFile TO $'''%BaseDir%\\sample_batch.csv'''
 SET ResultFile TO $'''%BaseDir%\\pad_result.csv'''
 SET LogFile TO $'''%BaseDir%\\pad_progress.log'''
 SET ShotDir TO $'''%BaseDir%'''
+# ダウンロードの受け取り先。落ちてきたファイルはここで名前を付け替える。
+SET DlDir TO $'''%BaseDir%\\download'''
+# 同じパスを JSON に入れる用（\ を 2 本にしておく。Robin で \\ → \ ）
+SET DlDirJson TO $'''%BaseDir%\\\\download'''
 
 # --- 運用スイッチ ---
 # まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす
@@ -284,6 +288,19 @@ SET SessionBody TO $'''{"capabilities": {"alwaysMatch": {"browserName": "%Browse
 IF UseProxy THEN
     SET SessionBody TO $'''%SessionBody%, "proxy": {"proxyType": "manual", "httpProxy": "%ProxyAddr%", "sslProxy": "%ProxyAddr%"}'''
 END
+# ダウンロードの受け取り方。ブラウザーは素のプロファイルなので、
+# ここで指定しないと既定のダウンロードフォルダに落ち、確認も出る。
+#   default_directory      … 保存先。JSON の中の Windows パスは \ を 4 本
+#   prompt_for_download    … 保存ダイアログを出さない
+#   always_open_pdf_externally … PDF をビューアで開かずファイルとして落とす
+#   automatic_downloads: 1 … 「複数ファイルのダウンロードを許可しますか」を出さない
+SET PrefKey TO $'''ms:edgeOptions'''
+IF Browser = $'''chrome''' THEN
+    SET PrefKey TO $'''goog:chromeOptions'''
+END
+SET SessionBody TO $'''%SessionBody%, "%PrefKey%": {"prefs": {"download.default_directory": "%DlDirJson%"'''
+SET SessionBody TO $'''%SessionBody%, "download.prompt_for_download": false, "plugins.always_open_pdf_externally": true'''
+SET SessionBody TO $'''%SessionBody%, "profile": {"default_content_setting_values": {"automatic_downloads": 1}}}}'''
 SET SessionBody TO $'''%SessionBody%}}}'''
 SET AppJson TO $'''application/json'''
 SET NewUrl TO $'''%DriverUrl%/session'''
@@ -432,6 +449,9 @@ IF RowError <> $'''''' THEN
     SET HaltReason TO RowError
 END
 END
+
+# ダウンロードの受け取り先。すでにあってもエラーにはならない。
+Folder.Create FolderPath: BaseDir FolderName: $'''download''' Folder=> DlDirObj
 
 # ================= 明細（CSV）を読み込む =================
 IF Halt = False THEN

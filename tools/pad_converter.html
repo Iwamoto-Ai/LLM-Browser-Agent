@@ -348,6 +348,66 @@ function dosCmd(cmdVar, outVar, errVar, exitVar, timeout, indent) {
     " StandardError=> " + errVar + " ExitCode=> " + exitVar;
 }
 
+// 更新日時の新しい順にファイルを取る。落ちてきたばかりのものが先頭に来る。
+function folderGetSorted(folderVar, filterVar, outVar) {
+  return "Folder.GetFiles Folder: " + folderVar + " FileFilter: " + filterVar +
+    " IncludeSubfolders: False FailOnAccessDenied: True " +
+    "SortBy1: Folder.SortBy.LastModified SortDescending1: True " +
+    "SortBy2: Folder.SortBy.Name SortDescending2: False " +
+    "SortBy3: Folder.SortBy.LastAccessed SortDescending3: False " +
+    "Files=> " + outVar;
+}
+
+// クリックしてファイルが落ちてくるのを待ち、エビデンス名に付け替える。
+// サーバーが付けるファイル名は事前に分からないので、押す前の数と比べて
+// 増えたものを拾う。書き込み中は .crdownload が残るので、それが消えるまで待つ。
+// 両方を見ないと、始まる前に「もう無い」と判断して先へ進む。
+function robinDownload(cands, name, indent, stepNo, cols, timeout) {
+  timeout = timeout || 60;
+  var L = [];
+  var A = function (s) { L.push(s); };
+  A(indent + "# [" + stepNo + "] ダウンロード " + (cands[0] || ""));
+  A(indent + "# 押す前の件数を数えておき、増えたぶんを新しいファイルとみなす。");
+  A(indent + folderGet("DlDir", "$" + Q_ + "*.*" + Q_, "DlBefore"));
+  A(indent + "SET DlCountBefore TO DlBefore.Count");
+  L = L.concat(robinAct(cands, "click", "", indent,
+                        "download " + (cands[0] || ""), stepNo, cols));
+  A(indent + "IF RowError = " + robinStr("") + " THEN");
+  A(indent + "    SET DlWait TO 0");
+  A(indent + "    SET DlDone TO False");
+  A(indent + "    LOOP WHILE DlDone = False");
+  A(indent + "        WAIT 1");
+  A(indent + "        SET DlWait TO DlWait + 1");
+  A(indent + "        " + folderGet("DlDir", "$" + Q_ + "*.crdownload" + Q_, "DlTemp"));
+  A(indent + "        " + folderGet("DlDir", "$" + Q_ + "*.*" + Q_, "DlNow"));
+  A(indent + "        IF DlTemp.Count = 0 THEN");
+  A(indent + "            IF DlNow.Count > DlCountBefore THEN");
+  A(indent + "                SET DlDone TO True");
+  A(indent + "            END");
+  A(indent + "        END");
+  A(indent + "        IF DlWait >= " + timeout + " THEN");
+  A(indent + "            SET DlDone TO True");
+  A(indent + "        END");
+  A(indent + "    END");
+  A(indent + "    " + folderGet("DlDir", "$" + Q_ + "*.*" + Q_, "DlAfter"));
+  A(indent + "    IF DlAfter.Count > DlCountBefore THEN");
+  A(indent + "        # 一番新しいものが今回落ちてきたファイル");
+  A(indent + "        " + folderGetSorted("DlDir", "$" + Q_ + "*.*" + Q_, "DlSorted"));
+  A(indent + "        SET DlFile TO DlSorted[0]");
+  A(indent + "        SET DlName TO " + robinStr(toRobinVar(name, cols)));
+  A(indent + "        # 拡張子はそのまま残るので、Excel でも PDF でも同じ 1 行で足りる");
+  A(indent + "        File.RenameFiles.Rename Files: DlFile NewName: DlName " +
+    "KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> DlRenamed");
+  A(indent + "    END");
+  A(indent + "    IF DlAfter.Count = DlCountBefore THEN");
+  A(indent + "        SET RowError TO " +
+    robinStr("ステップ" + stepNo + "（ダウンロード）でファイルが落ちてきませんでした" +
+             "（" + timeout + " 秒待機）"));
+  A(indent + "    END");
+  A(indent + "END");
+  return L;
+}
+
 // フォルダー内のファイル取得。並べ替えの列挙は Folder.SortBy.○○（実機確認済み）
 function folderGet(folderVar, filterVar, outVar) {
   return "Folder.GetFiles Folder: " + folderVar + " FileFilter: " + filterVar +
@@ -495,7 +555,8 @@ function prescanCols(steps, cols) {
 // 変換時に警告する。Python 版の SECTION_STEPS と同じ内容にすること。
 var SECTION_STEPS = {
   setup: ["comment", "setViewport", "navigate", "click", "doubleClick", "change"],
-  loop: ["comment", "screenshot", "assertText", "click", "doubleClick", "change"],
+  loop: ["comment", "screenshot", "assertText", "click", "doubleClick", "change",
+         "download"],
   recover: ["comment", "navigate", "click", "doubleClick", "change"],
   teardown: ["comment", "click", "doubleClick", "change"]
 };
@@ -574,7 +635,9 @@ function batchToSteps(batch) {
       assigns[assigns.length - 1].shotName = st.name || "";
       return;
     }
-    var as = { sec: sec, secret: "", varCol: "", selLit: "", shot: false, shotName: "" };
+    var as = { sec: sec, secret: "", varCol: "", selLit: "", shot: false,
+               shotName: "", dl: st.type === "download",
+               dlName: st.type === "download" ? (st.name || "") : "" };
     if (sec === "loop" && recSigs[sig(st)]) { as.sec = "loop+recover"; }
     var v = String(st.value === undefined ? "" : st.value);
     var m = /\{\{([^}]+)\}\}/.exec(v);
@@ -799,6 +862,10 @@ function buildBatch(steps, assigns, title) {
     } else if (st.type === "navigate") {
       copy.url = st.url;
     } else {
+      if (as.dl) {
+        copy.type = "download";
+        if (as.dlName) { copy.name = as.dlName; }
+      }
       copy.selectors = st.selectors || [];
       if (as.selLit && as.varCol && as.varCol !== "?") {
         // セレクタの中の実値を {{列名}} に差し替える。
@@ -841,7 +908,7 @@ function lintRobin(lines) {
     "Display.DefaultButton": ["Button1", "Button2"],
     "Web.Method": ["Get", "Post", "Delete"],
     "File.IfFileExists": ["Append", "Overwrite"],
-    "File.IfExists": ["DoNothing"]
+    "File.IfExists": ["DoNothing", "Overwrite"]
   };
   var warns = [];
   for (var i = 0; i < lines.length; i++) {
@@ -1038,6 +1105,10 @@ function buildRobin(batch, opt) {
   A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''");
   A("SET LogFile TO $'''%BaseDir%\\\\pad_progress.log'''");
   A("SET ShotDir TO $'''%BaseDir%'''");
+  A("# ダウンロードの受け取り先。落ちてきたファイルはここで名前を付け替える。");
+  A("SET DlDir TO $'''%BaseDir%\\\\download'''");
+  A("# 同じパスを JSON に入れる用（\\ を 2 本にしておく。Robin で \\\\ → \\ ）");
+  A("SET DlDirJson TO $'''%BaseDir%\\\\\\\\download'''");
   A("");
   A("# --- 運用スイッチ ---");
   A("# まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす");
@@ -1244,6 +1315,23 @@ function buildRobin(batch, opt) {
   A("    SET SessionBody TO $'''%SessionBody%, \"proxy\": {\"proxyType\": \"manual\", " +
     "\"httpProxy\": \"%ProxyAddr%\", \"sslProxy\": \"%ProxyAddr%\"}'''");
   A("END");
+  A("# ダウンロードの受け取り方。ブラウザーは素のプロファイルなので、");
+  A("# ここで指定しないと既定のダウンロードフォルダに落ち、確認も出る。");
+  A("#   default_directory      … 保存先。JSON の中の Windows パスは \\ を 4 本");
+  A("#   prompt_for_download    … 保存ダイアログを出さない");
+  A("#   always_open_pdf_externally … PDF をビューアで開かずファイルとして落とす");
+  A("#   automatic_downloads: 1 … 「複数ファイルのダウンロードを許可しますか」を出さない");
+  A("SET PrefKey TO $'''ms:edgeOptions'''");
+  A("IF Browser = " + robinStr("chrome") + " THEN");
+  A("    SET PrefKey TO $'''goog:chromeOptions'''");
+  A("END");
+  A("SET SessionBody TO $'''%SessionBody%, \"%PrefKey%\": " +
+    "{\"prefs\": {\"download.default_directory\": \"%DlDirJson%\"'''");
+  A("SET SessionBody TO $'''%SessionBody%" +
+    ", \"download.prompt_for_download\": false" +
+    ", \"plugins.always_open_pdf_externally\": true'''");
+  A("SET SessionBody TO $'''%SessionBody%, \"profile\": " +
+    "{\"default_content_setting_values\": {\"automatic_downloads\": 1}}}}'''");
   A("SET SessionBody TO $'''%SessionBody%}}}'''");
   A("SET AppJson TO $'''application/json'''");
   A("SET NewUrl TO $'''%DriverUrl%/session'''");
@@ -1457,6 +1545,10 @@ function buildRobin(batch, opt) {
 
   // ---- 明細読み込み ----
   var keyRef = cols.length > 1 ? "Col2" : "$''''''";
+  A("# ダウンロードの受け取り先。すでにあってもエラーにはならない。");
+  A("Folder.Create FolderPath: BaseDir FolderName: " + robinStr("download") +
+    " Folder=> DlDirObj");
+  A("");
   A("# ================= 明細（CSV）を読み込む =================");
   A("IF Halt = False THEN");
   A("    File.ReadFromCSVFile.ReadCSV CSVFile: DetailsFile " +
@@ -1582,6 +1674,16 @@ function buildRobin(batch, opt) {
       A(inner + "# デスクトップや他ウィンドウは写らず、フォーカスにも依存しない。");
       A(inner + "# 逆にスクロールしないと見えない範囲は写らない点に注意。");
       L = L.concat(robinShot(inner, "ShotPath"));
+      A("");
+      continue;
+    }
+    if (lt === "download") {
+      m += 1;
+      var dc = robinFilterCandidates(candidates(lst));
+      A(inner + "# ダウンロードしたファイルをエビデンスにする。");
+      A(inner + "# 画面に内容が出ず、Excel や PDF を受け取って初めて分かる業務向け。");
+      L = L.concat(robinDownload(dc, lst.name || shotName, inner, m, cols));
+      L = L.concat(robinFail(inner));
       A("");
       continue;
     }
@@ -1806,7 +1908,8 @@ root.PadConvert = {
       }
     }
     var rows = ['<tr><th>#</th><th>起点</th><th>操作</th><th>録画された指定</th><th>箱</th>' +
-                '<th>値の扱い</th><th>この後にエビデンス</th></tr>'];
+                '<th>値の扱い</th><th>この後にエビデンス</th>' +
+                '<th>ダウンロード</th></tr>'];
     for (var i = 0; i < recSteps.length; i++) {
       var d = PadConvert.describeStep(recSteps[i]), as = recAssign[i];
       var sel = '<select data-i="' + i + '" class="secSel">';
@@ -1838,13 +1941,23 @@ root.PadConvert = {
       }
       var shot = '<input type="checkbox" class="shotChk" data-i="' + i + '"' +
                  (as.shot ? " checked" : "") + ">";
+      // クリックの行だけ「この操作でダウンロード」を選べる
+      var dl = "";
+      if (recSteps[i].type === "click" || recSteps[i].type === "doubleClick") {
+        dl = '<input type="checkbox" class="dlChk" data-i="' + i + '"' + off +
+             (as.dl ? " checked" : "") + '>' +
+             ' <input type="text" class="dlTxt" data-i="' + i + '" placeholder="保存名"' +
+             ' value="' + (as.dlName || "") + '"' + off +
+             (as.dl ? "" : " hidden") + ">";
+      }
       var mark = i === origin
         ? '<td class="mark">▶ 起点</td>'
         : '<td><button class="originBtn" data-i="' + i + '">ここを起点に</button></td>';
       rows.push('<tr' + (i === origin ? ' class="origin"' : "") + "><td>" + (i + 1) + "</td>" +
                 mark + "<td>" + (d.jp || "（名前なし）") +
                 '</td><td class="raw">' + (d.raw || "") + "</td><td>" + sel +
-                "</td><td>" + val + "</td><td>" + shot + "</td></tr>");
+                "</td><td>" + val + "</td><td>" + shot + "</td>" +
+                "<td>" + dl + "</td></tr>");
     }
     $("assignTable").innerHTML = rows.join("");
     var od = origin >= 0 ? PadConvert.describeStep(recSteps[origin]) : null;
@@ -1901,6 +2014,21 @@ root.PadConvert = {
     Array.prototype.forEach.call(q(".shotChk"), function (el) {
       el.addEventListener("change", function () {
         recAssign[+el.dataset.i].shot = el.checked;
+        batchReady = false;
+      });
+    });
+    Array.prototype.forEach.call(q(".dlChk"), function (el) {
+      el.addEventListener("change", function () {
+        var i = +el.dataset.i;
+        recAssign[i].dl = el.checked;
+        var txt = $("assignTable").querySelector('.dlTxt[data-i="' + i + '"]');
+        if (txt) { txt.hidden = !el.checked; }
+        batchReady = false;
+      });
+    });
+    Array.prototype.forEach.call(q(".dlTxt"), function (el) {
+      el.addEventListener("input", function () {
+        recAssign[+el.dataset.i].dlName = el.value;
         batchReady = false;
       });
     });

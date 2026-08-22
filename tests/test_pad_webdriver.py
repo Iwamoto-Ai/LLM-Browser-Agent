@@ -362,21 +362,33 @@ def test_robin_auto_driver_off_by_default(tmp_path):
 
 
 def _session_body_variants(txt):
-    """生成 Robin の SessionBody 連結を模擬して、組み立て後の JSON を返す。"""
+    """生成 Robin の SessionBody 連結を模擬して、組み立て後の JSON を返す。
+
+    本文は前から継ぎ足して組み立てられる。プロキシの行だけ IF の中にあるので、
+    それを入れた場合と入れない場合の両方を作る。"""
     import re as _re
     parts = [ln.strip() for ln in txt.splitlines()
              if ln.strip().startswith("SET SessionBody TO")]
-    assert len(parts) == 3, parts
-    lit = [_re.match(r"SET SessionBody TO \$'''(.*)'''$", p).group(1) for p in parts]
-    head, proxy_part, tail = lit
+    q3 = chr(39) * 3
+    pat = "SET SessionBody TO " + chr(92) + "$" + q3 + "(.*)" + q3 + "$"
+    lit = [_re.match(pat, x).group(1) for x in parts]
+    proxy_idx = [i for i, s in enumerate(lit) if "proxyType" in s]
+    assert len(proxy_idx) == 1, lit
+    pi = proxy_idx[0]
     out = {}
     for name in ("MicrosoftEdge", "chrome"):
+        pref_key = "goog:chromeOptions" if name == "chrome" else "ms:edgeOptions"
         for use_proxy in (False, True):
-            body = head.replace("%BrowserName%", name)
-            if use_proxy:
-                body = proxy_part.replace("%SessionBody%", body) \
-                                 .replace("%ProxyAddr%", "p.example.com:8080")
-            body = tail.replace("%SessionBody%", body)
+            body = ""
+            for i, s in enumerate(lit):
+                if i == pi and not use_proxy:
+                    continue
+                s = (s.replace("%BrowserName%", name)
+                      .replace("%ProxyAddr%", "p.example.com:8080")
+                      .replace("%PrefKey%", pref_key)
+                      .replace("%DlDirJson%", "C:" + chr(92) * 2 + "t"))
+                body = (s.replace("%SessionBody%", body)
+                        if "%SessionBody%" in s else body + s)
             out[(name, use_proxy)] = json.loads(body)
     return out
 
@@ -435,3 +447,46 @@ def test_robin_checks_start_screen_before_loop(tmp_path):
                    if ln.strip().startswith("LOOP FOREACH"))
     assert check < loop_at
     assert "起点画面ではありません" in txt
+
+
+def test_download_step_waits_and_renames(tmp_path):
+    """download ステップが、待って・拾って・付け替えるところまで出ること。
+
+    ダウンロードは「押した瞬間はまだ書き込み中」「ファイル名が事前に分からない」
+    の 2 つが厄介なので、押す前の件数を数える／.crdownload が消えるまで待つ／
+    更新日時の新しい順で拾う、の 3 つが揃っている必要がある。"""
+    batch = {
+        "title": "dl", "originHint": "出力",
+        "setup": [{"type": "navigate", "url": "http://x/"}],
+        "loop": [
+            {"type": "download", "selectors": [["#OutputIcon0"]],
+             "name": "【一覧】{{プロジェクト番号}}"},
+        ],
+    }
+    out = pad.write_robin(batch, r"C:\t\d.csv", "プロジェクト番号",
+                          str(tmp_path / "f.robin.txt"))
+    txt = open(out, encoding="utf-8").read()
+    assert "SET DlCountBefore TO DlBefore.Count" in txt
+    assert "*.crdownload" in txt
+    assert "SortBy1: Folder.SortBy.LastModified SortDescending1: True" in txt
+    assert "File.RenameFiles.Rename Files: DlFile NewName: DlName" in txt
+    assert "KeepExtension: True" in txt
+    # {{列名}} は変数参照に変換される
+    assert "SET DlName TO $'''【一覧】%Col1%'''" in txt
+    # 落ちてこなかったときは失敗として記録する
+    assert "ファイルが落ちてきませんでした" in txt
+
+
+def test_download_prefs_in_session(tmp_path):
+    """保存先の固定と確認ダイアログの抑止がセッション作成に入ること。"""
+    batch = {"title": "dl", "setup": [{"type": "navigate", "url": "http://x/"}],
+             "loop": [{"type": "click", "selectors": [["#a"]]}]}
+    out = pad.write_robin(batch, r"C:\t\d.csv", "ID", str(tmp_path / "f.robin.txt"))
+    txt = open(out, encoding="utf-8").read()
+    assert "download.default_directory" in txt
+    assert "download.prompt_for_download" in txt
+    assert "plugins.always_open_pdf_externally" in txt
+    assert "automatic_downloads" in txt
+    # ブラウザーごとにキーが変わる
+    assert "SET PrefKey TO $'''ms:edgeOptions'''" in txt
+    assert "SET PrefKey TO $'''goog:chromeOptions'''" in txt
