@@ -520,3 +520,21 @@ def test_download_dir_survives_json_escaping(tmp_path):
 
     value = json.loads(chr(34) + unrobin(raw) + chr(34))
     assert value == r"C:\temp\download", value
+
+
+def test_driver_zip_removed_after_extract(tmp_path):
+    """展開できたら zip を消すこと。失敗したときは残すこと。
+
+    ドライバーの zip は 20MB 前後あり、版が変わるたびに増える。
+    展開が失敗したときに消してしまうと、手で開いて中身を確かめられない
+    （エラーページを掴んでいた、という切り分けができなくなる）。"""
+    batch = {"title": "z", "setup": [{"type": "navigate", "url": "http://x/"}],
+             "loop": [{"type": "click", "selectors": [["#a"]]}]}
+    out = pad.write_robin(batch, r"C:\t\d.csv", "ID",
+                          str(tmp_path / "f.robin.txt"), auto_driver=True)
+    txt = open(out, encoding="utf-8").read()
+    assert "File.Delete Files: ZipPath" in txt
+    # 展開の終了コードを見てから消す
+    at = txt.index("File.Delete Files: ZipPath")
+    before = txt[:at]
+    assert before.rstrip().endswith("IF UzExit = 0 THEN"), before[-200:]

@@ -1257,6 +1257,11 @@ function buildRobin(batch, opt) {
   A("            IF Halt = False THEN");
   A("                SET UnzipCmd TO $'''tar.exe -xf \"%ZipPath%\" -C \"%DrvDir%\"'''");
   A(dosCmd("UnzipCmd", "UzOut", "UzErr", "UzExit", 300, "                "));
+  A("                # 展開できたら zip は要らない。20MB 前後あるので残さない。");
+  A("                # 失敗したときは残す。手で開いて中身を確かめられる。");
+  A("                IF UzExit = 0 THEN");
+  A("                    File.Delete Files: ZipPath");
+  A("                END");
   A("            END");
   A("        END");
   A("    END");
