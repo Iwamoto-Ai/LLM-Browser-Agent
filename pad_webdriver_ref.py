@@ -548,6 +548,59 @@ def _robin_shot(indent: str, file_var: str) -> list:
     ]
 
 
+def _robin_download(cands: list, name: str, indent: str, step_no: int,
+                    cols: list, timeout: int = 60) -> list:
+    """クリックしてファイルが落ちてくるのを待ち、エビデンス名に付け替える。
+
+    サーバーが付けるファイル名は事前に分からないので、押す前の数と比べて
+    増えたものを拾う。書き込み中は .crdownload / .tmp が残るので、それが
+    消えるまで待つ。両方を見ないと、始まる前に「もう無い」と判断して先へ進む。
+    """
+    L = []
+    def A(s):
+        L.append(s)
+    A(f"{indent}# [{step_no}] ダウンロード {cands[0] if cands else ''}")
+    A(f"{indent}# 押す前の件数を数えておき、増えたぶんを新しいファイルとみなす。")
+    A(f"{indent}" + _folder_get("DlDir", "$" + Q_ + "*.*" + Q_, "DlBefore"))
+    A(f"{indent}SET DlCountBefore TO DlBefore.Count")
+    L.extend(_robin_act(cands, "click", "", indent,
+                        f"download {cands[0] if cands else ''}", step_no, cols))
+    A(f"{indent}IF RowError = " + _robin_str("") + " THEN")
+    A(f"{indent}    SET DlWait TO 0")
+    A(f"{indent}    SET DlDone TO False")
+    A(f"{indent}    LOOP WHILE DlDone = False")
+    A(f"{indent}        WAIT 1")
+    A(f"{indent}        SET DlWait TO DlWait + 1")
+    A(f"{indent}        " + _folder_get("DlDir", "$" + Q_ + "*.crdownload" + Q_, "DlTemp"))
+    A(f"{indent}        " + _folder_get("DlDir", "$" + Q_ + "*.*" + Q_, "DlNow"))
+    A(f"{indent}        IF DlTemp.Count = 0 THEN")
+    A(f"{indent}            IF DlNow.Count > DlCountBefore THEN")
+    A(f"{indent}                SET DlDone TO True")
+    A(f"{indent}            END")
+    A(f"{indent}        END")
+    A(f"{indent}        IF DlWait >= {timeout} THEN")
+    A(f"{indent}            SET DlDone TO True")
+    A(f"{indent}        END")
+    A(f"{indent}    END")
+    A(f"{indent}    " + _folder_get("DlDir", "$" + Q_ + "*.*" + Q_, "DlAfter"))
+    A(f"{indent}    IF DlAfter.Count > DlCountBefore THEN")
+    A(f"{indent}        # 一番新しいものが今回落ちてきたファイル")
+    A(f"{indent}        " + _folder_get_sorted("DlDir", "$" + Q_ + "*.*" + Q_, "DlSorted"))
+    A(f"{indent}        SET DlFile TO DlSorted[0]")
+    A(f"{indent}        SET DlName TO {_robin_str(_to_robin_var(name, cols))}")
+    A(f"{indent}        # 拡張子はそのまま残るので、Excel でも PDF でも同じ 1 行で足りる")
+    A(f"{indent}        File.RenameFiles.Rename Files: DlFile NewName: DlName "
+      "KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> DlRenamed")
+    A(f"{indent}    END")
+    A(f"{indent}    IF DlAfter.Count = DlCountBefore THEN")
+    _dlerr = ("ステップ%d（ダウンロード）でファイルが落ちてきませんでした"
+              "（%d 秒待機）" % (step_no, timeout))
+    A(f"{indent}        SET RowError TO {_robin_str(_dlerr)}")
+    A(f"{indent}    END")
+    A(f"{indent}END")
+    return L
+
+
 def _robin_fail(indent: str) -> list:
     """RowError が立っていたら、エビデンスと結果を記録して次の件へ。
     PrevFailed は件の先頭で True に置いてあるので、ここで触る必要はない。"""
@@ -655,7 +708,7 @@ def _lint_robin(lines: list, log=print) -> list:
         "Display.DefaultButton": {"Button1", "Button2"},
         "Web.Method": {"Get", "Post", "Delete"},
         "File.IfFileExists": {"Append", "Overwrite"},
-        "File.IfExists": {"DoNothing"},
+        "File.IfExists": {"DoNothing", "Overwrite"},
     }
     warns = []
     for i, ln in enumerate(lines, 1):
@@ -851,6 +904,10 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''")
     A("SET LogFile TO $'''%BaseDir%\\\\pad_progress.log'''")
     A("SET ShotDir TO $'''%BaseDir%'''")
+    A("# ダウンロードの受け取り先。落ちてきたファイルはここで名前を付け替える。")
+    A("SET DlDir TO $'''%BaseDir%\\\\download'''")
+    A("# 同じパスを JSON に入れる用（\\ を 2 本にしておく。Robin で \\\\ → \\ ）")
+    A("SET DlDirJson TO $'''%BaseDir%\\\\\\\\download'''")
     A("")
     A("# --- 運用スイッチ ---")
     A("# まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす")
@@ -1066,6 +1123,23 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("    SET SessionBody TO $'''%SessionBody%, \"proxy\": {\"proxyType\": \"manual\", "
       "\"httpProxy\": \"%ProxyAddr%\", \"sslProxy\": \"%ProxyAddr%\"}'''")
     A("END")
+    A("# ダウンロードの受け取り方。ブラウザーは素のプロファイルなので、")
+    A("# ここで指定しないと既定のダウンロードフォルダに落ち、確認も出る。")
+    A("#   default_directory      … 保存先。JSON の中の Windows パスは \\ を 4 本")
+    A("#   prompt_for_download    … 保存ダイアログを出さない")
+    A("#   always_open_pdf_externally … PDF をビューアで開かずファイルとして落とす")
+    A("#   automatic_downloads: 1 … 「複数ファイルのダウンロードを許可しますか」を出さない")
+    A("SET PrefKey TO $'''ms:edgeOptions'''")
+    A(f"IF Browser = {_robin_str('chrome')} THEN")
+    A("    SET PrefKey TO $'''goog:chromeOptions'''")
+    A("END")
+    A('SET SessionBody TO $' + Q_ + '%SessionBody%, "%PrefKey%": '
+      '{"prefs": {"download.default_directory": "%DlDirJson%"' + Q_)
+    A('SET SessionBody TO $' + Q_ + '%SessionBody%'
+      ', "download.prompt_for_download": false'
+      ', "plugins.always_open_pdf_externally": true' + Q_)
+    A('SET SessionBody TO $' + Q_ + '%SessionBody%, "profile": '
+      '{"default_content_setting_values": {"automatic_downloads": 1}}}}' + Q_)
     A("SET SessionBody TO $'''%SessionBody%}}}'''")
     A("SET AppJson TO $'''application/json'''")
     A("SET NewUrl TO $'''%DriverUrl%/session'''")
@@ -1292,6 +1366,10 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     # ---- 明細読み込み ----
     # SET の右辺で変数を参照するときは % で囲まない（%Col2% と書くと貼り付けが弾かれる）
     key_ref = "Col2" if len(cols) > 1 else "$''''''"
+    A("# ダウンロードの受け取り先。すでにあってもエラーにはならない。")
+    A("Folder.Create FolderPath: BaseDir FolderName: " + _robin_str("download")
+      + " Folder=> DlDirObj")
+    A("")
     A("# ================= 明細（CSV）を読み込む =================")
     A("IF Halt = False THEN")
     A("    File.ReadFromCSVFile.ReadCSV CSVFile: DetailsFile "
@@ -1422,6 +1500,16 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             L.extend(_robin_shot(inner, "ShotPath"))
             A("")
             continue
+        if t == "download":
+            m += 1
+            cands = _robin_filter_candidates(_candidates(st))
+            A(f"{inner}# ダウンロードしたファイルをエビデンスにする。")
+            A(f"{inner}# 画面に内容が出ず、Excel や PDF を受け取って初めて分かる業務向け。")
+            L.extend(_robin_download(cands, st.get("name", "") or shot_name,
+                                     inner, m, cols))
+            L.extend(_robin_fail(inner))
+            A("")
+            continue
         if t == "assertText":
             m += 1
             text = st.get("text", "")
@@ -1538,6 +1626,16 @@ def _dos(cmd_var: str, out_var: str, err_var: str, exit_var: str,
             f"StandardError=> {err_var} ExitCode=> {exit_var}")
 
 
+def _folder_get_sorted(folder_var: str, filter_var: str, out_var: str) -> str:
+    """更新日時の新しい順にファイルを取る。落ちてきたばかりのものが先頭に来る。"""
+    return (f"Folder.GetFiles Folder: {folder_var} FileFilter: {filter_var} "
+            "IncludeSubfolders: False FailOnAccessDenied: True "
+            "SortBy1: Folder.SortBy.LastModified SortDescending1: True "
+            "SortBy2: Folder.SortBy.Name SortDescending2: False "
+            "SortBy3: Folder.SortBy.LastAccessed SortDescending3: False "
+            f"Files=> {out_var}")
+
+
 def _folder_get(folder_var: str, filter_var: str, out_var: str) -> str:
     """フォルダー内のファイル取得。並べ替えの列挙は Folder.SortBy.○○（実機確認済み）。"""
     return (f"Folder.GetFiles Folder: {folder_var} FileFilter: {filter_var} "
@@ -1614,7 +1712,8 @@ def _use_utf8_stdout() -> None:
 # 置いても何も出力されない（起点の確認はループ先頭の要素から自動生成する）。
 SECTION_STEPS = {
     "setup": {"comment", "setViewport", "navigate", "click", "doubleClick", "change"},
-    "loop": {"comment", "screenshot", "assertText", "click", "doubleClick", "change"},
+    "loop": {"comment", "screenshot", "assertText", "click", "doubleClick", "change",
+             "download"},
     "recover": {"comment", "navigate", "click", "doubleClick", "change"},
     "teardown": {"comment", "click", "doubleClick", "change"},
 }
