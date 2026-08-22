@@ -324,163 +324,67 @@ JSON 用にエスケープして自動ログインのブロックに入れてい
 
 ## 🔄 WebDriver の自動取得
 
-**Edge と Chromeブラウザ は自動更新される。** そのたびに `msedgedriver.exe` を同じバージョンに入れ替えないと
-`session not created` で止まる。　これを手作業で追いかけるのは現実的でない。
+**Edge も Chrome も自動更新される。** そのたびにドライバーを同じ世代に入れ替えないと
+`session not created` で止まる。手作業で追いかけるのは現実的でないので自動化する。
 
-自動にするため **Selenium Manager**（Selenium 公式の単体実行ファイルで、Python も Node.js も要らない）
-を使用し、インストール済みブラウザーに対応するバージョンのWebDriverを自動で取得し更新する。
+取得元は `DriverSource` で選ぶ。**既定は `direct`。**
 
--⚠️`selenium-manager-windows.exe` をダウンロードし実行環境の `BaseDir`（例 `C:\temp`）に置いておく必要がある。 <br>
-　　入手先: <https://github.com/SeleniumHQ/selenium_manager_artifacts/releases>
+### direct — ベンダーのサイトから直接取る（既定）
+
+| | 版の決め方 | 取得先 |
+| --- | --- | --- |
+| Edge | レジストリの版をそのまま | `msedgedriver.microsoft.com/<版>/edgedriver_win64.zip` |
+| Chrome | メジャー番号 → `LATEST_RELEASE_<major>` で問い合わせ | `chrome-for-testing-public/<版>/win64/chromedriver-win64.zip` |
+
+**Chrome だけ 1 手多い。** 入っている版ぴったりのドライバーが無いことが多いため、
+その世代の最新版を問い合わせてから取りに行く。
+
+使うのは `curl.exe` / `tar.exe` / `powershell.exe` だけで、どれも Windows に最初から
+入っている Microsoft 署名済みの実行ファイル。落ちてくるドライバーもベンダー署名付き
+なので、**持ち込みの実行ファイルを止める環境でも動く。**
+
+```
+%BaseDir%\\driver\\<版>\\msedgedriver.exe
+%BaseDir%\\driver\\<版>\\chromedriver-win64\\chromedriver.exe
+```
+
+版ごとのフォルダに置くので、ブラウザーが更新されるとフォルダ名が変わり、自動的に
+取り直しになる。**中身を比べる処理が要らない。** すでにあれば何もしない。
+
+`curl` には `-f` を付けている。付けないと 404 でも成功を返し、エラーページを zip として
+保存してしまい、その先の `tar` が失敗して原因が読めなくなる。
+
+展開できたら zip は消す。20MB 前後あり、版が変わるたびに増えるため。**失敗したときは
+残す。** 手で開いて中身を確かめられる（エラーページを掴んでいた、という切り分けができる）。
+
+> **⚠️ プロキシはドライバーの取得にも要る。** 練習サイトのようにローカルのファイルを
+> 開く場合でも外へ出るので、社内プロキシ環境では `UseProxy` が要る。とくに Chrome は
+> 版の問い合わせで `googlechromelabs.github.io` へ出るため、**Edge が動いても
+> Chrome だけ失敗する**ことがある。
+
+### manager — Selenium Manager に任せる
+
+Selenium 公式の単体実行ファイル。`selenium-manager-windows.exe` を `BaseDir` に置く。
+入手先: <https://github.com/SeleniumHQ/selenium_manager_artifacts/releases>
 
 ```
 selenium-manager-windows.exe --browser edge --browser-version stable --output json
 ```
 
 ```json
-{
-  "logs": [ … ],
-  "result": {
-    "code": 0,
-    "message": "",
-    "driver_path": "C:\\Users\\…\\.cache\\selenium\\msedgedriver\\win64\\150.0.4078.105\\msedgedriver.exe",
-    "browser_path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
-  }
-}
+{"result": {"code": 0, "driver_path": "C:\\\\Users\\\\…\\\\msedgedriver.exe"}}
 ```
 
-⚠️**置き場所がバージョン番号を含むフォルダになる**点に注意。固定パスを `DriverExe` に書くと
-更新のたびに壊れるので、この  `result.driver_path` をフローが読み取って使う。
+置き場所がバージョン番号を含むフォルダになるので、`result.driver_path` を読み取って使う。
 
-**Chrome でも同じ仕組みが使える。** 生成物の冒頭にある `Browser` を `chrome` に変えるだけで、
-WebDriver へ渡すブラウザー名（`MicrosoftEdge` → `chrome`）、終了させるプロセス名
-（`msedgedriver` → `chromedriver`）、Selenium Manager が取得するドライバーの 3 つが同時に切り替わる。
+> **⚠️ 署名の無い実行ファイルを止める環境では、これ自体が起動できない。**
+> 実際、会社 PC では「アクセスが拒否されました」で動かなかった。ダウンロードは
+> できるので経路の問題ではなく、方式が成立しない。`direct` を既定にしたのはこのため。
 
-```
-SET Browser TO $'''edge'''
-SET BrowserName TO $'''MicrosoftEdge'''
-SET DriverProc TO $'''msedgedriver'''
-IF Browser = $'''chrome''' THEN
-    SET BrowserName TO $'''chrome'''
-    SET DriverProc TO $'''chromedriver'''
-END
-```
+### 手作業で置く場合
 
-💡対象サイトがブラウザー判定で表示を変える場合や、片方で不具合が出たときの逃げ道としても使える。
-生成時に決めておくなら `--pad-browser chrome` を付ける。
-
-生成器に `--auto-driver` を付けると次の仕組みが入る。**スイッチは冒頭の設定にまとめてあり、
-実際に取得を走らせる処理だけがドライバー起動の直前に置かれる。**
-
-```
-# --- ドライバーの入手方法 ---（冒頭の設定）
-SET AutoDriver TO True
-SET SmExe TO $'''selenium-manager-windows.exe'''
-```
-
-
-```
-SET AutoDriver TO True
-SET SmExe TO $'''selenium-manager-windows.exe'''
-IF AutoDriver THEN
-    SET SmArgs TO $'''%SmExe% --browser %Browser% --browser-version stable --output json'''
-    IF UseProxy THEN
-        SET SmArgs TO $'''%SmArgs% --proxy %ProxyAddr%'''
-    END
-    Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: SmArgs WorkingDirectory: BaseDir Timeout: 300 StandardOutput=> SmOutput StandardError=> SmError ExitCode=> SmExit
-    Variables.ConvertJsonToCustomObject Json: SmOutput CustomObject=> SmObj
-    IF SmObj['result']['code'] = 0 THEN
-        SET DriverExe TO SmObj['result']['driver_path']
-    END
-END
-```
-
-- **標準出力を受け取るのは「DOS コマンドの実行」**（`Scripting.RunDOSCommand`）。これまで使ってきた
-  「アプリケーションの実行」では出力を受け取れない。
-- **社内プロキシ環境ではドライバーのダウンロードもプロキシ経由**になるため、`--proxy` が要る。
-  `UseProxy` が `True` のときだけ自動で付く。
-- 初回はダウンロードが走るので `Timeout` は長め（300 秒）にしておく。2 回目以降はキャッシュから返る。
-- `ELSE` を使わず `IF code = 0` と `IF code <> 0` の 2 つに分けている（未検証の構文を避けるため）。
-- 取得に失敗したときは `Halt` を立てて**ドライバー起動そのものに入らない**。ここで止めないと、
-  更新前の古い固定パスで起動してしまい、症状が「セッション作成の失敗」に化けて原因が読めなくなる。
-
-### ドライバーとブラウザーの照合を目に見える形にする
-
-`AutoDriver` は「合っているはず」を前提にしていて、実際に何が起動したのかは出てこなかった。
-セッションを張った直後に、応答の `capabilities` から**実際に動いているもの**を取り出して
-ログとダイアログに出す。
-
-```
-SET BrowserVer TO SessionObj['value']['capabilities']['browserVersion']
-SET DriverVer TO $'''(不明)'''
-IF Browser = $'''chrome''' THEN
-    SET DriverVer TO SessionObj['value']['capabilities']['chrome']['chromedriverVersion']
-END
-IF Browser = $'''edge''' THEN
-    SET DriverVer TO SessionObj['value']['capabilities']['msedge']['msedgedriverVersion']
-END
-```
-
-出力はこの 1 行。`ShowDriverInfo` を `False` にするとダイアログは出ないが、ログには必ず残る。
-
-```
-[ドライバー] ブラウザー=chrome 151.0.7922.72 / WebDriver=chromedriver 151.0.7922.72 (…) /
-メジャー判定=一致 / 取得方法=Selenium Manager（ブラウザーのバージョンに合わせて自動取得）/ パス=…
-```
-
-- **比較するのはメジャーバージョンだけ。** Chrome とドライバーはビルド番号まで一致するとは
-  限らない（ブラウザー 115.0.5790.110 に対しドライバー 115.0.5790.102 など）。完全一致で
-  判定すると、正常な組み合わせを不一致と報告してしまう。
-- **メジャーの取り出しはページ側の JavaScript にやらせている。** PAD のテキスト分割アクションを
-  増やさずに済み、貼り付け時に黙って落ちる行を作らない。`/session/…/execute/sync` は
-  すでに使っている呼び出しなので、新しい仕組みは何も増えない。
-- `取得方法` は `AutoDriver` の結果で切り替わる。自動取得なら「ブラウザーのバージョンに
-  合わせて自動取得」、`False` なら「固定パス（ブラウザー更新時は手動で入れ替え）」と出る。
-  **ブラウザーだけ更新されて止まったときに、どちらの経路で動いていたかが後から分かる。**
-
-### 起動したブラウザーが要求どおりか確かめる ★重要
-
-**ドライバーは `browserName` の不一致を拒否する。** chromedriver に `MicrosoftEdge` を、
-msedgedriver に `chrome` を渡すと、どちらも `session not created: No matching capabilities
-found` を返した（実機確認）。ただし**バージョンの不一致は拒否しない** — msedgedriver 150 で
-Edge 151 のセッションは作れた。
-
-危ないのはフロー側の食い違いのほうである。`Browser` は capabilities のどのキーを読むかを
-決め、`BrowserName` は WebDriver へ送る値で、片方だけ書き換えると**セッションは正常に
-張れるのに版の取得だけが空振りする**。実機ではこれで「プロパティがありません」という、
-原因とは無関係な行で止まった。応答の `browserName` を見て、`BrowserName` と違えば
-そこで止める。
-
-```
-SET RealBrowser TO SessionObj['value']['capabilities']['browserName']
-IF RealBrowser <> BrowserName THEN
-    SET Halt TO True
-    SET HaltReason TO $'''要求したブラウザー(%BrowserName%)と実際に起動したブラウザー(%RealBrowser%)が違います。ドライバーの取り違えです'''
-END
-```
-
-**この判定を version の取得より前に置くこと。** `capabilities` の中でドライバーの版が入る
-キーはブラウザーごとに違う（Chrome は `chrome.chromedriverVersion`、Edge は
-`msedge.msedgedriverVersion`）ため、取り違えたまま先に進むと、こちらが想定したキーが
-存在せず「プロパティがありません」で落ちる。原因（取り違え）とは無関係な行で止まるので、
-切り分けが遠回りになる。
-
-### 中止した理由を記録する
-
-`Halt` は「ドライバー取得の失敗」「手動ログインのキャンセル」「起点画面に着けない」
-「セットアップ中のエラー」のどれでも立つ。理由を持たせないと、最後のダイアログが常に
-同じ文面になり、実際の原因と食い違う。`HaltReason` を必ずセットし、ダイアログと
-ログの両方に出す。
-
-```
-[2026/08/02 16:20:11] 中止 繰り返しの起点画面に到達できませんでした
-```
-
-
-
----
-
----
+`AutoDriver` を `False` にすると、冒頭の固定パスを使う。ネットワークの制限で自動取得が
+働かない環境向け。ブラウザーが更新されるたびに手で入れ替えることになる。
 
 ## 📥 ファイルのダウンロード（エビデンスが画面に出ない場合）
 
@@ -769,6 +673,7 @@ File: $'''ShotPath'''     ← 誤り（"ShotPath" という文字列になる）
 | フォルダー作成 | `Folder.Create FolderPath: FolderName: Folder=>` |
 | フォルダー内のファイル取得 | `Folder.GetFiles Folder: FileFilter: IncludeSubfolders: FailOnAccessDenied: SortBy1: Folder.SortBy.Name SortDescending1: … Files=>` |
 | ファイル名の変更 | `File.RenameFiles.Rename Files: NewName: KeepExtension: IfFileExists: File.IfExists.Overwrite RenamedFiles=>` |
+| ファイルの削除 | `File.Delete Files:` |
 | ループ / 条件 / 変数 | `LOOP FOREACH … IN … END` / `NEXT LOOP` / `IF … THEN … END` / `SET … TO …` / `LOOP WHILE … END` |
 
 `LOOP FOREACH` の内側でネストした `IF` と `NEXT LOOP` も正常に動作する。
