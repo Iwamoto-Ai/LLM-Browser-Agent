@@ -490,3 +490,33 @@ def test_download_prefs_in_session(tmp_path):
     # ブラウザーごとにキーが変わる
     assert "SET PrefKey TO $'''ms:edgeOptions'''" in txt
     assert "SET PrefKey TO $'''goog:chromeOptions'''" in txt
+
+
+def test_download_dir_survives_json_escaping(tmp_path):
+    """保存先が JSON の解釈を経ても元のパスに戻ること。
+
+    C:\\temp を素で JSON に入れると \\t がタブとして読まれる。
+    壊れたパスでもブラウザーは黙って既定のフォルダに落とすので、実行しても
+    気づけない。Robin リテラル → JSON の 2 段を通して確かめる。"""
+    batch = {"title": "dl", "setup": [{"type": "navigate", "url": "http://x/"}],
+             "loop": [{"type": "click", "selectors": [["#a"]]}]}
+    out = pad.write_robin(batch, r"C:\t\d.csv", "ID",
+                          str(tmp_path / "f.robin.txt"), out_dir=r"C:\temp")
+    txt = open(out, encoding="utf-8").read()
+    q3 = chr(39) * 3
+    pat = "SET DlDirJson TO " + chr(92) + "$" + q3 + "(.*?)" + q3
+    raw = re.search(pat, txt).group(1)
+
+    def unrobin(s):
+        o, i, b = [], 0, chr(92)
+        while i < len(s):
+            if s[i] == b and i + 1 < len(s) and s[i + 1] in (b, chr(39), chr(34)):
+                o.append(s[i + 1])
+                i += 2
+            else:
+                o.append(s[i])
+                i += 1
+        return "".join(o)
+
+    value = json.loads(chr(34) + unrobin(raw) + chr(34))
+    assert value == r"C:\temp\download", value

@@ -80,9 +80,13 @@ SET ResultFile TO $'''%BaseDir%\\pad_result.csv'''
 SET LogFile TO $'''%BaseDir%\\pad_progress.log'''
 SET ShotDir TO $'''%BaseDir%'''
 # ダウンロードの受け取り先。落ちてきたファイルはここで名前を付け替える。
-SET DlDir TO $'''%BaseDir%\\download'''
-# 同じパスを JSON に入れる用（\ を 2 本にしておく。Robin で \\ → \ ）
-SET DlDirJson TO $'''%BaseDir%\\\\download'''
+SET DlDir TO $'''C:\\temp\\download'''
+# 同じパスを JSON に入れる用。区切り文字を重ねてある。
+# %BaseDir% から組み立てると、展開後の C:\temp が JSON の中で
+# エスケープとして読まれてしまう（\t がタブになる）ので、ここは直接書く。
+# 上の DlDir と対になっている。片方だけ直すと食い違うので、
+# 変えるときは変換器の「ダウンロード保存先」で指定し直すのが確実。
+SET DlDirJson TO $'''C:\\\\temp\\\\download'''
 
 # --- 運用スイッチ ---
 # まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす
@@ -451,7 +455,7 @@ END
 END
 
 # ダウンロードの受け取り先。すでにあってもエラーにはならない。
-Folder.Create FolderPath: BaseDir FolderName: $'''download''' Folder=> DlDirObj
+Folder.Create FolderPath: $'''C:\\temp''' FolderName: $'''download''' Folder=> DlDirObj
 
 # ================= 明細（CSV）を読み込む =================
 IF Halt = False THEN

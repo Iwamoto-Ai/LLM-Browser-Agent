@@ -108,6 +108,9 @@
   <div><label for="shotName">エビデンスのファイル名</label>
     <input type="text" id="shotName" value="%RowId%__%RowKey%__%Stamp%">
     <span class="hint">%RowId% / %RowKey% / %Stamp% を差し込める</span></div>
+  <div><label for="downloadDir">ダウンロード保存先</label>
+    <input type="text" id="downloadDir" placeholder="空なら BaseDir の下の download">
+    <span class="hint">ログや結果CSVと同じ場所にしないこと</span></div>
   <div><label for="proxy">プロキシ (--proxy)</label>
     <input type="text" id="proxy" value="" placeholder="proxy.example.com:8080"></div>
   <div><label for="autodrv">ドライバー自動取得</label>
@@ -437,6 +440,25 @@ function originHint(batch, cands) {
     }
   }
   return "繰り返しの最初の操作ができる画面";
+}
+
+// JSON の文字列に入れる Windows パス。区切り文字を重ねて渡す。
+// JSON では C:\\temp の \\t がタブとして読まれる。壊れたパスを渡すと
+// ブラウザーは黙って既定のフォルダに落とすので、失敗にも気づけない。
+// ここで倍にしておけば、JSON の解釈を経て元のパスに戻る。
+// ダウンロードの受け取り先を、Robin 用と JSON 用の 2 つの形で返す。
+// 2 行を別々に書くと片方だけ直して食い違う。ここでまとめて作る。
+function downloadDir(outDir, dlDir) {
+  var sep = String.fromCharCode(92);
+  var base = String(dlDir || (outDir.replace(/[\\]+$/, "") + sep + "download"))
+    .replace(/[\\]+$/, "");
+  return { dir: base, json: base.split(sep).join(sep + sep) };
+}
+
+function jsonPath(base) {
+  var sep = String.fromCharCode(92);
+  return String(base).replace(/[\\]+$/, "").split(sep).join(sep + sep) +
+    sep + sep + "download";
 }
 
 var WEB_FLAGS = "EncodeRequestBody: False FailOnErrorStatus: False";
@@ -1104,11 +1126,16 @@ function buildRobin(batch, opt) {
   A("SET DetailsFile TO " + robinUnderBase(detailsPath, outDir));
   A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''");
   A("SET LogFile TO $'''%BaseDir%\\\\pad_progress.log'''");
+  var dl = downloadDir(outDir, opt.downloadDir || "");
   A("SET ShotDir TO $'''%BaseDir%'''");
   A("# ダウンロードの受け取り先。落ちてきたファイルはここで名前を付け替える。");
-  A("SET DlDir TO $'''%BaseDir%\\\\download'''");
-  A("# 同じパスを JSON に入れる用（\\ を 2 本にしておく。Robin で \\\\ → \\ ）");
-  A("SET DlDirJson TO $'''%BaseDir%\\\\\\\\download'''");
+  A("SET DlDir TO " + robinStr(dl.dir));
+  A("# 同じパスを JSON に入れる用。区切り文字を重ねてある。");
+  A("# %BaseDir% から組み立てると、展開後の C:\\temp が JSON の中で");
+  A("# エスケープとして読まれてしまう（\\t がタブになる）ので、ここは直接書く。");
+  A("# 上の DlDir と対になっている。片方だけ直すと食い違うので、");
+  A("# 変えるときは変換器の「ダウンロード保存先」で指定し直すのが確実。");
+  A("SET DlDirJson TO " + robinStr(dl.json));
   A("");
   A("# --- 運用スイッチ ---");
   A("# まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす");
@@ -1546,8 +1573,9 @@ function buildRobin(batch, opt) {
   // ---- 明細読み込み ----
   var keyRef = cols.length > 1 ? "Col2" : "$''''''";
   A("# ダウンロードの受け取り先。すでにあってもエラーにはならない。");
-  A("Folder.Create FolderPath: BaseDir FolderName: " + robinStr("download") +
-    " Folder=> DlDirObj");
+  var dlCut = dl.dir.lastIndexOf(String.fromCharCode(92));
+  A("Folder.Create FolderPath: " + robinStr(dl.dir.slice(0, dlCut)) +
+    " FolderName: " + robinStr(dl.dir.slice(dlCut + 1)) + " Folder=> DlDirObj");
   A("");
   A("# ================= 明細（CSV）を読み込む =================");
   A("IF Halt = False THEN");
@@ -2124,6 +2152,7 @@ root.PadConvert = {
         driverExe: $("driver").value.trim(),
         outDir: $("outdir").value.trim(),
         shotName: $("shotName").value.trim(),
+        downloadDir: $("downloadDir").value.trim(),
         proxy: $("proxy").value.trim(),
         autoDriver: $("autodrv").checked,
         browser: $("browser").value

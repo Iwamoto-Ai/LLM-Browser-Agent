@@ -494,6 +494,26 @@ def _robin_str(s: str) -> str:
     return "$'''" + s.replace("\\", "\\\\").replace("'", "\\'") + "'''"
 
 
+def _download_dir(out_dir: str, download_dir: str) -> tuple:
+    """ダウンロードの受け取り先を、Robin 用と JSON 用の 2 つの形で返す。
+
+    2 行を別々に書くと片方だけ直して食い違う。ここでまとめて作る。
+    指定が無ければ BaseDir の下の download を使う。"""
+    sep = chr(92)
+    base = (download_dir or (out_dir.rstrip(sep) + sep + "download")).rstrip(sep)
+    return base, base.replace(sep, sep * 2)
+
+
+def _json_path(base: str) -> str:
+    """JSON の文字列に入れる Windows パス。区切り文字を重ねて渡す。
+
+    JSON では C:\\temp の \\t がタブとして読まれる。壊れたパスを渡すと
+    ブラウザーは黙って既定のフォルダに落とすので、失敗にも気づけない。
+    ここで倍にしておけば、JSON の解釈を経て元のパスに戻る。"""
+    sep = chr(92)
+    return base.rstrip(sep).replace(sep, sep * 2) + sep * 2 + "download"
+
+
 def _robin_under_base(path_str: str, out_dir: str) -> str:
     """out_dir 配下のパスは %BaseDir% 相対のリテラルにする。
 
@@ -759,6 +779,7 @@ Q_ = "'''"   # Robin のリテラル区切り
 
 def write_robin(batch: dict, details_path: str, id_col: str, path: str,
                 shot_name: str = "%RowId%__%RowKey%__%Stamp%",
+                download_dir: str = "",
                 driver_exe: str = r"C:\temp\msedgedriver.exe",
                 out_dir: str = r"C:\temp", proxy: str = "",
                 auto_driver: bool = False,
@@ -903,11 +924,16 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"SET DetailsFile TO {_robin_under_base(details_path, out_dir)}")
     A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''")
     A("SET LogFile TO $'''%BaseDir%\\\\pad_progress.log'''")
+    _dl_dir, _dl_json = _download_dir(out_dir, download_dir)
     A("SET ShotDir TO $'''%BaseDir%'''")
     A("# ダウンロードの受け取り先。落ちてきたファイルはここで名前を付け替える。")
-    A("SET DlDir TO $'''%BaseDir%\\\\download'''")
-    A("# 同じパスを JSON に入れる用（\\ を 2 本にしておく。Robin で \\\\ → \\ ）")
-    A("SET DlDirJson TO $'''%BaseDir%\\\\\\\\download'''")
+    A(f"SET DlDir TO {_robin_str(_dl_dir)}")
+    A("# 同じパスを JSON に入れる用。区切り文字を重ねてある。")
+    A("# %BaseDir% から組み立てると、展開後の C:" + chr(92) + "temp が JSON の中で")
+    A("# エスケープとして読まれてしまう（" + chr(92) + "t がタブになる）ので、ここは直接書く。")
+    A("# 上の DlDir と対になっている。片方だけ直すと食い違うので、")
+    A("# 変えるときは変換器の「ダウンロード保存先」で指定し直すのが確実。")
+    A(f"SET DlDirJson TO {_robin_str(_dl_json)}")
     A("")
     A("# --- 運用スイッチ ---")
     A("# まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす")
@@ -1367,8 +1393,9 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     # SET の右辺で変数を参照するときは % で囲まない（%Col2% と書くと貼り付けが弾かれる）
     key_ref = "Col2" if len(cols) > 1 else "$''''''"
     A("# ダウンロードの受け取り先。すでにあってもエラーにはならない。")
-    A("Folder.Create FolderPath: BaseDir FolderName: " + _robin_str("download")
-      + " Folder=> DlDirObj")
+    _dl_parent, _, _dl_leaf = _dl_dir.rstrip(chr(92)).rpartition(chr(92))
+    A(f"Folder.Create FolderPath: {_robin_str(_dl_parent)} "
+      f"FolderName: {_robin_str(_dl_leaf)} Folder=> DlDirObj")
     A("")
     A("# ================= 明細（CSV）を読み込む =================")
     A("IF Halt = False THEN")
@@ -1766,6 +1793,11 @@ def main() -> None:
                    help="エビデンスのファイル名（拡張子なし）。"
                         "%RowId% / %RowKey% / %Stamp% を差し込める。"
                         "例: 【注文受諾】%RowId%_〇〇株式会社")
+    p.add_argument("--download-dir", default="",
+                   help="ダウンロードの受け取り先（既定: BaseDir の下の download）。"
+                        "実行環境のパスを渡すこと。"
+                        "ログや結果CSVと同じフォルダにすると、待機中に更新された"
+                        "ログを拾って付け替えてしまうので、専用のフォルダにする")
     p.add_argument("--auto-driver", action="store_true",
                    help="Selenium Manager でドライバーを自動取得する行を入れる"
                         "（selenium-manager-windows.exe を実行環境の BaseDir に置くこと）")
@@ -1793,7 +1825,7 @@ def main() -> None:
 
     if args.robin:
         out = write_robin(batch, args.details, id_col, args.robin,
-                          args.shot_name,
+                          args.shot_name, args.download_dir,
                           args.driver_exe, args.pad_out_dir, args.proxy,
                           args.auto_driver, args.pad_browser)
         js_out = out[:-len(".robin.txt")] + ".jsact.js" if out.endswith(".robin.txt") \
