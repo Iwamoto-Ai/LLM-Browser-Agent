@@ -439,6 +439,16 @@ function originHint(batch, cands) {
   return "繰り返しの最初の操作ができる画面";
 }
 
+// JSON の文字列に入れる Windows パス。区切り文字を重ねて渡す。
+// JSON では C:\\temp の \\t がタブとして読まれる。壊れたパスを渡すと
+// ブラウザーは黙って既定のフォルダに落とすので、失敗にも気づけない。
+// ここで倍にしておけば、JSON の解釈を経て元のパスに戻る。
+function jsonPath(base) {
+  var sep = String.fromCharCode(92);
+  return String(base).replace(/[\\]+$/, "").split(sep).join(sep + sep) +
+    sep + sep + "download";
+}
+
 var WEB_FLAGS = "EncodeRequestBody: False FailOnErrorStatus: False";
 
 function web(url, method, body, resp, status, indent) {
@@ -1107,8 +1117,11 @@ function buildRobin(batch, opt) {
   A("SET ShotDir TO $'''%BaseDir%'''");
   A("# ダウンロードの受け取り先。落ちてきたファイルはここで名前を付け替える。");
   A("SET DlDir TO $'''%BaseDir%\\\\download'''");
-  A("# 同じパスを JSON に入れる用（\\ を 2 本にしておく。Robin で \\\\ → \\ ）");
-  A("SET DlDirJson TO $'''%BaseDir%\\\\\\\\download'''");
+  A("# 同じパスを JSON に入れる用。区切り文字を重ねてある。");
+  A("# %BaseDir% から組み立てると、展開後の C:\\temp が JSON の中で");
+  A("# エスケープとして読まれてしまう（\\t がタブになる）ので、ここは直接書く。");
+  A("# BaseDir を変えたら、この行も合わせて直すこと。");
+  A("SET DlDirJson TO " + robinStr(jsonPath(outDir)));
   A("");
   A("# --- 運用スイッチ ---");
   A("# まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす");

@@ -494,6 +494,16 @@ def _robin_str(s: str) -> str:
     return "$'''" + s.replace("\\", "\\\\").replace("'", "\\'") + "'''"
 
 
+def _json_path(base: str) -> str:
+    """JSON の文字列に入れる Windows パス。区切り文字を重ねて渡す。
+
+    JSON では C:\\temp の \\t がタブとして読まれる。壊れたパスを渡すと
+    ブラウザーは黙って既定のフォルダに落とすので、失敗にも気づけない。
+    ここで倍にしておけば、JSON の解釈を経て元のパスに戻る。"""
+    sep = chr(92)
+    return base.rstrip(sep).replace(sep, sep * 2) + sep * 2 + "download"
+
+
 def _robin_under_base(path_str: str, out_dir: str) -> str:
     """out_dir 配下のパスは %BaseDir% 相対のリテラルにする。
 
@@ -906,8 +916,11 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("SET ShotDir TO $'''%BaseDir%'''")
     A("# ダウンロードの受け取り先。落ちてきたファイルはここで名前を付け替える。")
     A("SET DlDir TO $'''%BaseDir%\\\\download'''")
-    A("# 同じパスを JSON に入れる用（\\ を 2 本にしておく。Robin で \\\\ → \\ ）")
-    A("SET DlDirJson TO $'''%BaseDir%\\\\\\\\download'''")
+    A("# 同じパスを JSON に入れる用。区切り文字を重ねてある。")
+    A("# %BaseDir% から組み立てると、展開後の C:" + chr(92) + "temp が JSON の中で")
+    A("# エスケープとして読まれてしまう（" + chr(92) + "t がタブになる）ので、ここは直接書く。")
+    A("# BaseDir を変えたら、この行も合わせて直すこと。")
+    A(f"SET DlDirJson TO {_robin_str(_json_path(out_dir))}")
     A("")
     A("# --- 運用スイッチ ---")
     A("# まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす")
