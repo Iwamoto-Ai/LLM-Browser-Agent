@@ -504,6 +504,28 @@ def _download_dir(out_dir: str, download_dir: str) -> tuple:
     return base, base.replace(sep, sep * 2)
 
 
+# エビデンス名に差し込める記号。@ で囲むのは、正規表現のメタ文字を避けるため
+# （{ID} だと { がメタ文字になり、Text.Replace の正規表現版で意図せず効く）。
+_NAME_MARKS = (("@ID@", "RowId"), ("@KEY@", "RowKey"), ("@STAMP@", "Stamp"))
+
+
+def _name_expand(fmt: str, var: str, indent: str) -> list:
+    """名前テンプレートの @ID@ などを、その行の値に置き換える行を返す。
+
+    テンプレートは先頭の設定ブロックに置きたいが、%RowId% は明細を読んでから
+    でないと値が入らない。先頭では記号のまま持っておき、1 件ごとにここで
+    実際の値へ置き換える。テンプレートに出てこない記号の置換は出さない。"""
+    out = []
+    for mark, src in _NAME_MARKS:
+        if mark not in fmt:
+            continue
+        out.append(f"{indent}Text.Replace.ReplaceTextWithRegex Text: {var} "
+                   f"TextToFind: {_robin_str(mark)} IgnoreCase: False "
+                   f"ReplaceWith: {src} ActivateEscapeSequences: False "
+                   f"Result=> {var}")
+    return out
+
+
 def _json_path(base: str) -> str:
     """JSON の文字列に入れる Windows パス。区切り文字を重ねて渡す。
 
@@ -608,6 +630,8 @@ def _robin_download(cands: list, name: str, indent: str, step_no: int,
     A(f"{indent}        " + _folder_get_sorted("DlDir", "$" + Q_ + "*.*" + Q_, "DlSorted"))
     A(f"{indent}        SET DlFile TO DlSorted[0]")
     A(f"{indent}        SET DlName TO {_robin_str(_to_robin_var(name, cols))}")
+    for _ln in _name_expand(name, "DlName", indent + "        "):
+        L.append(_ln)
     A(f"{indent}        # 拡張子はそのまま残るので、Excel でも PDF でも同じ 1 行で足りる")
     A(f"{indent}        File.RenameFiles.Rename Files: DlFile NewName: DlName "
       "KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> DlRenamed")
@@ -778,7 +802,7 @@ def _lint_robin(lines: list, log=print) -> list:
 Q_ = "'''"   # Robin のリテラル区切り
 
 def write_robin(batch: dict, details_path: str, id_col: str, path: str,
-                shot_name: str = "%RowId%__%RowKey%__%Stamp%",
+                shot_name: str = "@ID@__@KEY@__@STAMP@",
                 download_dir: str = "",
                 driver_exe: str = r"C:\temp\msedgedriver.exe",
                 out_dir: str = r"C:\temp", proxy: str = "",
@@ -833,6 +857,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# 【メモ欄】自動で分かる範囲を初期値として入れてある。適宜書き換えて使う。")
     _mtitle = _safe_comment(str(batch.get("title", "")).strip(), cols)
     _mloop = len([s for s in loop_steps if s.get("type") != "comment"])
+    _dl_dir, _dl_json = _download_dir(out_dir, download_dir)
     _mkeys = " ／ ".join(cols[1:]) if len(cols) > 1 else "なし"
     A(f"# タイトル: {_mtitle}")
     A(f"# 処理内容：明細 1 件につき {_mloop} 操作を繰り返す"
@@ -842,6 +867,9 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     # 変換環境が Linux/macOS でも Windows パスの末尾を取り出せるようにする
     _mcsv = details_path.replace("\\", "/").rstrip("/").split("/")[-1]
     A(f"#           明細CSV: {_mcsv}")
+    A(f"#           BaseDir: {out_dir}")
+    A(f"#           エビデンス名: {shot_name}")
+    A(f"#           ダウンロード保存先: {_dl_dir}")
     A(f"# 備考：{datetime.now():%Y/%m/%d} 生成 ／ ブラウザー={browser}"
       f" ／ ドライバー自動取得={'有効' if auto_driver else '無効'}"
       f" ／ プロキシ={proxy or '未使用'}")
@@ -924,8 +952,10 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"SET DetailsFile TO {_robin_under_base(details_path, out_dir)}")
     A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''")
     A("SET LogFile TO $'''%BaseDir%\\\\pad_progress.log'''")
-    _dl_dir, _dl_json = _download_dir(out_dir, download_dir)
     A("SET ShotDir TO $'''%BaseDir%'''")
+    A("# エビデンスのファイル名。差し込みは @ID@（ID列）/ @KEY@（業務キー）/")
+    A("# @STAMP@（日時 yyyyMMdd_HHmmss）。1 件ごとにその行の値へ置き換わる。")
+    A(f"SET ShotNameFmt TO {_robin_str(shot_name)}")
     A("# ダウンロードの受け取り先。落ちてきたファイルはここで名前を付け替える。")
     A(f"SET DlDir TO {_robin_str(_dl_dir)}")
     A("# 同じパスを JSON に入れる用。区切り文字を重ねてある。")
@@ -1513,9 +1543,10 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
       "CustomFormat: $'''yyyyMMdd_HHmmss''' Result=> Stamp")
     A(f"{inner}Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt "
       "CustomFormat: $'''yyyy/MM/dd HH:mm:ss''' Result=> RecStamp")
-    A(f"{inner}# エビデンスのファイル名。ここ 1 行を直せば命名が変わる。")
-    A(f"{inner}# 使える差し込み: %RowId%（ID列）/ %RowKey%（業務キー）/ %Stamp%（日時）")
-    A(f"{inner}SET ShotName TO {_robin_str(shot_name)}")
+    A(f"{inner}# エビデンスのファイル名。書式は冒頭の ShotNameFmt で決める。")
+    A(f"{inner}SET ShotName TO ShotNameFmt")
+    for _ln in _name_expand(shot_name, "ShotName", inner):
+        A(_ln)
     A(f"{inner}SET ShotPath TO $'''%ShotDir%\\\\%ShotName%.png'''")
     A(f"{inner}SET FailShot TO $'''%ShotDir%\\\\fail_%ShotName%.png'''")
     A(f"{inner}File.WriteText File: LogFile "
@@ -1530,7 +1561,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             A(f"{inner}# 💬 {_safe_comment(st.get('text', ''), cols)}")
             continue
         if t == "screenshot":
-            A(f"{inner}# エビデンス保存（%RowId%__%RowKey%__日時）")
+            A(f"{inner}# エビデンス保存（名前は冒頭の ShotNameFmt で決まる）")
             A(f"{inner}# WebDriver に撮らせるとページの表示領域だけが写る。")
             A(f"{inner}# デスクトップや他ウィンドウは写らず、フォーカスにも依存しない。")
             A(f"{inner}# 逆にスクロールしないと見えない範囲は写らない点に注意。")
@@ -1799,10 +1830,10 @@ def main() -> None:
     p.add_argument("--pad-browser", choices=["edge", "chrome"], default="edge",
                    help="生成する Robin が使うブラウザー（既定 edge）。"
                         "生成後も Robin 冒頭の Browser を書き換えれば切り替えられる")
-    p.add_argument("--shot-name", default="%RowId%__%RowKey%__%Stamp%",
+    p.add_argument("--shot-name", default="@ID@__@KEY@__@STAMP@",
                    help="エビデンスのファイル名（拡張子なし）。"
-                        "%RowId% / %RowKey% / %Stamp% を差し込める。"
-                        "例: 【注文受諾】%RowId%_〇〇株式会社")
+                        "@ID@ / @KEY@ / @STAMP@ を差し込める。"
+                        "例: 【注文受諾】@ID@_〇〇株式会社")
     p.add_argument("--download-dir", default="",
                    help="ダウンロードの受け取り先（既定: BaseDir の下の download）。"
                         "実行環境のパスを渡すこと。"

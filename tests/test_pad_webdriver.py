@@ -555,3 +555,42 @@ def test_chrome_driver_home_created_before_lookup(tmp_path):
     create = txt.index("FolderName: $" + chr(39) * 3 + "chromedriver-win64")
     lookup = txt.index("Folder.GetFiles Folder: DrvHome")
     assert create < lookup, txt[create - 200:lookup + 80]
+
+
+def test_shot_name_template_at_top(tmp_path):
+    """エビデンス名の書式を先頭の設定ブロックに置き、1 件ごとに展開すること。
+
+    %RowId% は明細を読んでからでないと値が入らないので、テンプレートは
+    @ID@ のような記号で持っておき、ループの中で実際の値に置き換える。
+    テンプレートに出てこない記号の置換は出さない（無駄な行を増やさない）。"""
+    batch = {"title": "t", "setup": [{"type": "navigate", "url": "http://x/"}],
+             "loop": [{"type": "click", "selectors": [["#a"]]},
+                      {"type": "screenshot", "name": "s"}]}
+    out = pad.write_robin(batch, r"C:\t\d.csv", "ID",
+                          str(tmp_path / "f.robin.txt"),
+                          shot_name="【受諾】@ID@_社名")
+    txt = open(out, encoding="utf-8").read()
+    q3 = chr(39) * 3
+    assert "SET ShotNameFmt TO $" + q3 + "【受諾】@ID@_社名" in txt
+    assert "SET ShotName TO ShotNameFmt" in txt
+    assert "TextToFind: $" + q3 + "@ID@" in txt
+    # 使っていない記号の置換は出さない（説明のコメントには出てよい）
+    assert "TextToFind: $" + q3 + "@KEY@" not in txt
+    assert "TextToFind: $" + q3 + "@STAMP@" not in txt
+    # 設定ブロック（ループより前）に書式がある
+    assert txt.index("SET ShotNameFmt") < txt.index("LOOP FOREACH")
+
+
+def test_memo_lines_include_paths(tmp_path):
+    """メモ欄に BaseDir・エビデンス名・ダウンロード保存先が出ること。
+
+    既定値でも書く。「書いていない＝既定」より「書いてある」ほうが
+    確認が早い。"""
+    batch = {"title": "t", "setup": [{"type": "navigate", "url": "http://x/"}],
+             "loop": [{"type": "click", "selectors": [["#a"]]}]}
+    out = pad.write_robin(batch, r"C:\t\d.csv", "ID",
+                          str(tmp_path / "f.robin.txt"), out_dir=r"C:\temp")
+    head = open(out, encoding="utf-8").read().split("LLM-Browser-Agent")[0]
+    assert "BaseDir: C:" + chr(92) + "temp" in head
+    assert "エビデンス名: @ID@__@KEY@__@STAMP@" in head
+    assert "ダウンロード保存先: C:" + chr(92) + "temp" + chr(92) + "download" in head

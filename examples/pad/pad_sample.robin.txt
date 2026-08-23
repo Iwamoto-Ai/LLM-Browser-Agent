@@ -6,6 +6,9 @@
 # 処理内容：明細 1 件につき 6 操作を繰り返す（ID列: ID ／ 業務キー: KEY）
 #           開始URL: file:///C:/temp/sample.html
 #           明細CSV: sample_batch.csv
+#           BaseDir: C:\temp
+#           エビデンス名: @ID@__@KEY@__@STAMP@
+#           ダウンロード保存先: C:\temp\download
 # 備考：2026/08/23 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
 # ============================================================
 # LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
@@ -79,6 +82,9 @@ SET DetailsFile TO $'''%BaseDir%\\sample_batch.csv'''
 SET ResultFile TO $'''%BaseDir%\\pad_result.csv'''
 SET LogFile TO $'''%BaseDir%\\pad_progress.log'''
 SET ShotDir TO $'''%BaseDir%'''
+# エビデンスのファイル名。差し込みは @ID@（ID列）/ @KEY@（業務キー）/
+# @STAMP@（日時 yyyyMMdd_HHmmss）。1 件ごとにその行の値へ置き換わる。
+SET ShotNameFmt TO $'''@ID@__@KEY@__@STAMP@'''
 # ダウンロードの受け取り先。落ちてきたファイルはここで名前を付け替える。
 SET DlDir TO $'''C:\\temp\\download'''
 # 同じパスを JSON に入れる用。区切り文字を重ねてある。
@@ -539,9 +545,11 @@ IF Halt = False THEN
         DateTime.GetCurrentDateTime.Local DateTimeFormat: DateTime.DateTimeFormat.DateAndTime CurrentDateTime=> NowDt
         Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt CustomFormat: $'''yyyyMMdd_HHmmss''' Result=> Stamp
         Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt CustomFormat: $'''yyyy/MM/dd HH:mm:ss''' Result=> RecStamp
-        # エビデンスのファイル名。ここ 1 行を直せば命名が変わる。
-        # 使える差し込み: %RowId%（ID列）/ %RowKey%（業務キー）/ %Stamp%（日時）
-        SET ShotName TO $'''%RowId%__%RowKey%__%Stamp%'''
+        # エビデンスのファイル名。書式は冒頭の ShotNameFmt で決める。
+        SET ShotName TO ShotNameFmt
+        Text.Replace.ReplaceTextWithRegex Text: ShotName TextToFind: $'''@ID@''' IgnoreCase: False ReplaceWith: RowId ActivateEscapeSequences: False Result=> ShotName
+        Text.Replace.ReplaceTextWithRegex Text: ShotName TextToFind: $'''@KEY@''' IgnoreCase: False ReplaceWith: RowKey ActivateEscapeSequences: False Result=> ShotName
+        Text.Replace.ReplaceTextWithRegex Text: ShotName TextToFind: $'''@STAMP@''' IgnoreCase: False ReplaceWith: Stamp ActivateEscapeSequences: False Result=> ShotName
         SET ShotPath TO $'''%ShotDir%\\%ShotName%.png'''
         SET FailShot TO $'''%ShotDir%\\fail_%ShotName%.png'''
         File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 開始''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
