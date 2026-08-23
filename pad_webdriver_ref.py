@@ -1041,6 +1041,11 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("            SET DrvHome TO $'''%DrvDir%\\\\chromedriver-win64'''")
     A("            SET DrvExeName TO $'''chromedriver.exe'''")
     A("            SET ZipUrl TO $'''https://storage.googleapis.com/chrome-for-testing-public/%DrvVer%/win64/chromedriver-win64.zip'''")
+    A("            # Chrome の zip は chromedriver-win64 の下に展開される。")
+    A("            # 先に作っておく。Folder.GetFiles はフォルダが無いとエラーで止まり、")
+    A("            # 展開前の存在確認ができない（Edge は DrvDir がそのまま使えるので通る）。")
+    A("            Folder.Create FolderPath: DrvDir "
+      "FolderName: $'''chromedriver-win64''' Folder=> DrvHomeObj")
     A("        END")
     A("        SET ZipPath TO $'''%DrvDir%\\\\driver.zip'''")
     A("        " + _folder_get("DrvHome", "DrvExeName", "HaveDrv"))
