@@ -106,8 +106,8 @@
   <div><label for="browser">ブラウザー (--pad-browser)</label>
     <select id="browser"><option value="edge">edge</option><option value="chrome">chrome</option></select></div>
   <div><label for="shotName">エビデンスのファイル名</label>
-    <input type="text" id="shotName" value="%RowId%__%RowKey%__%Stamp%">
-    <span class="hint">%RowId% / %RowKey% / %Stamp% を差し込める</span></div>
+    <input type="text" id="shotName" value="@ID@__@KEY@__@STAMP@">
+    <span class="hint">@ID@ / @KEY@ / @STAMP@ を差し込める</span></div>
   <div><label for="downloadDir">ダウンロード保存先</label>
     <input type="text" id="downloadDir" placeholder="空なら BaseDir の下の download">
     <span class="hint">ログや結果CSVと同じ場所にしないこと</span></div>
@@ -398,6 +398,7 @@ function robinDownload(cands, name, indent, stepNo, cols, timeout) {
   A(indent + "        " + folderGetSorted("DlDir", "$" + Q_ + "*.*" + Q_, "DlSorted"));
   A(indent + "        SET DlFile TO DlSorted[0]");
   A(indent + "        SET DlName TO " + robinStr(toRobinVar(name, cols)));
+  nameExpand(name, "DlName", indent + "        ").forEach(function (ln) { L.push(ln); });
   A(indent + "        # 拡張子はそのまま残るので、Excel でも PDF でも同じ 1 行で足りる");
   A(indent + "        File.RenameFiles.Rename Files: DlFile NewName: DlName " +
     "KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> DlRenamed");
@@ -453,6 +454,27 @@ function downloadDir(outDir, dlDir) {
   var base = String(dlDir || (outDir.replace(/[\\]+$/, "") + sep + "download"))
     .replace(/[\\]+$/, "");
   return { dir: base, json: base.split(sep).join(sep + sep) };
+}
+
+// エビデンス名に差し込める記号。@ で囲むのは、正規表現のメタ文字を避けるため
+// （{ID} だと { がメタ文字になり、Text.Replace の正規表現版で意図せず効く）。
+var NAME_MARKS = [["@ID@", "RowId"], ["@KEY@", "RowKey"], ["@STAMP@", "Stamp"]];
+
+// 名前テンプレートの @ID@ などを、その行の値に置き換える行を返す。
+// テンプレートは先頭の設定ブロックに置きたいが、%RowId% は明細を読んでから
+// でないと値が入らない。先頭では記号のまま持っておき、1 件ごとにここで
+// 実際の値へ置き換える。テンプレートに出てこない記号の置換は出さない。
+function nameExpand(fmt, varName, indent) {
+  var out = [];
+  for (var i = 0; i < NAME_MARKS.length; i++) {
+    var mark = NAME_MARKS[i][0], src = NAME_MARKS[i][1];
+    if (String(fmt).indexOf(mark) < 0) { continue; }
+    out.push(indent + "Text.Replace.ReplaceTextWithRegex Text: " + varName +
+      " TextToFind: " + robinStr(mark) + " IgnoreCase: False" +
+      " ReplaceWith: " + src + " ActivateEscapeSequences: False" +
+      " Result=> " + varName);
+  }
+  return out;
 }
 
 function jsonPath(base) {
@@ -995,7 +1017,7 @@ function buildRobin(batch, opt) {
   var autoDriver = !!opt.autoDriver;
   var browser = opt.browser || "edge";
   var today = opt.today;
-  var shotName = opt.shotName || "%RowId%__%RowKey%__%Stamp%";   // {y,m,d}（テスト用に固定できるようにする）
+  var shotName = opt.shotName || "@ID@__@KEY@__@STAMP@";   // {y,m,d}（テスト用に固定できるようにする）
 
   var jsOne = jsActOneline();
   var cols = [idCol];
@@ -1039,7 +1061,11 @@ function buildRobin(batch, opt) {
     "（ID列: " + idCol + " ／ 業務キー: " + mkeys + "）");
   if (startUrl) { A("#           開始URL: " + startUrl); }
   var mcsv = detailsPath.split("\\").join("/").replace(/\/+$/, "").split("/").pop();
+  var dl = downloadDir(outDir, opt.downloadDir || "");
   A("#           明細CSV: " + mcsv);
+  A("#           BaseDir: " + outDir);
+  A("#           エビデンス名: " + shotName);
+  A("#           ダウンロード保存先: " + dl.dir);
   var d = today || (function () { var t = new Date();
     return { y: t.getFullYear(), m: t.getMonth() + 1, d: t.getDate() }; })();
   var pad2 = function (n) { return (n < 10 ? "0" : "") + n; };
@@ -1126,8 +1152,10 @@ function buildRobin(batch, opt) {
   A("SET DetailsFile TO " + robinUnderBase(detailsPath, outDir));
   A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''");
   A("SET LogFile TO $'''%BaseDir%\\\\pad_progress.log'''");
-  var dl = downloadDir(outDir, opt.downloadDir || "");
   A("SET ShotDir TO $'''%BaseDir%'''");
+  A("# エビデンスのファイル名。差し込みは @ID@（ID列）/ @KEY@（業務キー）/");
+  A("# @STAMP@（日時 yyyyMMdd_HHmmss）。1 件ごとにその行の値へ置き換わる。");
+  A("SET ShotNameFmt TO " + robinStr(shotName));
   A("# ダウンロードの受け取り先。落ちてきたファイルはここで名前を付け替える。");
   A("SET DlDir TO " + robinStr(dl.dir));
   A("# 同じパスを JSON に入れる用。区切り文字を重ねてある。");
@@ -1692,9 +1720,9 @@ function buildRobin(batch, opt) {
     "CustomFormat: $'''yyyyMMdd_HHmmss''' Result=> Stamp");
   A(inner + "Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt " +
     "CustomFormat: $'''yyyy/MM/dd HH:mm:ss''' Result=> RecStamp");
-  A(inner + "# エビデンスのファイル名。ここ 1 行を直せば命名が変わる。");
-  A(inner + "# 使える差し込み: %RowId%（ID列）/ %RowKey%（業務キー）/ %Stamp%（日時）");
-  A(inner + "SET ShotName TO " + robinStr(shotName));
+  A(inner + "# エビデンスのファイル名。書式は冒頭の ShotNameFmt で決める。");
+  A(inner + "SET ShotName TO ShotNameFmt");
+  nameExpand(shotName, "ShotName", inner).forEach(function (ln) { A(ln); });
   A(inner + "SET ShotPath TO $'''%ShotDir%\\\\%ShotName%.png'''");
   A(inner + "SET FailShot TO $'''%ShotDir%\\\\fail_%ShotName%.png'''");
   A(inner + "File.WriteText File: LogFile " +
@@ -1707,7 +1735,7 @@ function buildRobin(batch, opt) {
     var lst = loopSteps[li], lt = lst.type;
     if (lt === "comment") { A(inner + "# 💬 " + safeComment(lst.text || "", cols)); continue; }
     if (lt === "screenshot") {
-      A(inner + "# エビデンス保存（%RowId%__%RowKey%__日時）");
+            A(inner + "# エビデンス保存（名前は冒頭の ShotNameFmt で決まる）");
       A(inner + "# WebDriver に撮らせるとページの表示領域だけが写る。");
       A(inner + "# デスクトップや他ウィンドウは写らず、フォーカスにも依存しない。");
       A(inner + "# 逆にスクロールしないと見えない範囲は写らない点に注意。");
