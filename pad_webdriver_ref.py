@@ -918,27 +918,19 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"SET BaseDir TO {_robin_str(out_dir)}")
     A("# ※ BaseDir の末尾に \\ を付けないこと（%BaseDir%\\file.png が二重になる）")
     A("")
-    A("# --- ドライバーの入手方法 ---")
-    A("# AutoDriver = True なら、入っているブラウザーに合わせて自動で取ってくる。")
-    A("# ブラウザーが更新されても入れ替えが要らない。")
-    A("#")
-    A("# DriverSource = direct  … ベンダーのサイトから直接取る（推奨）。")
-    A("#   使うのは curl.exe / tar.exe / powershell.exe だけで、どれも Windows に")
-    A("#   最初から入っている Microsoft 署名済みの実行ファイル。持ち込みの exe を")
-    A("#   実行できない環境でも動く。落ちてくるドライバーもベンダー署名付き。")
-    A("# DriverSource = manager … Selenium Manager に任せる。")
-    A("#   selenium-manager-windows.exe を BaseDir に置いておく必要がある。取得元:")
-    A("#   https://github.com/SeleniumHQ/selenium_manager_artifacts/releases")
-    A("#   ※ 署名の無い実行ファイルを止める環境では、これ自体が起動できない。")
-    A("#")
-    A("# AutoDriver = False … 下の固定パスを使う。ブラウザー更新時は手で入れ替える。")
-    A(f"SET AutoDriver TO {'True' if auto_driver else 'False'}")
-    A(f"SET DriverSource TO {_robin_str('direct')}")
-    A("SET SmExe TO $'''selenium-manager-windows.exe'''")
+    A("# --- 運用スイッチ ---")
+    A("# まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす")
+    A("SET MaxItems TO 1")
+    A("# 起動したブラウザーとドライバーの種類・バージョンをダイアログで出す")
+    A("# False にしてもログ（pad_progress.log）には必ず 1 行残る")
+    A("SET ShowDriverInfo TO True")
+    A("# 失敗分だけを再実行するとき True（読み込み元と出力先が自動で切り替わる）")
+    A("SET RetryMode TO False")
+    A("IF RetryMode THEN")
+    A("    SET DetailsFile TO $'''%BaseDir%\\\\pad_result.csv'''")
+    A("    SET ResultFile TO $'''%BaseDir%\\\\pad_result_retry.csv'''")
+    A("END")
     A("")
-    A("# AutoDriver = False のときに使う固定パス。Browser に追従させるため、")
-    A("# edge / chrome それぞれの既定を持ち、下の IF で切り替える。")
-    A("# BaseDir 以外に置く場合は、次の 2 行を直接書き換えること。")
     _arg = _robin_under_base(driver_exe, out_dir)
     _edge = _arg if browser == "edge" else "$" + Q_ + "%BaseDir%\\\\msedgedriver.exe" + Q_
     _chrome = _arg if browser == "chrome" else "$" + Q_ + "%BaseDir%\\\\chromedriver.exe" + Q_
@@ -965,19 +957,27 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# 変えるときは変換器の「ダウンロード保存先」で指定し直すのが確実。")
     A(f"SET DlDirJson TO {_robin_str(_dl_json)}")
     A("")
-    A("# --- 運用スイッチ ---")
-    A("# まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす")
-    A("SET MaxItems TO 1")
-    A("# 起動したブラウザーとドライバーの種類・バージョンをダイアログで出す")
-    A("# False にしてもログ（pad_progress.log）には必ず 1 行残る")
-    A("SET ShowDriverInfo TO True")
-    A("# 失敗分だけを再実行するとき True（読み込み元と出力先が自動で切り替わる）")
-    A("SET RetryMode TO False")
-    A("IF RetryMode THEN")
-    A("    SET DetailsFile TO $'''%BaseDir%\\\\pad_result.csv'''")
-    A("    SET ResultFile TO $'''%BaseDir%\\\\pad_result_retry.csv'''")
-    A("END")
+    A("# --- ドライバーの入手方法 ---")
+    A("# AutoDriver = True なら、入っているブラウザーに合わせて自動で取ってくる。")
+    A("# ブラウザーが更新されても入れ替えが要らない。")
+    A("#")
+    A("# DriverSource = direct  … ベンダーのサイトから直接取る（推奨）。")
+    A("#   使うのは curl.exe / tar.exe / powershell.exe だけで、どれも Windows に")
+    A("#   最初から入っている Microsoft 署名済みの実行ファイル。持ち込みの exe を")
+    A("#   実行できない環境でも動く。落ちてくるドライバーもベンダー署名付き。")
+    A("# DriverSource = manager … Selenium Manager に任せる。")
+    A("#   selenium-manager-windows.exe を BaseDir に置いておく必要がある。取得元:")
+    A("#   https://github.com/SeleniumHQ/selenium_manager_artifacts/releases")
+    A("#   ※ 署名の無い実行ファイルを止める環境では、これ自体が起動できない。")
+    A("#")
+    A("# AutoDriver = False … 下の固定パスを使う。ブラウザー更新時は手で入れ替える。")
+    A(f"SET AutoDriver TO {'True' if auto_driver else 'False'}")
+    A(f"SET DriverSource TO {_robin_str('direct')}")
+    A("SET SmExe TO $'''selenium-manager-windows.exe'''")
     A("")
+    A("# AutoDriver = False のときに使う固定パス。Browser に追従させるため、")
+    A("# edge / chrome それぞれの既定を持ち、下の IF で切り替える。")
+    A("# ドライバーの置き場所を変えるときは、上の SET EdgeDriverExe / ChromeDriverExe を直す。")
     A("# --- 要素操作の共通 JavaScript ---")
     A("# PAD は長すぎる 1 行を貼り付けても黙って無視するため、短い行に分けて継ぎ足す。")
     A("# （%JsAct% は直前までの内容。順番どおりに貼ること）")
@@ -1360,21 +1360,20 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     # 残っている。値を読まなければ、生成物に出る余地がない。
     # 起点までの移動は普通メニューのクリックだけで足りる。
     move = [st for st in setup if st.get("type") in ("click", "doubleClick")]
-    if move:
-        A("IF Halt = False THEN")
-        A("# ---------- 起点画面まで進む ----------")
-        A("# ログイン直後の画面から、繰り返しの起点までメニューを辿る。")
-        A("# ここは通らなくても構わない（すでに起点にいる場合など）。")
-        A("# 起点に着いたかどうかは次の確認で見る。")
+
+    def _emit_move(indent: str) -> None:
+        """起点画面まで、録画に残っているメニュー移動を再生する。
+
+        失敗しても止めない。すでに起点にいる場合はメニューが無くて空振りする
+        だけで、それで構わない。着いたかどうかは直後の確認で見る。"""
         for st in move:
             cands = _candidates(st)
             if not _robin_filter_candidates(cands):
                 continue
-            for ln in _robin_act_best_effort(cands, "click", "", "    ",
+            for ln in _robin_act_best_effort(cands, "click", "", indent,
                                              f"click {cands[0]}", cols):
                 A(ln)
-        A("END")
-        A("")
+
     A("")
     # ---- 起点画面の確認 ----
     # 手動ログイン運用では、人がどこまで進めて[OK]を押したかで結果が変わる。
@@ -1385,10 +1384,20 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
         A("# 1 度きりで中止すると、画面を直してから実行し直すことになって手間が増える。")
         body_args = json.dumps([first_target, "find", ""], ensure_ascii=False)
         hint = origin_hint
-        A(f"SET ActBody TO $'''{{\"script\": \"%JsAct%\", \"args\": {body_args}}}'''")
         A("SET StartOk TO False")
         A("SET StartTry TO 0")
         A("LOOP WHILE StartOk = False")
+        if move:
+            A("    # ---------- 起点画面まで進む ----------")
+            A("    # ログイン直後の画面から、繰り返しの起点までメニューを辿る。")
+            A("    # 毎周やり直すのは、1 回目にログイン前の画面で空振りしても、")
+            A("    # ログインしてから[OK]を押せばそのまま起点まで進めるようにするため。")
+            A("    # すでに起点にいるときはメニューが無くて空振りするだけ。")
+            _emit_move("    ")
+            A("")
+        A("    # 起点かどうかを調べる。移動で ActBody を使い回しているので、")
+        A("    # ここで確認用の本文に入れ直す。")
+        A(f"    SET ActBody TO $'''{{\"script\": \"%JsAct%\", \"args\": {body_args}}}'''")
         A("    " + _web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus"))
         A("    # 応答コードを先に見る。エラー応答には ok が無いので、そのまま")
         A("    # 読みに行くと「プロパティがありません」で止まる。")
@@ -1400,15 +1409,27 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
         A("    END")
         A("    IF StartOk = False THEN")
         A("        SET StartTry TO StartTry + 1")
-        _msg = _robin_str(
+        # 1 回目はログイン前に押してしまった可能性が高い。そこを先に言う。
+        # 2 回目以降は起点まで進んでいないほうが疑わしいので、目印だけ出す。
+        _dlg = ("Icon: Display.Icon.Warning Buttons: Display.Buttons.OKCancel "
+                "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True "
+                "ButtonPressed=> StartBtn")
+        _msg1 = _robin_str(
+            "ログインが済んでいなければ、ログインしてから[OK]。"
+            "済んでいれば" + hint + "まで進めて[OK]。")
+        _msg2 = _robin_str(
             "起点画面が出ていません。" + hint +
             "まで進めて[OK]。（%StartTry% 回目）")
-        A("        Display.ShowMessageDialog.ShowMessage Title: "
+        A("        IF StartTry = 1 THEN")
+        A("            Display.ShowMessageDialog.ShowMessage Title: "
+          + _robin_str("ログインは終わりましたか")
+          + f" Message: {_msg1} {_dlg}")
+        A("        END")
+        A("        IF StartTry > 1 THEN")
+        A("            Display.ShowMessageDialog.ShowMessage Title: "
           + _robin_str("起点画面ではありません")
-          + f" Message: {_msg} Icon: Display.Icon.Warning "
-            "Buttons: Display.Buttons.OKCancel "
-            "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True "
-            "ButtonPressed=> StartBtn")
+          + f" Message: {_msg2} {_dlg}")
+        A("        END")
         A(f"        IF StartBtn = {_robin_str('Cancel')} THEN")
         A("            SET Halt TO True")
         A(f"            SET HaltReason TO "

@@ -594,3 +594,51 @@ def test_memo_lines_include_paths(tmp_path):
     assert "BaseDir: C:" + chr(92) + "temp" in head
     assert "エビデンス名: @ID@__@KEY@__@STAMP@" in head
     assert "ダウンロード保存先: C:" + chr(92) + "temp" + chr(92) + "download" in head
+
+
+def test_settings_order_puts_maxitems_high(tmp_path):
+    """よく触る設定を上に置くこと。
+
+    MaxItems は毎回触るのに、ドライバーの入手方法の長い説明（50 行ほど）に
+    押し下げられて見つけにくかった。"""
+    txt = _robin_text(tmp_path)
+    at = {k: txt.index(k) for k in
+          ("SET TargetUrl", "SET BaseDir", "SET MaxItems",
+           "SET ShotNameFmt", "SET AutoDriver")}
+    assert at["SET TargetUrl"] < at["SET BaseDir"] < at["SET MaxItems"]
+    assert at["SET MaxItems"] < at["SET ShotNameFmt"] < at["SET AutoDriver"]
+
+
+def test_origin_dialog_differs_on_first_try(tmp_path):
+    """1 回目はログインを尋ね、2 回目以降は起点の目印だけ出すこと。
+
+    ログイン画面のまま[OK]を押してしまったとき、いきなり「起点画面が
+    出ていません」と言われても何をすればよいか分からない。"""
+    txt = _robin_text(tmp_path)
+    assert "IF StartTry = 1 THEN" in txt
+    assert "IF StartTry > 1 THEN" in txt
+    assert "ログインが済んでいなければ" in txt
+    assert "起点画面が出ていません" in txt
+
+
+def test_origin_move_inside_retry_loop(tmp_path):
+    """起点までの移動を、確認のループの中で毎周やり直すこと。
+
+    ループの外に置くと 1 回しか走らない。ログイン前に[OK]を押すと空振りし、
+    そのあとログインして[OK]を押しても移動はもう終わっているので、起点に
+    着かないまま「起点画面が出ていません」を繰り返すことになる。"""
+    batch = {"title": "t", "originHint": "発注",
+             "setup": [{"type": "navigate", "url": "http://x/"},
+                       {"type": "click", "selectors": [["#menu"]]}],
+             "loop": [{"type": "click", "selectors": [["#POS_ORDERS"]]}]}
+    out = pad.write_robin(batch, r"C:\t\d.csv", "ID",
+                          str(tmp_path / "f.robin.txt"))
+    txt = open(out, encoding="utf-8").read()
+    loop_at = txt.index("LOOP WHILE StartOk = False")
+    end_at = txt.index("IF StartTry = 1 THEN")
+    inside = txt[loop_at:end_at]
+    # 移動も確認も、どちらもループの中にある
+    assert "#menu" in inside
+    assert "find" in inside
+    # 移動でも ActBody を使うので、確認の直前に入れ直している
+    assert inside.index("#menu") < inside.index("#POS_ORDERS")
