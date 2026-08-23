@@ -538,3 +538,20 @@ def test_driver_zip_removed_after_extract(tmp_path):
     at = txt.index("File.Delete Files: ZipPath")
     before = txt[:at]
     assert before.rstrip().endswith("IF UzExit = 0 THEN"), before[-200:]
+
+
+def test_chrome_driver_home_created_before_lookup(tmp_path):
+    """Chrome の展開先を、存在確認より前に作ること。
+
+    Chrome の zip は chromedriver-win64 の下に展開されるので、tar を走らせる
+    まではそのフォルダが無い。Folder.GetFiles はフォルダが無いとエラーで止まる
+    ため、先に作っておく必要がある。Edge は DrvDir がそのまま使えるので
+    この問題が出ず、Chrome だけ落ちていた。"""
+    batch = {"title": "z", "setup": [{"type": "navigate", "url": "http://x/"}],
+             "loop": [{"type": "click", "selectors": [["#a"]]}]}
+    out = pad.write_robin(batch, r"C:\t\d.csv", "ID",
+                          str(tmp_path / "f.robin.txt"), auto_driver=True)
+    txt = open(out, encoding="utf-8").read()
+    create = txt.index("FolderName: $" + chr(39) * 3 + "chromedriver-win64")
+    lookup = txt.index("Folder.GetFiles Folder: DrvHome")
+    assert create < lookup, txt[create - 200:lookup + 80]

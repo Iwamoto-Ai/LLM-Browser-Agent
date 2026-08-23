@@ -6,7 +6,7 @@
 # 処理内容：明細 1 件につき 6 操作を繰り返す（ID列: ID ／ 業務キー: KEY）
 #           開始URL: file:///C:/temp/sample.html
 #           明細CSV: sample_batch.csv
-# 備考：2026/08/22 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
+# 備考：2026/08/23 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
 # ============================================================
 # LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
 # Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).
@@ -200,6 +200,10 @@ IF DriverSource = $'''direct''' THEN
             SET DrvHome TO $'''%DrvDir%\\chromedriver-win64'''
             SET DrvExeName TO $'''chromedriver.exe'''
             SET ZipUrl TO $'''https://storage.googleapis.com/chrome-for-testing-public/%DrvVer%/win64/chromedriver-win64.zip'''
+            # Chrome の zip は chromedriver-win64 の下に展開される。
+            # 先に作っておく。Folder.GetFiles はフォルダが無いとエラーで止まり、
+            # 展開前の存在確認ができない（Edge は DrvDir がそのまま使えるので通る）。
+            Folder.Create FolderPath: DrvDir FolderName: $'''chromedriver-win64''' Folder=> DrvHomeObj
         END
         SET ZipPath TO $'''%DrvDir%\\driver.zip'''
         Folder.GetFiles Folder: DrvHome FileFilter: DrvExeName IncludeSubfolders: False FailOnAccessDenied: True SortBy1: Folder.SortBy.Name SortDescending1: False SortBy2: Folder.SortBy.LastModified SortDescending2: False SortBy3: Folder.SortBy.LastAccessed SortDescending3: False Files=> HaveDrv
