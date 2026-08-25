@@ -812,3 +812,19 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 - [Microsoft Power Automate Desktop (PAD)](https://www.microsoft.com/ja-jp/area/biz/smb/column-power-automate-desktop)
 - [Microsoft Edge WebDriver](https://developer.microsoft.com/ja-jp/microsoft-edge/tools/webdriver?form=MA13LH&cs=3787589721)
 - [Google Chrome WebDriver](https://developer.chrome.com/docs/chromedriver?hl=ja)
+
+---
+
+## 商標について
+
+- Microsoft、Windows、Microsoft Edge、Power Automate、Playwright は、
+  米国 Microsoft Corporation の米国およびその他の国における登録商標または商標です。
+- Google Chrome は、Google LLC の商標または登録商標です。
+- Claude、Anthropic は、Anthropic PBC の商標または登録商標です。
+- Python は、Python Software Foundation の登録商標です。
+- Selenium は、Software Freedom Conservancy, Inc. の商標または登録商標です。
+- Node.js は、OpenJS Foundation の商標または登録商標です。
+- Ollama は、Ollama Inc. の商標または登録商標です。
+
+その他、記載されている会社名および製品名は、各社の商標または登録商標です。
+本文中では ™ および ® を省略しています。

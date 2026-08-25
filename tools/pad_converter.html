@@ -498,8 +498,10 @@ function robinShot(indent, fileVar) {
     web("ShotUrl", "Get", null, "ShotResp", "ShotStatus", indent),
     indent + "Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj",
     indent + "SET ShotB64 TO ShotObj['value']",
+    // やり直したときに古い画像が残らないよう上書きする。
+    // DoNothing だと 1 回目のものが残り、直したはずの画面を確かめられない。
     indent + "File.ConvertFromBase64 Base64Text: ShotB64 File: " + fileVar +
-             " IfFileExists: File.IfExists.DoNothing"
+             " IfFileExists: File.IfExists.Overwrite"
   ];
 }
 
@@ -1144,6 +1146,14 @@ function buildRobin(batch, opt) {
   A("SET DetailsFile TO " + robinUnderBase(detailsPath, outDir));
   A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''");
   A("SET LogFile TO $'''%BaseDir%\\\\pad_progress.log'''");
+  var vw = null;
+  for (var vi = 0; vi < setup.length; vi++) {
+    if (setup[vi].type === "setViewport") { vw = setup[vi]; break; }
+  }
+  A("# ブラウザーのウィンドウサイズ。**エビデンスに写る範囲はここで決まる。**");
+  A("# 複数の PC に配布する場合は、一番小さい画面に収まる値にそろえること。");
+  A("SET WinW TO " + (parseInt(vw && vw.width, 10) || 1366));
+  A("SET WinH TO " + (parseInt(vw && vw.height, 10) || 900));
   A("SET ShotDir TO $'''%BaseDir%'''");
   A("# エビデンスのファイル名。差し込みは @ID@（ID列）/ @KEY@（業務キー）/");
   A("# @STAMP@（日時 yyyyMMdd_HHmmss）。1 件ごとにその行の値へ置き換わる。");
@@ -1495,12 +1505,8 @@ function buildRobin(batch, opt) {
     var st = setup[i2], t2 = st.type;
     if (t2 === "setViewport") {
       n += 1;
-      var w = parseInt(st.width, 10) || 1920;
-      var h = parseInt(st.height, 10) || 1080;
-      A("# [" + n + "] ウィンドウサイズ " + w + "x" + h);
-      A("# エビデンスに写る範囲はこのサイズで決まる。複数の PC に配布する場合は");
-      A("# 一番小さい画面に収まる値にそろえること。");
-      A("SET RectBody TO $'''{\"width\": " + w + ", \"height\": " + h + "}'''");
+      A("# [" + n + "] ウィンドウサイズ（冒頭の WinW / WinH で決まる）");
+      A("SET RectBody TO $'''{\"width\": %WinW%, \"height\": %WinH%}'''");
       A(web("RectUrl", "Post", "RectBody", "RectResp", "RectStatus"));
       continue;
     }
