@@ -585,8 +585,10 @@ def _robin_shot(indent: str, file_var: str) -> list:
         _web("ShotUrl", "Get", None, "ShotResp", "ShotStatus", indent),
         f"{indent}Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj",
         f"{indent}SET ShotB64 TO ShotObj['value']",
+        # やり直したときに古い画像が残らないよう上書きする。
+        # DoNothing だと 1 回目のものが残り、直したはずの画面を確かめられない。
         f"{indent}File.ConvertFromBase64 Base64Text: ShotB64 File: {file_var} "
-        f"IfFileExists: File.IfExists.DoNothing",
+        f"IfFileExists: File.IfExists.Overwrite",
     ]
 
 
@@ -944,6 +946,11 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"SET DetailsFile TO {_robin_under_base(details_path, out_dir)}")
     A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''")
     A("SET LogFile TO $'''%BaseDir%\\\\pad_progress.log'''")
+    _vw = next((s for s in setup if s.get("type") == "setViewport"), {})
+    A("# ブラウザーのウィンドウサイズ。**エビデンスに写る範囲はここで決まる。**")
+    A("# 複数の PC に配布する場合は、一番小さい画面に収まる値にそろえること。")
+    A(f"SET WinW TO {int(_vw.get('width', 1366) or 1366)}")
+    A(f"SET WinH TO {int(_vw.get('height', 900) or 900)}")
     A("SET ShotDir TO $'''%BaseDir%'''")
     A("# エビデンスのファイル名。差し込みは @ID@（ID列）/ @KEY@（業務キー）/")
     A("# @STAMP@（日時 yyyyMMdd_HHmmss）。1 件ごとにその行の値へ置き換わる。")
@@ -1314,12 +1321,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
         t_ = st.get("type")
         if t_ == "setViewport":
             n += 1
-            w = int(st.get("width", 1920) or 1920)
-            h = int(st.get("height", 1080) or 1080)
-            A(f"# [{n}] ウィンドウサイズ {w}x{h}")
-            A("# エビデンスに写る範囲はこのサイズで決まる。複数の PC に配布する場合は")
-            A("# 一番小さい画面に収まる値にそろえること。")
-            A(f"SET RectBody TO $'''{{\"width\": {w}, \"height\": {h}}}'''")
+            A(f"# [{n}] ウィンドウサイズ（冒頭の WinW / WinH で決まる）")
+            A("SET RectBody TO $'''{\"width\": %WinW%, \"height\": %WinH%}'''")
             A(_web("RectUrl", "Post", "RectBody", "RectResp", "RectStatus"))
             continue
         if t_ == "navigate":

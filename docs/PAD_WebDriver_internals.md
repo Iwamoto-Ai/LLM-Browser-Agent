@@ -16,6 +16,82 @@
 **Python 版限定**　[📄 手順書の自動生成（Pythonが使える環境で使う）](#-手順書の自動生成pythonが使える環境で使う)
 ---
 
+## 🧱 なぜ拡張機能なしで動くのか
+
+Power Automate Desktop 無料版（PAD）の Web 自動化アクションは専用のブラウザ拡張機能を必要とするが、
+**WebDriver はブラウザ拡張機能が無くても動作する。** `msedgedriver.exe` 自体がローカルの HTTP サーバーとして動く。
+つまり **HTTP リクエストを送れれば、拡張機能なしでブラウザを完全に操作できる**。
+PAD の「Web サービスの呼び出し」がまさにそれに当たる。
+
+このドキュメントは、`run_batch.py`（Python 版バッチランナー）と同じことを、
+**Python を使わず PAD だけで**実現するため Python 版のコア部分のDOMベース要素インデックスモジュールを JavaScript で作り直したプログラムを埋め込むことで実現した。
+
+企業環境では次のような制約が同時に成立することがある。この手法はそこを通り抜けるためのもの。
+
+- ブラウザー拡張機能のインストールが禁止されている。
+- Python / Node.js などの開発ツールがインストールできない。
+- PowerShell スクリプトの実行が禁止されている。
+- Proxy Server を使用している環境。
+- 一方で Power Automate Desktop 無料版 (PAD) と WebDriver は使える。
+
+
+**実機（Power Automate Desktop 無料版 (PAD) / Windows 11 / Edge）で完走を確認済み。** 以下の記述は原則として実機で
+確認できた内容を明記している。
+
+
+---
+
+> **このページは「使う人」向け。** 導入から実行までの手順をまとめている。
+> 生成器の設計や、実機で分かった PAD の癖は
+> [PAD_WebDriver_internals.md](PAD_WebDriver_internals.md) に分けてある。
+
+---
+
+## 🧭 全体像（詳細）
+
+```
+┌──────────────────────────┐
+│ Power Automate Desktop   │
+│  Web.InvokeWebService    │  ← 標準アクション。ブラウザ拡張機能は不要。
+└────────────┬─────────────┘
+             │ HTTP + JSON (W3C WebDriver)
+             │ http://127.0.0.1:9515
+┌────────────▼─────────────────────────────┐
+│ msedgedriver.exe または chromedriver.exe  │  ← System.RunApplication で起動。
+└────────────┬─────────────────────────────┘
+             │ DevTools Protocol
+┌────────────▼────────────────────────┐
+│ Microsoft Edge または Google Chrome  │
+└─────────────────────────────────────┘
+```
+
+| 役割 | 担当 |
+| --- | --- |
+| 明細（Excel/CSV）の読み込み、件数ループ、skip 判定、進捗、結果 CSV、リトライ | **PAD の標準アクション** |
+| ブラウザの起動・画面遷移・クリック・入力・スクショ | **WebDriver**（PAD から HTTP で指示） |
+
+Python 版との対応:
+
+| Python 版 (`run_batch.py`) | PAD 版 |
+| --- | --- |
+| `--details` の CSV/xlsx 読み込み | 「CSV ファイルから読み取る」 |
+| 明細ごとのループ | 「For each」 |
+| `skip` 列 | 「If」 |
+| `--max-items` | カウンタ変数 + 「If」 |
+| `setup` / `loop` / `recover` | 同じ 3 部構成（サブフローに分けてもよい） |
+| 失敗しても次の件へ | `FailOnErrorStatus: False` + `ok` 判定 + `NEXT LOOP` |
+| `--retry-from` | 結果 CSV を明細として読み直す（`RetryMode`） |
+| 進捗表示 | 「テキストをファイルに書き込む」 |
+| 結果 CSV | 「テキストをファイルに書き込む」（追記） |
+| エビデンスのスクショ | WebDriver の `/screenshot` + 「Base64 をファイルに変換する」 |
+
+> 初版では「失敗しても次の件へ」を PAD の［エラー発生時（On block error）］で実現する想定だった。
+> しかし `FailOnErrorStatus: False` を指定すると HTTP エラーでフローが止まらないため、
+> **［エラー発生時］は不要**であることが実機で判明した。現在は `ok` 判定と `NEXT LOOP` で
+> 制御している。
+
+---
+
 # 第 1 部　設計
 
 ---
@@ -730,3 +806,7 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 **バッチ定義 JSON を変えれば、その業務の手順書がそのまま生成される。**
 
 ---
+
+---
+
+本文に出てくる製品名の商標については [README](../README.md#商標について) を参照してください。

@@ -1,46 +1,51 @@
 # Power Automate Desktop 無料版 (PAD) と WebDriver だけでバッチ実行する（ブラウザ拡張機能は不要）
 
 > **PAD 版は手動ログイン方式専用。**
-> ログインは人が画面で行い、[OK]を押すとフローが起点画面まで進めて処理を始める。
+> 人が画面でログインした後に開始させる方式。
 > **ID・パスワードは一切扱わない安心・安全設計。**
 
-Power Automate Desktop 無料版（PAD）の Web 自動化アクションは専用のブラウザ拡張機能を必要とするが、
-**WebDriver はブラウザ拡張機能が無くても動作する。** `msedgedriver.exe` 自体がローカルの HTTP サーバーとして動く。
-つまり **HTTP リクエストを送れれば、拡張機能なしでブラウザを完全に操作できる**。
-PAD の「Web サービスの呼び出し」がまさにそれに当たる。
+Power Automate Desktop 無料版（PAD）は、プログラム言語で開発するより遥かに簡単に
+自動化を実現できる素晴らしいソフトだと思いますが、それでも一般の人からすると
+簡単ではないと思います。
+そこで、**ブラウザ操作の自動化に特化させることにより PAD での自動化を簡単にする
+支援ツール**として作りました。
 
-このドキュメントは、`run_batch.py`（Python 版バッチランナー）と同じことを、
-**Python を使わず PAD だけで**実現するため Python 版のコア部分のDOMベース要素インデックスモジュールを JavaScript で作り直したプログラムを埋め込むことで実現した。
+**1 件ずつ手でやっていた画面操作を、明細の件数ぶんまとめて流せます。**
 
-企業環境では次のような制約が同時に成立することがある。この手法はそこを通り抜けるためのもの。
+たとえば「発注番号で検索して、受諾して、画面を保存する」を 50 件。
+これまで 50 回繰り返していた操作が、明細の CSV を用意して実行するだけになります。
 
-- ブラウザー拡張機能のインストールが禁止されている。
-- Python / Node.js などの開発ツールがインストールできない。
-- PowerShell スクリプトの実行が禁止されている。
-- Proxy Server を使用している環境。
-- 一方で Power Automate Desktop 無料版 (PAD) と WebDriver は使える。
+### 使う人がすることは 4 つ
 
+```
+① 1 件ぶんの操作をブラウザーで録画する（Chrome / Edge の標準機能）
+② 変換器に読み込ませて、PAD に貼るコードを作る
+③ PAD に貼って実行する
+④ ログインして[OK]を押す ← あとは自動
+```
 
-**実機（Power Automate Desktop 無料版 (PAD) / Windows 11 / Edge）で完走を確認済み。** 以下の記述は原則として実機で
-確認できた内容を明記している。
+**②で JSON を書く必要はありません。** 画面に操作が一覧で出るので、
+「これは 1 件ごとに繰り返す」「ここは毎回変わる値」と選ぶだけです。
 
+### 終わったあとに残るもの
 
----
+| | |
+| --- | --- |
+| エビデンス | 1 件ごとの画面写真、またはダウンロードしたファイル |
+| 結果 CSV | どの明細が成功・失敗したか、理由つき |
+| 進捗ログ | 実行の記録。途中で止まったときの手がかり |
 
-> **このページは「使う人」向け。** 導入から実行までの手順をまとめている。
-> 生成器の設計や、実機で分かった PAD の癖は
-> [PAD_WebDriver_internals.md](PAD_WebDriver_internals.md) に分けてある。
-
----
+**失敗した行だけをもう一度流せます。** 全部やり直す必要はありません。
 
 ## 📖 目次
 
 **はじめに**　[💡Power Automate Desktop 無料版 (PAD) 標準の録画機能との違い](#power-automate-desktop-無料版-pad-標準の録画機能との違い) / [🧭 全体像](#-全体像)
-**準備**　[🛠️ 事前準備](#-事前準備) / [🔄 自動 WebDriver 取得更新機能](#-自動-webdriver-取得更新機能) / [🌐 プロキシ経由でインターネットへ出る環境（企業のネット環境に多い）](#-プロキシ経由でインターネットへ出る環境企業のネット環境に多い)
+**準備**　[🛠️ 事前準備](#-事前準備) / [🔄 自動 WebDriver 取得更新機能](#-自動-webdriver-取得更新機能) / [🌐 プロキシ経由でインターネットへ出る環境（企業のネット環境に多い）](#-プロキシ経由でインターネットへ出る環境企業のネット環境に多い) / [📄 明細の CSV について](#-明細の-csv-について)
 **使い方**　[🤖 録画JSONファイルをPADコード(Robin)へ変換する](#-録画jsonファイルをpadコードrobinへ変換する)
-**運用**　[🔐 資格情報の扱い](#-資格情報の扱い) / [手動ログイン](#手動ログイン) / [📊 結果 CSV と再実行](#-結果-csv-と再実行) / [📸 エビデンス（スクリーンショット）](#-エビデンススクリーンショット) / [📥 エビデンスがファイルで届く場合](#-エビデンスがファイルで届く場合)
-**練習**　[🧪 実環境が無くても練習できる](#-実環境が無くても練習できる) / [📦 サンプル](#-サンプル)
+**運用**　[🔐 資格情報の扱い](#-資格情報の扱い) / [手動ログイン](#手動ログイン) / [📊 結果 CSV と再実行](#-結果-csv-と再実行) / [📥 エビデンスがファイルで届く場合](#-エビデンスがファイルで届く場合) / [📸 エビデンス（スクリーンショット）](#-エビデンススクリーンショット)
+**練習**　[🚚 練習できる業務フロー](#-練習できる業務フロー) / [🧪 実環境が無くても練習できる](#-実環境が無くても練習できる) / [📦 サンプル](#-サンプル)
 **困ったとき**　[❓ うまくいかないとき](#-うまくいかないとき) / [⚠️ 制約](#-制約)
+**上級者向け**　[🧑‍💻 上級者向け](#-上級者向け)
 ---
 
 ## 💡Power Automate Desktop 無料版 (PAD) 標準の録画機能との違い
@@ -62,50 +67,44 @@ Power Automate Desktop 無料版 (PAD)
 
 ## 🧭 全体像
 
+### PAD とブラウザーの間に「WebDriver」がいる
+
 ```
-┌──────────────────────────┐
-│ Power Automate Desktop   │
-│  Web.InvokeWebService    │  ← 標準アクション。ブラウザ拡張機能は不要。
-└────────────┬─────────────┘
-             │ HTTP + JSON (W3C WebDriver)
-             │ http://127.0.0.1:9515
-┌────────────▼─────────────────────────────┐
-│ msedgedriver.exe または chromedriver.exe  │  ← System.RunApplication で起動。
-└────────────┬─────────────────────────────┘
-             │ DevTools Protocol
-┌────────────▼────────────────────────┐
-│ Microsoft Edge または Google Chrome  │
-└─────────────────────────────────────┘
+Power Automate Desktop
+      │  「この要素を押して」と指示を送る
+      ▼
+  WebDriver（msedgedriver.exe / chromedriver.exe）
+      │
+      ▼
+  Edge / Chrome
 ```
 
-| 役割 | 担当 |
+ブラウザーを実際に動かしているのは PAD ではなく **WebDriver** という部品です。
+PAD は指示を送るだけで、**画面の座標も画像も使いません。**
+
+そのおかげで、
+
+- ウィンドウの位置がずれても動く
+- 画面の解像度が違う PC でも動く
+- 画面を見ていなくても動く（最小化していても構わない）
+
+**ブラウザーの拡張機能は要りません。** WebDriver はブラウザーに付属する
+正規の部品で、Microsoft と Google がそれぞれ配布しています。
+このツールが自動で取ってきて、更新にも追従します。
+
+### どこまでを PAD がやるか
+
+| すること | 担当 |
 | --- | --- |
-| 明細（Excel/CSV）の読み込み、件数ループ、skip 判定、進捗、結果 CSV、リトライ | **PAD の標準アクション** |
-| ブラウザの起動・画面遷移・クリック・入力・スクショ | **WebDriver**（PAD から HTTP で指示） |
+| 明細の読み込み、件数の繰り返し、結果の記録、失敗した行の再実行 | **PAD** |
+| 画面を開く、押す、入力する、エビデンスを撮る | **WebDriver** |
 
-Python 版との対応:
+PAD が得意な「表を回す」ところは PAD に、ブラウザー操作は WebDriver に、
+という分担です。
 
-| Python 版 (`run_batch.py`) | PAD 版 |
-| --- | --- |
-| `--details` の CSV/xlsx 読み込み | 「CSV ファイルから読み取る」 |
-| 明細ごとのループ | 「For each」 |
-| `skip` 列 | 「If」 |
-| `--max-items` | カウンタ変数 + 「If」 |
-| `setup` / `loop` / `recover` | 同じ 3 部構成（サブフローに分けてもよい） |
-| 失敗しても次の件へ | `FailOnErrorStatus: False` + `ok` 判定 + `NEXT LOOP` |
-| `--retry-from` | 結果 CSV を明細として読み直す（`RetryMode`） |
-| 進捗表示 | 「テキストをファイルに書き込む」 |
-| 結果 CSV | 「テキストをファイルに書き込む」（追記） |
-| エビデンスのスクショ | WebDriver の `/screenshot` + 「Base64 をファイルに変換する」 |
-
-> 初版では「失敗しても次の件へ」を PAD の［エラー発生時（On block error）］で実現する想定だった。
-> しかし `FailOnErrorStatus: False` を指定すると HTTP エラーでフローが止まらないため、
-> **［エラー発生時］は不要**であることが実機で判明した。現在は `ok` 判定と `NEXT LOOP` で
-> 制御している。
-
----
-
----
+> **仕組みをもっと知りたい方へ。** PAD からどんな指示を送っているか、
+> なぜ拡張機能なしで動くのかは
+> [PAD_WebDriver_internals.md](PAD_WebDriver_internals.md) にまとめてあります。
 
 # 第 1 部　準備
 
@@ -202,6 +201,43 @@ curl -x http://proxy.example.com:8080 https://example.com -I
 
 ---
 
+## 📄 明細の CSV について
+
+**1 行が 1 件の処理**になります。1 列目が ID 列で、進捗ログ・結果 CSV・
+エビデンスのファイル名に使われます。
+
+```
+プロジェクト番号,発注番号,skip
+PM9000000001,900000000001,
+PM9000000002,900000000002,1     ← skip 列に何か書くとこの行は飛ばす
+```
+
+### 文字コードは「CSV UTF-8（コンマ区切り）」
+
+### メモ帳で開く ※推奨
+
+**Windows 11 標準のメモ帳は、CSV UTF-8 のファイルを文字化けせずに開けます。**
+中身をちょっと確かめたいときはこれが一番早いです。
+
+### Excel で開く場合
+
+**ファイルをダブルクリックしないこと。** 文字化けしたり、番号が
+`9E+11` のような表示になったりします。次の手順で開いてください。
+
+1. 先に Excel を起動する（空白のブックを開く）
+2. 上のメニューから「データ」タブ →「テキストまたは CSV から」
+3. CSV ファイルを選んで「データの取り込み」。プレビューが出ます
+4. 右上の**「元のファイル」を UTF-8** にして、文字が正しく読めるか確かめる
+5. 区切り記号が「コンマ」になっていることを確かめる
+6. **「データの変換」を押し、発注番号などの列を選んで「データ型」を「テキスト」に**
+7. 「閉じて読み込む」
+
+**6 が大事です。** ここを飛ばすと、12 桁以上の番号が `9E+11` のような
+指数表記になります。**表示形式を「数値」に直しても、丸められた値は戻りません。**
+最初からテキストとして読み込むのが確実です。
+
+---
+
 # 第 2 部　使い方
 
 ---
@@ -220,47 +256,15 @@ PAD のフローは内部的に **Robin 言語**で表現されており、フ�
 
 
 
-### 🌐 変換の手段は 2 つ（出力は同じ）
+### 🌐 変換はブラウザーで行う
 
-| | 中身 | 向いている人 |
-| --- | --- | --- |
-| **ブラウザ版**（推奨） | `pad_converter.html` をブラウザーで開くだけ | 一般ユーザー向け。インストール不要、通信なし、Pythonなどの開発ツール不要 |
-| Python 版 | `pad_webdriver_ref.py` をコマンドラインで実行 | 上級者向け。自動化したい人 |
+変換器 `tools/pad_converter.html` を**ブラウザーで開くだけ**です。
+インストールも通信もありません。録画 JSON を読み込ませ、画面で選んで、
+できたコードを PAD に貼り付けます。
 
-**出力は 1 文字まで一致する。** `tools/verify_parity.mjs` が CI で毎回突き合わせている。
-どちらで作ったものかは生成物のヘッダーに残る。
-
-```
-# 変換器：ブラウザ版 v1.0.0
-```
-
-版の値は両方にソース定数として持たせてあり、**上げるときは必ず同時に直す**。
-`verify_parity.mjs` はこの 1 行だけ比較から外している（種類が必ず食い違うため）。
-
-
-ブラウザ版の手順は 4 つ。
-
-1. `tools/pad_converter.html` をダウンロードしてローカル（例 C:\Temp ）に置きブラウザーで開く
-2. 録画 JSON をドラッグ＆ドロップ
-3. **実行環境（PAD を動かす PC）のパス**を入力（明細ファイル / ドライバー / BaseDir）
-4. 「変換する」→「Robin をコピー」→ PAD の**空の新規フロー**に `Ctrl+V`
-
-引数を覚える必要がなく、画面に「実行環境のパスを入れる」と明記してあるので、
-**変換環境のパスを渡してしまう取り違え**（後述）も起きにくい。
-
-> 共通 JavaScript は**コピーのみ**で、保存機能は用意していない。実機で
-> `pad_flow.jsact.js` がウイルス対策に誤ブロックされ、`.txt` にリネームしても
-> 同じだった。**拡張子ではなく中身（DOM 操作のスクリプト）が誤検知される。**
-> 同じ内容でも Robin 側は 18 行に分割されているため問題なくダウンロードできる。
-
-
-<div align="center">
-　ブラウザ版 生成器  `tools/pad_converter.html` の画面
-  <img src="SS_pad_converter_html_1.png">
-</div>
-
-
-
+> Python が使える環境なら、コマンドラインの変換器（`pad_webdriver_ref.py`）も
+> あります。**出力は 1 文字も変わりません。**
+> 使い方は [上級者向け](#-上級者向け) を参照。
 
 ### 🗺️ 全体の流れ
 
@@ -736,48 +740,6 @@ BaseDir (--pad-out-dir)：  C:\temp
 
 
 
-#### 上級者向け: Python版の変換器 `pad_webdriver_ref.py`
-```
-# Python版の変換器を使う場合は Python必要。（ブラウザ、WebDriver は不要）
-python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
-    --details "C:\temp\edi2_batch.csv" --id-column "プロジェクト番号" `
-    --robin output/pad_flow.robin.txt `
-    --driver-exe "C:\temp\msedgedriver.exe" --pad-out-dir "C:\temp"
-```
-
-**引数のパスは 2 種類あるので混ぜないこと。**
-
-| 引数 | どのマシンのパスか |
-| --- | --- |
-| `--batch` / `--robin` | **変換環境**（Python が使える PC）のパス。リポジトリ相対でよい |
-| `--details` / `--driver-exe` / `--pad-out-dir` | **実行環境**（PAD を動かす PC）のパス。生成された Robin に文字列として埋め込まれる |
-
-| 引数 | 役割 |
-| --- | --- |
-| `--batch` | バッチ定義 JSON（③で作ったもの） |
-| `--details` | 明細 CSV のパス。`SET DetailsFile` になる |
-| `--id-column` | ID 列の名前。この列が `Col1` になり、進捗・結果・再実行のキーになる |
-| `--robin` | 出力先。同名で `.jsact.js` も一緒に出る（ブラウザ版はコピーのみ） |
-| `--driver-exe` | `msedgedriver.exe` のパス。`SET DriverExe` になる |
-| `--pad-out-dir` | 出力フォルダ。`SET BaseDir` になる |
-
-`--details` と `--driver-exe` が `--pad-out-dir` の配下にある場合、生成される Robin は
-それらを `%BaseDir%` 相対で出力する。上の例なら次のようになり、**配布時に直すのは
-`BaseDir` の 1 行だけ**で済む。
-
-```
-SET BaseDir TO $'''C:\\temp'''
-SET DriverExe TO $'''%BaseDir%\\msedgedriver.exe'''
-SET DetailsFile TO $'''%BaseDir%\\edi2_batch.csv'''
-SET ResultFile TO $'''%BaseDir%\\pad_result.csv'''
-SET LogFile TO $'''%BaseDir%\\pad_progress.log'''
-SET ShotDir TO $'''%BaseDir%'''
-```
-
-配下でないパスを渡した場合は絶対パスのまま出力されるので、環境ごとに 3 行を直すことになる。
-
-
-
 #### 生成器が自動で行う変換
 
 | 録画 JSON | 生成される PADコード(Robin) |
@@ -889,24 +851,6 @@ SET ShotDir TO $'''%BaseDir%'''
 
 > **⚠️ 登録系の再実行は二重登録に注意。** 再実行の前に `fail__` の画像で実際の画面を
 > 確認すること。
-
----
-
-### （任意）手順書だけを出す　　　※ Python版のみ
-
-`--robin` の代わりに `--trace` を使うと、**PAD が送るのと同じ HTTP 呼び出しを同じ順序で
-実際に送りながら**、その呼び出し列を Markdown の表として書き出せる。フローを人に説明する
-資料や、生成物が期待どおりか確かめる用途に使う。
-
-```
-# 別ターミナルでWebドライバーを実行しておく: msedgedriver.exe --port=9515
-# 手順書生成
-python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
-    --details data/edi2_practice_batch.csv --trace output/pad_trace.md
-```
-
-「何番目に・どのメソッドで・どの URL へ・どんな本文を送るか」が全件出力される
-（セッション ID は `{session}` に伏せ、秘密情報は `[SECRET:名前]` の表記で残らない）。
 
 ---
 
@@ -1355,3 +1299,83 @@ python pad_webdriver_ref.py \
 - 生成されるフローの組み立て
 - `Web.InvokeWebService` の引数、Robin リテラルのエスケープ
 - 実機で確認できた書式 / 無効だった構文
+
+---
+
+# 第 6 部　上級者向け
+
+---
+
+## 🧑‍💻 上級者向け
+
+Python が使える環境向けの機能です。**使わなくても、ブラウザー版だけで
+すべてのことができます。**
+
+#### 上級者向け: Python版の変換器 `pad_webdriver_ref.py`
+```
+# Python版の変換器を使う場合は Python必要。（ブラウザ、WebDriver は不要）
+python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
+    --details "C:\temp\edi2_batch.csv" --id-column "プロジェクト番号" `
+    --robin output/pad_flow.robin.txt `
+    --driver-exe "C:\temp\msedgedriver.exe" --pad-out-dir "C:\temp"
+```
+
+**引数のパスは 2 種類あるので混ぜないこと。**
+
+| 引数 | どのマシンのパスか |
+| --- | --- |
+| `--batch` / `--robin` | **変換環境**（Python が使える PC）のパス。リポジトリ相対でよい |
+| `--details` / `--driver-exe` / `--pad-out-dir` | **実行環境**（PAD を動かす PC）のパス。生成された Robin に文字列として埋め込まれる |
+
+| 引数 | 役割 |
+| --- | --- |
+| `--batch` | バッチ定義 JSON（③で作ったもの） |
+| `--details` | 明細 CSV のパス。`SET DetailsFile` になる |
+| `--id-column` | ID 列の名前。この列が `Col1` になり、進捗・結果・再実行のキーになる |
+| `--robin` | 出力先。同名で `.jsact.js` も一緒に出る（ブラウザ版はコピーのみ） |
+| `--driver-exe` | `msedgedriver.exe` のパス。`SET DriverExe` になる |
+| `--pad-out-dir` | 出力フォルダ。`SET BaseDir` になる |
+
+`--details` と `--driver-exe` が `--pad-out-dir` の配下にある場合、生成される Robin は
+それらを `%BaseDir%` 相対で出力する。上の例なら次のようになり、**配布時に直すのは
+`BaseDir` の 1 行だけ**で済む。
+
+```
+SET BaseDir TO $'''C:\\temp'''
+SET DriverExe TO $'''%BaseDir%\\msedgedriver.exe'''
+SET DetailsFile TO $'''%BaseDir%\\edi2_batch.csv'''
+SET ResultFile TO $'''%BaseDir%\\pad_result.csv'''
+SET LogFile TO $'''%BaseDir%\\pad_progress.log'''
+SET ShotDir TO $'''%BaseDir%'''
+```
+
+配下でないパスを渡した場合は絶対パスのまま出力されるので、環境ごとに 3 行を直すことになる。
+
+### （任意）手順書だけを出す　　　※ Python版のみ
+
+`--robin` の代わりに `--trace` を使うと、**PAD が送るのと同じ HTTP 呼び出しを同じ順序で
+実際に送りながら**、その呼び出し列を Markdown の表として書き出せる。フローを人に説明する
+資料や、生成物が期待どおりか確かめる用途に使う。
+
+```
+# 別ターミナルでWebドライバーを実行しておく: msedgedriver.exe --port=9515
+# 手順書生成
+python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
+    --details data/edi2_practice_batch.csv --trace output/pad_trace.md
+```
+
+「何番目に・どのメソッドで・どの URL へ・どんな本文を送るか」が全件出力される
+（セッション ID は `{session}` に伏せ、秘密情報は `[SECRET:名前]` の表記で残らない）。
+
+---
+
+### さらに詳しく
+
+- 仕組み・実機で分かった書式 … [PAD_WebDriver_internals.md](PAD_WebDriver_internals.md)
+- ドライバーを手作業で置く場合 … 同上「WebDriver の自動取得」
+
+---
+
+---
+
+本文に出てくる製品名の商標については [README](../README.md#商標について) を参照してください。

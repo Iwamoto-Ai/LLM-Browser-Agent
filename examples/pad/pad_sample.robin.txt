@@ -9,7 +9,7 @@
 #           BaseDir: C:\temp
 #           エビデンス名: @ID@__@KEY@__@STAMP@
 #           ダウンロード保存先: C:\temp\download
-# 備考：2026/08/23 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
+# 備考：2026/08/25 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
 # ============================================================
 # LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
 # Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).
@@ -73,6 +73,10 @@ SET DriverUrl TO $'''http://127.0.0.1:9515'''
 SET DetailsFile TO $'''%BaseDir%\\sample_batch.csv'''
 SET ResultFile TO $'''%BaseDir%\\pad_result.csv'''
 SET LogFile TO $'''%BaseDir%\\pad_progress.log'''
+# ブラウザーのウィンドウサイズ。**エビデンスに写る範囲はここで決まる。**
+# 複数の PC に配布する場合は、一番小さい画面に収まる値にそろえること。
+SET WinW TO 1366
+SET WinH TO 900
 SET ShotDir TO $'''%BaseDir%'''
 # エビデンスのファイル名。差し込みは @ID@（ID列）/ @KEY@（業務キー）/
 # @STAMP@（日時 yyyyMMdd_HHmmss）。1 件ごとにその行の値へ置き換わる。
@@ -393,10 +397,8 @@ END
 # セッションが張れていなければ、以降の URL 変数が存在しないので入らない。
 IF Halt = False THEN
 SET RowError TO $''''''
-# [1] ウィンドウサイズ 1366x900
-# エビデンスに写る範囲はこのサイズで決まる。複数の PC に配布する場合は
-# 一番小さい画面に収まる値にそろえること。
-SET RectBody TO $'''{"width": 1366, "height": 900}'''
+# [1] ウィンドウサイズ（冒頭の WinW / WinH で決まる）
+SET RectBody TO $'''{"width": %WinW%, "height": %WinH%}'''
 Web.InvokeWebService.InvokeWebService Url: RectUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: RectBody EncodeRequestBody: False FailOnErrorStatus: False Response=> RectResp StatusCode=> RectStatus
 # [2] ページを開く（URL は冒頭の TargetUrl で設定）
 SET UrlBody TO $'''{"url": "%TargetUrl%"}'''
@@ -578,7 +580,7 @@ IF Halt = False THEN
             Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
             Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
             SET ShotB64 TO ShotObj['value']
-            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.DoNothing
+            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
             File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
@@ -603,7 +605,7 @@ IF Halt = False THEN
             Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
             Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
             SET ShotB64 TO ShotObj['value']
-            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.DoNothing
+            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
             File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
@@ -628,7 +630,7 @@ IF Halt = False THEN
             Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
             Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
             SET ShotB64 TO ShotObj['value']
-            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.DoNothing
+            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
             File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
@@ -653,7 +655,7 @@ IF Halt = False THEN
             Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
             Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
             SET ShotB64 TO ShotObj['value']
-            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.DoNothing
+            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
             File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
@@ -679,7 +681,7 @@ IF Halt = False THEN
             Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
             Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
             SET ShotB64 TO ShotObj['value']
-            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.DoNothing
+            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
             File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
@@ -704,7 +706,7 @@ IF Halt = False THEN
             Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
             Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
             SET ShotB64 TO ShotObj['value']
-            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.DoNothing
+            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
             File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
