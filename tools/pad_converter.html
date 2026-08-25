@@ -493,18 +493,139 @@ function web(url, method, body, resp, status, indent) {
          b + WEB_FLAGS + " Response=> " + resp + " StatusCode=> " + status;
 }
 
+// エビデンスを 1 枚に撮る。
+// W3C の /screenshot は**見えている範囲だけ**を返す。縦に長い画面だと
+// スクロールしないと読めないエビデンスになってしまう。
+// ウィンドウを広げてから撮る手もあるが、**高さは物理画面までしか広げられない**
+// （実機では 6000 を要求して 1220 が上限だった）。幅は広げられるが高さが足りない。
+// そこで Chrome / Edge 独自の命令を使う。captureBeyondViewport を付けると、
+// 見えていない部分まで含めて 1 枚にしてくれる。実機で確認済み。
+// 使えないブラウザーや古い版のときは、従来の /screenshot に落ちる。
 function robinShot(indent, fileVar) {
+  var body = '{"cmd": "Page.captureScreenshot", ' +
+    '"params": {"format": "png", "captureBeyondViewport": true}}';
   return [
-    web("ShotUrl", "Get", null, "ShotResp", "ShotStatus", indent),
-    indent + "Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj",
-    indent + "SET ShotB64 TO ShotObj['value']",
-    // やり直したときに古い画像が残らないよう上書きする。
-    // DoNothing だと 1 回目のものが残り、直したはずの画面を確かめられない。
-    indent + "File.ConvertFromBase64 Base64Text: ShotB64 File: " + fileVar +
-             " IfFileExists: File.IfExists.Overwrite"
+    indent + "SET ShotSaved TO False",
+    indent + "IF FullShot THEN",
+    indent + "    SET CdpBody TO $'''" + body + "'''",
+    web("CdpUrl", "Post", "CdpBody", "ShotResp", "ShotStatus", indent + "    "),
+    indent + "    IF ShotStatus = 200 THEN",
+    indent + "        Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj",
+    indent + "        SET ShotB64 TO ShotObj['value']['data']",
+    indent + "        File.ConvertFromBase64 Base64Text: ShotB64 File: " + fileVar +
+             " IfFileExists: File.IfExists.Overwrite",
+    indent + "        SET ShotSaved TO True",
+    indent + "    END",
+    indent + "END",
+    indent + "# 全体撮影が使えなかったときは、見えている範囲だけでも残す。",
+    indent + "IF ShotSaved = False THEN",
+    web("ShotUrl", "Get", null, "ShotResp", "ShotStatus", indent + "    "),
+    indent + "    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj",
+    indent + "    SET ShotB64 TO ShotObj['value']",
+    indent + "    File.ConvertFromBase64 Base64Text: ShotB64 File: " + fileVar +
+             " IfFileExists: File.IfExists.Overwrite",
+    indent + "END"
   ];
 }
 
+function robinDownload(cands, name, indent, stepNo, cols, timeout) {
+  timeout = timeout || 60;
+  var L = [];
+  var A = function (s) { L.push(s); };
+  A(indent + "# [" + stepNo + "] ダウンロード " + (cands[0] || ""));
+  A(indent + "# 押す前の件数を数えておき、増えたぶんを新しいファイルとみなす。");
+  A(indent + folderGet("DlDir", "$" + Q_ + "*.*" + Q_, "DlBefore"));
+  A(indent + "SET DlCountBefore TO DlBefore.Count");
+  L = L.concat(robinAct(cands, "click", "", indent,
+                        "download " + (cands[0] || ""), stepNo, cols));
+  A(indent + "IF RowError = " + robinStr("") + " THEN");
+  A(indent + "    SET DlWait TO 0");
+  A(indent + "    SET DlDone TO False");
+  A(indent + "    LOOP WHILE DlDone = False");
+  A(indent + "        WAIT 1");
+  A(indent + "        SET DlWait TO DlWait + 1");
+  A(indent + "        " + folderGet("DlDir", "$" + Q_ + "*.crdownload" + Q_, "DlTemp"));
+  A(indent + "        " + folderGet("DlDir", "$" + Q_ + "*.*" + Q_, "DlNow"));
+  A(indent + "        IF DlTemp.Count = 0 THEN");
+  A(indent + "            IF DlNow.Count > DlCountBefore THEN");
+  A(indent + "                SET DlDone TO True");
+  A(indent + "            END");
+  A(indent + "        END");
+  A(indent + "        IF DlWait >= " + timeout + " THEN");
+  A(indent + "            SET DlDone TO True");
+  A(indent + "        END");
+  A(indent + "    END");
+  A(indent + "    " + folderGet("DlDir", "$" + Q_ + "*.*" + Q_, "DlAfter"));
+  A(indent + "    IF DlAfter.Count > DlCountBefore THEN");
+  A(indent + "        # 一番新しいものが今回落ちてきたファイル");
+  A(indent + "        " + folderGetSorted("DlDir", "$" + Q_ + "*.*" + Q_, "DlSorted"));
+  A(indent + "        SET DlFile TO DlSorted[0]");
+  A(indent + "        SET DlName TO " + robinStr(toRobinVar(name, cols)));
+  nameExpand(name, "DlName", indent + "        ").forEach(function (ln) { L.push(ln); });
+  A(indent + "        # 拡張子はそのまま残るので、Excel でも PDF でも同じ 1 行で足りる");
+  A(indent + "        File.RenameFiles.Rename Files: DlFile NewName: DlName " +
+    "KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> DlRenamed");
+  A(indent + "    END");
+  A(indent + "    IF DlAfter.Count = DlCountBefore THEN");
+  A(indent + "        SET RowError TO " +
+    robinStr("ステップ" + stepNo + "（ダウンロード）でファイルが落ちてきませんでした" +
+             "（" + timeout + " 秒待機）"));
+  A(indent + "    END");
+  A(indent + "END");
+  return L;
+}
+
+// フォルダー内のファイル取得。並べ替えの列挙は Folder.SortBy.○○（実機確認済み）
+function folderGet(folderVar, filterVar, outVar) {
+  return "Folder.GetFiles Folder: " + folderVar + " FileFilter: " + filterVar +
+    " IncludeSubfolders: False FailOnAccessDenied: True " +
+    "SortBy1: Folder.SortBy.Name SortDescending1: False " +
+    "SortBy2: Folder.SortBy.LastModified SortDescending2: False " +
+    "SortBy3: Folder.SortBy.LastAccessed SortDescending3: False " +
+    "Files=> " + outVar;
+}
+
+// 起点画面の案内文を、人が読める形で作る。
+// 「#POS_SHIPMENTS が見える画面まで進めて」では、その ID が画面のどこを
+// 指すのか利用者には分からない。次の順で探す。
+//   1. バッチ定義の originHint（例: "納入"）。人が書いたものが一番確実
+//   2. 候補の aria/ や text/ の名前。画面に出ている文字なので目で探せる
+//   3. どちらも無ければ、ID は出さずに文言だけで案内する
+function originHint(batch, cands) {
+  var named = String((batch && batch.originHint) || "").trim();
+  if (named) { return "「" + named + "」が見える画面"; }
+  for (var i = 0; i < cands.length; i++) {
+    var pres = ["aria/", "text/"];
+    for (var k = 0; k < pres.length; k++) {
+      if (cands[i].indexOf(pres[k]) === 0) {
+        var name = cands[i].slice(pres[k].length).split("[")[0].trim();
+        if (name) { return "「" + name + "」が見える画面"; }
+      }
+    }
+  }
+  return "繰り返しの最初の操作ができる画面";
+}
+
+// JSON の文字列に入れる Windows パス。区切り文字を重ねて渡す。
+// JSON では C:\\temp の \\t がタブとして読まれる。壊れたパスを渡すと
+// ブラウザーは黙って既定のフォルダに落とすので、失敗にも気づけない。
+// ここで倍にしておけば、JSON の解釈を経て元のパスに戻る。
+// ダウンロードの受け取り先を、Robin 用と JSON 用の 2 つの形で返す。
+// 2 行を別々に書くと片方だけ直して食い違う。ここでまとめて作る。
+function downloadDir(outDir, dlDir) {
+  var sep = String.fromCharCode(92);
+  var base = String(dlDir || (outDir.replace(/[\\]+$/, "") + sep + "download"))
+    .replace(/[\\]+$/, "");
+  return { dir: base, json: base.split(sep).join(sep + sep) };
+}
+
+// エビデンス名に差し込める記号。@ で囲むのは、正規表現のメタ文字を避けるため
+// （{ID} だと { がメタ文字になり、Text.Replace の正規表現版で意図せず効く）。
+var NAME_MARKS = [["@ID@", "RowId"], ["@KEY@", "RowKey"], ["@STAMP@", "Stamp"]];
+
+// 名前テンプレートの @ID@ などを、その行の値に置き換える行を返す。
+// テンプレートは先頭の設定ブロックに置きたいが、%RowId% は明細を読んでから
+// でないと値が入らない。先頭では記号のまま持っておき、1 件ごとにここで
 function robinFail(indent) {
   var ind2 = indent + "    ";
   var out = [indent + "IF RowError <> $'''''' THEN",
@@ -1154,6 +1275,9 @@ function buildRobin(batch, opt) {
   A("# 複数の PC に配布する場合は、一番小さい画面に収まる値にそろえること。");
   A("SET WinW TO " + (parseInt(vw && vw.width, 10) || 1366));
   A("SET WinH TO " + (parseInt(vw && vw.height, 10) || 900));
+  A("# エビデンスをページ全体で撮るか。True なら、画面に入りきらない縦長・横長の");
+  A("# ページも 1 枚に収める。False なら見えている範囲だけ。");
+  A("SET FullShot TO True");
   A("SET ShotDir TO $'''%BaseDir%'''");
   A("# エビデンスのファイル名。差し込みは @ID@（ID列）/ @KEY@（業務キー）/");
   A("# @STAMP@（日時 yyyyMMdd_HHmmss）。1 件ごとにその行の値へ置き換わる。");
@@ -1438,6 +1562,9 @@ function buildRobin(batch, opt) {
   A("SET GoUrl TO $'''%DriverUrl%/session/%SessionId%/url'''");
   A("SET RectUrl TO $'''%DriverUrl%/session/%SessionId%/window/rect'''");
   A("SET ShotUrl TO $'''%DriverUrl%/session/%SessionId%/screenshot'''");
+  A("# ページ全体を 1 枚に撮るための口。W3C 標準の外にある Chrome / Edge 独自の");
+  A("# 命令で、見えていない部分まで含めて撮れる。");
+  A("SET CdpUrl TO $'''%DriverUrl%/session/%SessionId%/chromium/send_command_and_get_result'''");
   A("SET QuitUrl TO $'''%DriverUrl%/session/%SessionId%'''");
   A("");
   A("# --- 起動したブラウザーとドライバーを確認する ---");

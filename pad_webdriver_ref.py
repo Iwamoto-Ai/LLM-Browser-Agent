@@ -578,17 +578,43 @@ def _web(url: str, method: str, body: str, resp: str, status: str,
 
 
 def _robin_shot(indent: str, file_var: str) -> list:
-    """エビデンス取得。WebDriver の /screenshot はページの表示領域だけを返すので、
-    デスクトップや他ウィンドウが写り込まず、フォーカスにも依存しない。
-    変数名を ActObj / ActResp と分けるのは、直前の ok 判定を壊さないため。"""
+    """エビデンスを 1 枚に撮る。
+
+    W3C の /screenshot は**見えている範囲だけ**を返す。縦に長い画面だと
+    スクロールしないと読めないエビデンスになってしまう。
+
+    ウィンドウを広げてから撮る手もあるが、**高さは物理画面までしか広げられない**
+    （実機では 6000 を要求して 1220 が上限だった）。幅は広げられるが高さが足りない。
+
+    そこで Chrome / Edge 独自の命令を使う。captureBeyondViewport を付けると、
+    見えていない部分まで含めて 1 枚にしてくれる。実機で確認済み。
+    使えないブラウザーや古い版のときは、従来の /screenshot に落ちる。
+    """
+    body = ('{"cmd": "Page.captureScreenshot", '
+            '"params": {"format": "png", "captureBeyondViewport": true}}')
     return [
-        _web("ShotUrl", "Get", None, "ShotResp", "ShotStatus", indent),
-        f"{indent}Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj",
-        f"{indent}SET ShotB64 TO ShotObj['value']",
-        # やり直したときに古い画像が残らないよう上書きする。
-        # DoNothing だと 1 回目のものが残り、直したはずの画面を確かめられない。
-        f"{indent}File.ConvertFromBase64 Base64Text: ShotB64 File: {file_var} "
+        f"{indent}SET ShotSaved TO False",
+        f"{indent}IF FullShot THEN",
+        f"{indent}    SET CdpBody TO $'''{body}'''",
+        _web("CdpUrl", "Post", "CdpBody", "ShotResp", "ShotStatus", indent + "    "),
+        f"{indent}    IF ShotStatus = 200 THEN",
+        f"{indent}        Variables.ConvertJsonToCustomObject Json: ShotResp "
+        f"CustomObject=> ShotObj",
+        f"{indent}        SET ShotB64 TO ShotObj['value']['data']",
+        f"{indent}        File.ConvertFromBase64 Base64Text: ShotB64 File: {file_var} "
         f"IfFileExists: File.IfExists.Overwrite",
+        f"{indent}        SET ShotSaved TO True",
+        f"{indent}    END",
+        f"{indent}END",
+        f"{indent}# 全体撮影が使えなかったときは、見えている範囲だけでも残す。",
+        f"{indent}IF ShotSaved = False THEN",
+        _web("ShotUrl", "Get", None, "ShotResp", "ShotStatus", indent + "    "),
+        f"{indent}    Variables.ConvertJsonToCustomObject Json: ShotResp "
+        f"CustomObject=> ShotObj",
+        f"{indent}    SET ShotB64 TO ShotObj['value']",
+        f"{indent}    File.ConvertFromBase64 Base64Text: ShotB64 File: {file_var} "
+        f"IfFileExists: File.IfExists.Overwrite",
+        f"{indent}END",
     ]
 
 
@@ -951,6 +977,9 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# 複数の PC に配布する場合は、一番小さい画面に収まる値にそろえること。")
     A(f"SET WinW TO {int(_vw.get('width', 1366) or 1366)}")
     A(f"SET WinH TO {int(_vw.get('height', 900) or 900)}")
+    A("# エビデンスをページ全体で撮るか。True なら、画面に入りきらない縦長・横長の")
+    A("# ページも 1 枚に収める。False なら見えている範囲だけ。")
+    A("SET FullShot TO True")
     A("SET ShotDir TO $'''%BaseDir%'''")
     A("# エビデンスのファイル名。差し込みは @ID@（ID列）/ @KEY@（業務キー）/")
     A("# @STAMP@（日時 yyyyMMdd_HHmmss）。1 件ごとにその行の値へ置き換わる。")
@@ -1245,6 +1274,9 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("SET GoUrl TO $'''%DriverUrl%/session/%SessionId%/url'''")
     A("SET RectUrl TO $'''%DriverUrl%/session/%SessionId%/window/rect'''")
     A("SET ShotUrl TO $'''%DriverUrl%/session/%SessionId%/screenshot'''")
+    A("# ページ全体を 1 枚に撮るための口。W3C 標準の外にある Chrome / Edge 独自の")
+    A("# 命令で、見えていない部分まで含めて撮れる。")
+    A("SET CdpUrl TO $'''%DriverUrl%/session/%SessionId%/chromium/send_command_and_get_result'''")
     A("SET QuitUrl TO $'''%DriverUrl%/session/%SessionId%'''")
     A("")
     A("# --- 起動したブラウザーとドライバーを確認する ---")
