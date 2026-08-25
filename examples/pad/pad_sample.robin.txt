@@ -77,6 +77,9 @@ SET LogFile TO $'''%BaseDir%\\pad_progress.log'''
 # 複数の PC に配布する場合は、一番小さい画面に収まる値にそろえること。
 SET WinW TO 1366
 SET WinH TO 900
+# エビデンスをページ全体で撮るか。True なら、画面に入りきらない縦長・横長の
+# ページも 1 枚に収める。False なら見えている範囲だけ。
+SET FullShot TO True
 SET ShotDir TO $'''%BaseDir%'''
 # エビデンスのファイル名。差し込みは @ID@（ID列）/ @KEY@（業務キー）/
 # @STAMP@（日時 yyyyMMdd_HHmmss）。1 件ごとにその行の値へ置き換わる。
@@ -350,6 +353,9 @@ SET ExecUrl TO $'''%DriverUrl%/session/%SessionId%/execute/sync'''
 SET GoUrl TO $'''%DriverUrl%/session/%SessionId%/url'''
 SET RectUrl TO $'''%DriverUrl%/session/%SessionId%/window/rect'''
 SET ShotUrl TO $'''%DriverUrl%/session/%SessionId%/screenshot'''
+# ページ全体を 1 枚に撮るための口。W3C 標準の外にある Chrome / Edge 独自の
+# 命令で、見えていない部分まで含めて撮れる。
+SET CdpUrl TO $'''%DriverUrl%/session/%SessionId%/chromium/send_command_and_get_result'''
 SET QuitUrl TO $'''%DriverUrl%/session/%SessionId%'''
 
 # --- 起動したブラウザーとドライバーを確認する ---
@@ -577,10 +583,24 @@ IF Halt = False THEN
         END
         IF RowError <> $'''''' THEN
             SET NgCount TO NgCount + 1
-            Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
-            Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
-            SET ShotB64 TO ShotObj['value']
-            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
             File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
@@ -602,10 +622,24 @@ IF Halt = False THEN
         END
         IF RowError <> $'''''' THEN
             SET NgCount TO NgCount + 1
-            Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
-            Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
-            SET ShotB64 TO ShotObj['value']
-            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
             File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
@@ -627,10 +661,24 @@ IF Halt = False THEN
         END
         IF RowError <> $'''''' THEN
             SET NgCount TO NgCount + 1
-            Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
-            Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
-            SET ShotB64 TO ShotObj['value']
-            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
             File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
@@ -652,10 +700,24 @@ IF Halt = False THEN
         END
         IF RowError <> $'''''' THEN
             SET NgCount TO NgCount + 1
-            Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
-            Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
-            SET ShotB64 TO ShotObj['value']
-            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
             File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
@@ -678,10 +740,24 @@ IF Halt = False THEN
         END
         IF RowError <> $'''''' THEN
             SET NgCount TO NgCount + 1
-            Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
-            Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
-            SET ShotB64 TO ShotObj['value']
-            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
             File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
@@ -703,10 +779,24 @@ IF Halt = False THEN
         END
         IF RowError <> $'''''' THEN
             SET NgCount TO NgCount + 1
-            Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
-            Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
-            SET ShotB64 TO ShotObj['value']
-            File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
             File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
             File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append

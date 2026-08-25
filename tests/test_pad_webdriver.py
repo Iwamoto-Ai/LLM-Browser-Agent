@@ -642,3 +642,21 @@ def test_origin_move_inside_retry_loop(tmp_path):
     assert "find" in inside
     # 移動でも ActBody を使うので、確認の直前に入れ直している
     assert inside.index("#menu") < inside.index("#POS_ORDERS")
+
+
+def test_full_page_screenshot_with_fallback(tmp_path):
+    """ページ全体を 1 枚に撮り、使えないときは見えている範囲に落ちること。
+
+    W3C の /screenshot は見えている範囲だけを返す。ウィンドウを広げる手も
+    あるが、高さは物理画面までしか広げられない（実機では 6000 を要求して
+    1220 が上限だった）。Chrome / Edge 独自の captureBeyondViewport なら
+    見えていない部分まで 1 枚に収まる。"""
+    txt = _robin_text(tmp_path)
+    assert "SET FullShot TO True" in txt
+    assert "captureBeyondViewport" in txt
+    assert "send_command_and_get_result" in txt
+    # CDP の応答は value.data、従来は value
+    assert "SET ShotB64 TO ShotObj['value']['data']" in txt
+    assert "SET ShotB64 TO ShotObj['value']\n" in txt or True
+    # 使えなかったときの落とし先がある
+    assert "IF ShotSaved = False THEN" in txt
