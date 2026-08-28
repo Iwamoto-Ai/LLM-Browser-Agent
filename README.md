@@ -820,11 +820,16 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 - Microsoft、Windows、Microsoft Edge、Power Automate、Playwright は、
   米国 Microsoft Corporation の米国およびその他の国における登録商標または商標です。
 - Google Chrome は、Google LLC の商標または登録商標です。
+- Oracle、Java、MySQL および Oracle E-Business Suite、Oracle iSupplier Portal は、
+  Oracle Corporation およびその子会社、関連会社の米国およびその他の国における
+  登録商標または商標です。
 - Claude、Anthropic は、Anthropic PBC の商標または登録商標です。
+- Qwen は、Alibaba Group Holding Limited およびその関連会社の商標または登録商標です。
+- Mistral は、Mistral AI の商標または登録商標です。
+- Ollama は、Ollama Inc. の商標または登録商標です。
 - Python は、Python Software Foundation の登録商標です。
 - Selenium は、Software Freedom Conservancy, Inc. の商標または登録商標です。
 - Node.js は、OpenJS Foundation の商標または登録商標です。
-- Ollama は、Ollama Inc. の商標または登録商標です。
 
 その他、記載されている会社名および製品名は、各社の商標または登録商標です。
 本文中では ™ および ® を省略しています。
