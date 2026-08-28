@@ -885,3 +885,24 @@ Released under the [Apache License 2.0](LICENSE). Copyright 2026  Tsuyoshi Iwamo
 - [Microsoft Power Automate Desktop (PAD)](https://learn.microsoft.com/en-us/power-automate/desktop-flows/install)
 - [Microsoft Edge WebDriver](https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver/?form=MA13LH&cs=308912350)
 - [Google Chrome WebDriver](https://developer.chrome.com/docs/chromedriver/downloads)
+
+---
+
+## Trademarks
+
+- Microsoft, Windows, Microsoft Edge, Power Automate and Playwright are registered
+  trademarks or trademarks of Microsoft Corporation in the United States and other countries.
+- Google Chrome is a trademark or registered trademark of Google LLC.
+- Oracle, Java, MySQL, Oracle E-Business Suite and Oracle iSupplier Portal are registered
+  trademarks or trademarks of Oracle Corporation and/or its affiliates in the United States
+  and other countries.
+- Claude and Anthropic are trademarks or registered trademarks of Anthropic PBC.
+- Qwen is a trademark or registered trademark of Alibaba Group Holding Limited and its affiliates.
+- Mistral is a trademark or registered trademark of Mistral AI.
+- Ollama is a trademark or registered trademark of Ollama Inc.
+- Python is a registered trademark of the Python Software Foundation.
+- Selenium is a trademark or registered trademark of Software Freedom Conservancy, Inc.
+- Node.js is a trademark or registered trademark of the OpenJS Foundation.
+
+All other company and product names mentioned herein are trademarks or registered
+trademarks of their respective owners. The ™ and ® symbols are omitted in the text.
