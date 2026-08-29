@@ -112,6 +112,9 @@ for (var i = 0; i < cands.length; i++) {
     el.value = value;
     el.dispatchEvent(new Event(`input`, { bubbles: true }));
     el.dispatchEvent(new Event(`change`, { bubbles: true }));
+  } else if (action === `text`) {
+    var s = el.innerText || el.textContent || ``;
+    return { ok: true, used: cands[i], text: s.trim() };
   }
   return { ok: true, used: cands[i] };
 }
@@ -618,6 +621,55 @@ def _robin_shot(indent: str, file_var: str) -> list:
     ]
 
 
+def _capture_names(batch: dict) -> list:
+    """loop に出てくる capture の名前を、出た順に並べる。
+
+    画面から読み取った値は結果 CSV の列になる。列の順番を生成の 2 か所
+    （見出しと明細行）で揃える必要があるので、ここで一度だけ決める。"""
+    out = []
+    for st in batch.get("loop") or []:
+        if st.get("type") == "capture":
+            nm = str(st.get("name", "")).strip() or "取得値"
+            if nm not in out:
+                out.append(nm)
+    return out
+
+
+def _robin_capture(cands: list, var: str, indent: str, step_no: int,
+                   note: str, cols: list) -> list:
+    """画面の文字を読み取って変数に入れる。
+
+    登録の結果として発番される番号（要求 ID など）は、次の処理で使う。
+    結果 CSV に列として残しておけば、そのまま次のバッチの明細にできる。
+    読めなかったときは失敗として記録する。空のまま先へ進むと、
+    次のバッチが「番号の無い行」を処理しようとして原因が分かりにくい。"""
+    cands = [_to_robin_var(c, cols) for c in _robin_filter_candidates(cands)]
+    note = _to_robin_var(note, cols).replace("'", "").replace("[", "").replace("]", "")
+    body_args = json.dumps([cands, "text", ""], ensure_ascii=False)
+    _err_http = _robin_str("ステップ%d（%s）で WebDriver がエラーを返しました"
+                           "（HTTP %%ActStatus%%）" % (step_no, note))
+    _err_find = _robin_str("ステップ%d（%s）で読み取る場所が見つかりません"
+                           % (step_no, note))
+    L = [
+        f"{indent}# [{step_no}] {note}",
+        f"{indent}SET ActBody TO $'''{{\"script\": \"%JsAct%\", \"args\": {body_args}}}'''",
+        _web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent),
+        f"{indent}IF ActStatus <> 200 THEN",
+        f"{indent}    SET RowError TO {_err_http}",
+        f"{indent}END",
+        f"{indent}IF ActStatus = 200 THEN",
+        f"{indent}    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj",
+        f"{indent}    IF ActObj['value']['ok'] <> True THEN",
+        f"{indent}        SET RowError TO {_err_find}",
+        f"{indent}    END",
+        f"{indent}    IF ActObj['value']['ok'] = True THEN",
+        f"{indent}        SET {var} TO ActObj['value']['text']",
+        f"{indent}    END",
+        f"{indent}END",
+    ]
+    return L
+
+
 def _robin_download(cands: list, name: str, indent: str, step_no: int,
                     cols: list, timeout: int = 60) -> list:
     """クリックしてファイルが落ちてくるのを待ち、エビデンス名に付け替える。
@@ -673,7 +725,7 @@ def _robin_download(cands: list, name: str, indent: str, step_no: int,
     return L
 
 
-def _robin_fail(indent: str) -> list:
+def _robin_fail(indent: str, cap_vals: str = "") -> list:
     """RowError が立っていたら、エビデンスと結果を記録して次の件へ。
     PrevFailed は件の先頭で True に置いてあるので、ここで触る必要はない。"""
     ind2 = indent + "    "
@@ -682,16 +734,16 @@ def _robin_fail(indent: str) -> list:
         f"{ind2}SET NgCount TO NgCount + 1",
         *_robin_shot(ind2, "FailShot"),
         f"{ind2}File.WriteText File: ResultFile "
-        f"TextToWrite: $'''%RowId%,%RowKey%,失敗,\"%RowError%\",\"%FailShot%\",%RecStamp%''' "
-        f"AppendNewLine: True IfFileExists: File.IfFileExists.Append",
+        f"TextToWrite: $'''%RowId%,%RowKey%,失敗,\"%RowError%\",\"%FailShot%\",%RecStamp%{cap_vals}''' "
+        f"AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8",
         f"{ind2}File.WriteText File: LogFile "
         f"TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' "
-        f"AppendNewLine: True IfFileExists: File.IfFileExists.Append",
+        f"AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8",
         # WebDriver の生の応答も残す。error と message に理由がそのまま入るので、
         # 「要素が見つかりません」だけでは分からないときの手がかりになる。
         f"{ind2}File.WriteText File: LogFile "
         f"TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' "
-        f"AppendNewLine: True IfFileExists: File.IfFileExists.Append",
+        f"AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8",
         f"{ind2}NEXT LOOP",
         f"{indent}END",
     ]
@@ -780,6 +832,7 @@ def _lint_robin(lines: list, log=print) -> list:
         "Display.DefaultButton": {"Button1", "Button2"},
         "Web.Method": {"Get", "Post", "Delete"},
         "File.IfFileExists": {"Append", "Overwrite"},
+        "File.FileEncoding": {"UTF8", "Unicode"},
         "File.IfExists": {"DoNothing", "Overwrite"},
     }
     warns = []
@@ -832,6 +885,7 @@ Q_ = "'''"   # Robin のリテラル区切り
 def write_robin(batch: dict, details_path: str, id_col: str, path: str,
                 shot_name: str = "@ID@__@KEY@__@STAMP@",
                 download_dir: str = "",
+                details_from_result: bool = False,
                 driver_exe: str = r"C:\temp\msedgedriver.exe",
                 out_dir: str = r"C:\temp", proxy: str = "",
                 auto_driver: bool = False,
@@ -886,6 +940,10 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     _mtitle = _safe_comment(str(batch.get("title", "")).strip(), cols)
     _mloop = len([s for s in loop_steps if s.get("type") != "comment"])
     _dl_dir, _dl_json = _download_dir(out_dir, download_dir)
+    # 画面から読み取る値。結果 CSV の列になり、次のバッチの明細に渡せる。
+    caps = _capture_names(batch)
+    _cap_blank = "," * len(caps)
+    _cap_vals = "".join(f",%Cap{i + 1}%" for i in range(len(caps)))
     _mkeys = " ／ ".join(cols[1:]) if len(cols) > 1 else "なし"
     A(f"# タイトル: {_mtitle}")
     A(f"# 処理内容：明細 1 件につき {_mloop} 操作を繰り返す"
@@ -969,8 +1027,18 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("    SET DriverExe TO ChromeDriverExe")
     A("END")
     A("SET DriverUrl TO $'''http://127.0.0.1:9515'''")
-    A(f"SET DetailsFile TO {_robin_under_base(details_path, out_dir)}")
-    A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''")
+    if details_from_result:
+        A("# --- 明細の読み込み元 ---")
+        A("# **前のバッチ（登録側）の結果 CSV を明細として読む。**")
+        A("# 登録側が記録した番号（要求 ID など）を、そのまま使うため。")
+        A("#   前のバッチ  pad_result.csv       … 要求 ID などの列つき")
+        A("#   このバッチ  pad_result_2.csv     … こちらの結果はここへ")
+        A("# 同じファイルを読みながら書くと壊れるので、出力先を分けてある。")
+        A("SET DetailsFile TO $'''%BaseDir%\\\\pad_result.csv'''")
+        A("SET ResultFile TO $'''%BaseDir%\\\\pad_result_2.csv'''")
+    else:
+        A(f"SET DetailsFile TO {_robin_under_base(details_path, out_dir)}")
+        A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''")
     A("SET LogFile TO $'''%BaseDir%\\\\pad_progress.log'''")
     _vw = next((s for s in setup if s.get("type") == "setViewport"), {})
     A("# ブラウザーのウィンドウサイズ。**エビデンスに写る範囲はここで決まる。**")
@@ -1046,7 +1114,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     _hdr = _robin_str("===== 実行開始 上限%MaxItems%件 RetryMode=%RetryMode% "
                       "Browser=%Browser% =====")
     A(f"File.WriteText File: LogFile TextToWrite: {_hdr} "
-      f"AppendNewLine: True IfFileExists: File.IfFileExists.Append")
+      f"AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
     A("")
     A("# ドライバーをどう用意したか。ログとダイアログに出す。")
     _fx = _robin_str("固定パス（AutoDriver=False のためブラウザー更新時は手動で入れ替え）")
@@ -1323,7 +1391,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"SET DriverInfo TO {_di}")
     A(f"File.WriteText File: LogFile "
       f"TextToWrite: {_robin_str('[ドライバー] %DriverInfo%')} "
-      f"AppendNewLine: True IfFileExists: File.IfFileExists.Append")
+      f"AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
     A("# ダイアログにだけ補足を足す。ここはページを開く前なのでブラウザーは白紙で、")
     A("# 初めて見た人が異常だと思いやすい。ログ側は 1 行を短く保つため足さない。")
     _note = _robin_str("%DriverInfo%  ※この時点ではまだページを開いていません"
@@ -1502,9 +1570,11 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("    # 結果 CSV は、そのまま明細として読み直せる列構成にする。")
     A("    # ID だけでなく業務キーも入れないと、再実行で対象を特定できない。")
     key_head = cols[1] if len(cols) > 1 else "業務キー"
+    # 画面から読み取った値も列にする。次のバッチの明細としてそのまま渡せる。
+    _cap_head = "".join("," + c for c in caps)
     A(f"    File.WriteText File: ResultFile "
-      f"TextToWrite: $'''{id_col},{key_head},結果,理由,エビデンス,実行日時''' "
-      f"AppendNewLine: True IfFileExists: File.IfFileExists.Overwrite")
+      f"TextToWrite: $'''{id_col},{key_head},結果,理由,エビデンス,実行日時{_cap_head}''' "
+      f"AppendNewLine: True IfFileExists: File.IfFileExists.Overwrite Encoding: File.FileEncoding.UTF8")
     A("    SET OkCount TO 0")
     A("    SET NgCount TO 0")
     A("    SET SkipCount TO 0")
@@ -1522,6 +1592,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"{inner}SET RowId TO Col1")
     A(f"{inner}SET RowKey TO {key_ref}")
     A(f"{inner}SET RowError TO $''''''")
+    for _i in range(len(caps)):
+        A(f"{inner}SET Cap{_i + 1} TO $''''''")
     A("")
     A(f"{inner}# 再実行モードでは「失敗」行だけを対象にする")
     A(f"{inner}IF RetryMode THEN")
@@ -1544,8 +1616,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"{inner}    IF Row['skip'] <> $'''''' THEN")
     A(f"{inner}        SET SkipCount TO SkipCount + 1")
     A(f"{inner}        File.WriteText File: ResultFile "
-      "TextToWrite: $'''%RowId%,%RowKey%,スキップ,,,''' AppendNewLine: True "
-      "IfFileExists: File.IfFileExists.Append")
+      f"TextToWrite: $'''%RowId%,%RowKey%,スキップ,,,{_cap_blank}''' AppendNewLine: True "
+      "IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
     A(f"{inner}        NEXT LOOP")
     A(f"{inner}    END")
     A(f"{inner}END")
@@ -1553,8 +1625,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"{inner}# 件数上限。打ち切った行も記録に残す（どこから再開するか分かる）")
     A(f"{inner}IF Attempted >= MaxItems THEN")
     A(f"{inner}    File.WriteText File: ResultFile "
-      "TextToWrite: $'''%RowId%,%RowKey%,未実行,\"件数上限 %MaxItems% 件に達したため\",,''' "
-      "AppendNewLine: True IfFileExists: File.IfFileExists.Append")
+      f"TextToWrite: $'''%RowId%,%RowKey%,未実行,\"件数上限 %MaxItems% 件に達したため\",,{_cap_blank}''' "
+      "AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
     A(f"{inner}    NEXT LOOP")
     A(f"{inner}END")
     A(f"{inner}SET Attempted TO Attempted + 1")
@@ -1607,7 +1679,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"{inner}SET FailShot TO $'''%ShotDir%\\\\fail_%ShotName%.png'''")
     A(f"{inner}File.WriteText File: LogFile "
       "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 開始''' AppendNewLine: True "
-      "IfFileExists: File.IfFileExists.Append")
+      "IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
     A("")
 
     m = 0
@@ -1624,6 +1696,17 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             L.extend(_robin_shot(inner, "ShotPath"))
             A("")
             continue
+        if t == "capture":
+            m += 1
+            nm = str(st.get("name", "")).strip() or "取得値"
+            cands = _robin_filter_candidates(_candidates(st))
+            A(f"{inner}# 画面に出た値を読み取って、結果 CSV の「{nm}」列に残す。")
+            A(f"{inner}# 次のバッチはこの CSV をそのまま明細として読める。")
+            L.extend(_robin_capture(cands, f"Cap{caps.index(nm) + 1}", inner, m,
+                                    f"capture {nm}", cols))
+            L.extend(_robin_fail(inner, _cap_vals))
+            A("")
+            continue
         if t == "download":
             m += 1
             cands = _robin_filter_candidates(_candidates(st))
@@ -1631,7 +1714,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             A(f"{inner}# 画面に内容が出ず、Excel や PDF を受け取って初めて分かる業務向け。")
             L.extend(_robin_download(cands, st.get("name", "") or shot_name,
                                      inner, m, cols))
-            L.extend(_robin_fail(inner))
+            L.extend(_robin_fail(inner, _cap_vals))
             A("")
             continue
         if t == "assertText":
@@ -1640,7 +1723,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             A(f"{inner}# 完了確認。「ボタンは押せたが実際には処理されていない」を検知する。")
             L.extend(_robin_act([], "exists", text, inner,
                                 f"完了確認: {text}", m, cols))
-            L.extend(_robin_fail(inner))
+            L.extend(_robin_fail(inner, _cap_vals))
             A("")
             continue
         if t in ("click", "doubleClick", "change"):
@@ -1649,7 +1732,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             action = "fill" if t == "change" else "click"
             L.extend(_robin_act(cands, action, st.get("value", ""), inner,
                                 f"{action} {cands[0] if cands else ''}", m, cols))
-            L.extend(_robin_fail(inner))
+            L.extend(_robin_fail(inner, _cap_vals))
             A(f"{inner}WAIT 1")
             A("")
             continue
@@ -1658,11 +1741,11 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"{inner}SET PrevFailed TO False")
     A(f"{inner}SET OkCount TO OkCount + 1")
     A(f"{inner}File.WriteText File: ResultFile "
-      "TextToWrite: $'''%RowId%,%RowKey%,成功,,\"%ShotPath%\",%RecStamp%''' "
-      "AppendNewLine: True IfFileExists: File.IfFileExists.Append")
+      f"TextToWrite: $'''%RowId%,%RowKey%,成功,,\"%ShotPath%\",%RecStamp%{_cap_vals}''' "
+      "AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
     A(f"{inner}File.WriteText File: LogFile "
       "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 成功''' AppendNewLine: True "
-      "IfFileExists: File.IfFileExists.Append")
+      "IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
     A(f"{ind}END")
     A("END")
     A("")
@@ -1702,7 +1785,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
       f"CustomFormat: {_robin_str('yyyy/MM/dd HH:mm:ss')} Result=> HaltStamp")
     A(f"    File.WriteText File: LogFile "
       f"TextToWrite: {_robin_str('[%HaltStamp%] 中止 %HaltReason%')} "
-      f"AppendNewLine: True IfFileExists: File.IfFileExists.Append")
+      f"AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
     A("    Display.ShowMessageDialog.ShowMessage Title: $'''中止''' "
       "Message: $'''%HaltReason%のため、明細を1件も処理せず中止しました。"
       "詳細は pad_progress.log を確認してください。''' "
@@ -1837,7 +1920,7 @@ def _use_utf8_stdout() -> None:
 SECTION_STEPS = {
     "setup": {"comment", "setViewport", "navigate", "click", "doubleClick", "change"},
     "loop": {"comment", "screenshot", "assertText", "click", "doubleClick", "change",
-             "download"},
+             "download", "capture"},
     "recover": {"comment", "navigate", "click", "doubleClick", "change"},
     "teardown": {"comment", "click", "doubleClick", "change"},
 }
@@ -1890,6 +1973,10 @@ def main() -> None:
                    help="エビデンスのファイル名（拡張子なし）。"
                         "@ID@ / @KEY@ / @STAMP@ を差し込める。"
                         "例: 【注文受諾】@ID@_〇〇株式会社")
+    p.add_argument("--details-from-result", action="store_true",
+                   help="明細として、前のバッチの結果 CSV（pad_result.csv）を読む。"
+                        "登録側が capture で記録した番号をそのまま使うとき。"
+                        "こちらの結果は pad_result_2.csv に出る")
     p.add_argument("--download-dir", default="",
                    help="ダウンロードの受け取り先（既定: BaseDir の下の download）。"
                         "実行環境のパスを渡すこと。"
@@ -1923,6 +2010,7 @@ def main() -> None:
     if args.robin:
         out = write_robin(batch, args.details, id_col, args.robin,
                           args.shot_name, args.download_dir,
+                          args.details_from_result,
                           args.driver_exe, args.pad_out_dir, args.proxy,
                           args.auto_driver, args.pad_browser)
         js_out = out[:-len(".robin.txt")] + ".jsact.js" if out.endswith(".robin.txt") \

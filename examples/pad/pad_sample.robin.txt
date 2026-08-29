@@ -9,7 +9,7 @@
 #           BaseDir: C:\temp
 #           エビデンス名: @ID@__@KEY@__@STAMP@
 #           ダウンロード保存先: C:\temp\download
-# 備考：2026/08/25 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
+# 備考：2026/08/29 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
 # ============================================================
 # LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
 # Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).
@@ -133,8 +133,9 @@ SET JsAct TO $'''%JsAct%dy && (body.innerText || body.textContent)) || ``; retur
 SET JsAct TO $'''%JsAct%}; } for (var i = 0; i < cands.length; i++) { var el = find(cands[i]); if (!el) { continue; } if (ac'''
 SET JsAct TO $'''%JsAct%tion === `click`) { try { el.scrollIntoView({ block: `center` }); } catch (e) {} el.click(); } else '''
 SET JsAct TO $'''%JsAct%if (action === `fill`) { el.focus(); el.value = value; el.dispatchEvent(new Event(`input`, { bubbles'''
-SET JsAct TO $'''%JsAct%: true })); el.dispatchEvent(new Event(`change`, { bubbles: true })); } return { ok: true, used: can'''
-SET JsAct TO $'''%JsAct%ds[i] }; } return { ok: false, used: null };'''
+SET JsAct TO $'''%JsAct%: true })); el.dispatchEvent(new Event(`change`, { bubbles: true })); } else if (action === `text`) '''
+SET JsAct TO $'''%JsAct%{ var s = el.innerText || el.textContent || ``; return { ok: true, used: cands[i], text: s.trim() };'''
+SET JsAct TO $'''%JsAct% } return { ok: true, used: cands[i] }; } return { ok: false, used: null };'''
 # ※ 継ぎ足しがうまくいかない場合は、共通 JavaScript（変換器のコピー機能、または
 #   Python 版が同時に出力する .jsact ファイル）の中身を「変数の設定」アクション
 #   （変数名 JsAct）の値の欄に手で貼り付けてもよい。
@@ -156,7 +157,7 @@ SET SessionOk TO False
 # --- 実行開始をログに残す ---
 # ここは中止しても必ず通る。ループの中だけで書くと、起点に着けずに
 # 中止したとき「ログを確認してください」と案内しながらログが空になる。
-File.WriteText File: LogFile TextToWrite: $'''===== 実行開始 上限%MaxItems%件 RetryMode=%RetryMode% Browser=%Browser% =====''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+File.WriteText File: LogFile TextToWrite: $'''===== 実行開始 上限%MaxItems%件 RetryMode=%RetryMode% Browser=%Browser% =====''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
 
 # ドライバーをどう用意したか。ログとダイアログに出す。
 SET DriverSrc TO $'''固定パス（AutoDriver=False のためブラウザー更新時は手動で入れ替え）'''
@@ -389,7 +390,7 @@ IF VerObj['value']['match'] = True THEN
     SET VerJudge TO $'''一致'''
 END
 SET DriverInfo TO $'''ブラウザー=%Browser% %BrowserVer% / WebDriver=%DriverProc% %DriverVer% / メジャー判定=%VerJudge% / 取得方法=%DriverSrc% / パス=%DriverExe%'''
-File.WriteText File: LogFile TextToWrite: $'''[ドライバー] %DriverInfo%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+File.WriteText File: LogFile TextToWrite: $'''[ドライバー] %DriverInfo%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
 # ダイアログにだけ補足を足す。ここはページを開く前なのでブラウザーは白紙で、
 # 初めて見た人が異常だと思いやすい。ログ側は 1 行を短く保つため足さない。
 SET DriverInfoMsg TO $'''%DriverInfo%  ※この時点ではまだページを開いていません（白紙で正常）。OK を押すとページを開きます。'''
@@ -491,7 +492,7 @@ IF Halt = False THEN
     File.ReadFromCSVFile.ReadCSV CSVFile: DetailsFile Encoding: File.CSVEncoding.UTF8 TrimFields: True FirstLineContainsColumnNames: True ColumnsSeparator: File.CSVColumnsSeparator.Comma CSVTable=> Rows
     # 結果 CSV は、そのまま明細として読み直せる列構成にする。
     # ID だけでなく業務キーも入れないと、再実行で対象を特定できない。
-    File.WriteText File: ResultFile TextToWrite: $'''ID,KEY,結果,理由,エビデンス,実行日時''' AppendNewLine: True IfFileExists: File.IfFileExists.Overwrite
+    File.WriteText File: ResultFile TextToWrite: $'''ID,KEY,結果,理由,エビデンス,実行日時''' AppendNewLine: True IfFileExists: File.IfFileExists.Overwrite Encoding: File.FileEncoding.UTF8
     SET OkCount TO 0
     SET NgCount TO 0
     SET SkipCount TO 0
@@ -527,14 +528,14 @@ IF Halt = False THEN
         IF RetryMode = False THEN
             IF Row['skip'] <> $'''''' THEN
                 SET SkipCount TO SkipCount + 1
-                File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,スキップ,,,''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+                File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,スキップ,,,''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
                 NEXT LOOP
             END
         END
 
         # 件数上限。打ち切った行も記録に残す（どこから再開するか分かる）
         IF Attempted >= MaxItems THEN
-            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,未実行,"件数上限 %MaxItems% 件に達したため",,''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,未実行,"件数上限 %MaxItems% 件に達したため",,''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
             NEXT LOOP
         END
         SET Attempted TO Attempted + 1
@@ -566,7 +567,7 @@ IF Halt = False THEN
         Text.Replace.ReplaceTextWithRegex Text: ShotName TextToFind: $'''@STAMP@''' IgnoreCase: False ReplaceWith: Stamp ActivateEscapeSequences: False Result=> ShotName
         SET ShotPath TO $'''%ShotDir%\\%ShotName%.png'''
         SET FailShot TO $'''%ShotDir%\\fail_%ShotName%.png'''
-        File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 開始''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+        File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 開始''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
 
         # 💬 注文 %Col2%（%Col1%）の確認を開始
         # [1] fill #search-key
@@ -601,9 +602,9 @@ IF Halt = False THEN
                 SET ShotB64 TO ShotObj['value']
                 File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
             END
-            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
-            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
-            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
             NEXT LOOP
         END
         WAIT 1
@@ -640,9 +641,9 @@ IF Halt = False THEN
                 SET ShotB64 TO ShotObj['value']
                 File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
             END
-            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
-            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
-            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
             NEXT LOOP
         END
         WAIT 1
@@ -679,9 +680,9 @@ IF Halt = False THEN
                 SET ShotB64 TO ShotObj['value']
                 File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
             END
-            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
-            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
-            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
             NEXT LOOP
         END
         WAIT 1
@@ -718,9 +719,9 @@ IF Halt = False THEN
                 SET ShotB64 TO ShotObj['value']
                 File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
             END
-            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
-            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
-            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
             NEXT LOOP
         END
         WAIT 1
@@ -758,9 +759,9 @@ IF Halt = False THEN
                 SET ShotB64 TO ShotObj['value']
                 File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
             END
-            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
-            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
-            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
             NEXT LOOP
         END
         WAIT 1
@@ -797,9 +798,9 @@ IF Halt = False THEN
                 SET ShotB64 TO ShotObj['value']
                 File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
             END
-            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
-            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
-            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
             NEXT LOOP
         END
         WAIT 1
@@ -807,8 +808,8 @@ IF Halt = False THEN
         # ここまで来たら成功
         SET PrevFailed TO False
         SET OkCount TO OkCount + 1
-        File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,成功,,"%ShotPath%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
-        File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 成功''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+        File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,成功,,"%ShotPath%",%RecStamp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+        File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 成功''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
     END
 END
 
@@ -824,6 +825,6 @@ END
 IF Halt THEN
     DateTime.GetCurrentDateTime.Local DateTimeFormat: DateTime.DateTimeFormat.DateAndTime CurrentDateTime=> HaltDt
     Text.ConvertDateTimeToText.FromCustomDateTime DateTime: HaltDt CustomFormat: $'''yyyy/MM/dd HH:mm:ss''' Result=> HaltStamp
-    File.WriteText File: LogFile TextToWrite: $'''[%HaltStamp%] 中止 %HaltReason%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append
+    File.WriteText File: LogFile TextToWrite: $'''[%HaltStamp%] 中止 %HaltReason%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
     Display.ShowMessageDialog.ShowMessage Title: $'''中止''' Message: $'''%HaltReason%のため、明細を1件も処理せず中止しました。詳細は pad_progress.log を確認してください。''' Icon: Display.Icon.Warning Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn
 END
