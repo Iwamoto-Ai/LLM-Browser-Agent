@@ -82,12 +82,19 @@ if (j.indexOf("{{発注番号}}") < 0) { errors.push("列名の差し込みが�
 if (j.indexOf('"u"') >= 0 || j.indexOf('"p"') >= 0) { errors.push("録画時の実値が残っている"); }
 
 // バッチ定義 → 振り分け → バッチ定義 が元に戻るか（読み込んで直せること）
-const sample = JSON.parse(fs.readFileSync("recordings/edi2_accept_batch.json", "utf8")
+const sample = JSON.parse(fs.readFileSync("recordings/edi2_delivery_batch.json", "utf8")
   .split("\n").filter((l) => !l.trim().startsWith("//")).join("\n"));
 const back = P.batchToSteps(sample);
 const rebuilt = P.buildBatch(back.steps, back.assigns, sample.title);
 const norm = (arr) => JSON.stringify((arr || []).map((s) =>
   JSON.stringify(Object.keys(s).sort().reduce((o, k) => (o[k] = s[k], o), {}))));
+// capture の列名が往復で消えないこと（消えると結果 CSV の見出しが
+// 「取得値」になり、次のバッチが列を引けなくなる）
+const capsIn = (sample.loop || []).filter((s) => s.type === "capture").map((s) => s.name);
+const capsOut = (rebuilt.loop || []).filter((s) => s.type === "capture").map((s) => s.name);
+if (JSON.stringify(capsIn) !== JSON.stringify(capsOut)) {
+  errors.push("capture の列名が変わる: " + capsIn + " → " + capsOut);
+}
 for (const key of ["setup", "loop", "recover"]) {
   if (norm(sample[key]) !== norm(rebuilt[key])) {
     errors.push("バッチ定義の復元で " + key + " が変わる");
