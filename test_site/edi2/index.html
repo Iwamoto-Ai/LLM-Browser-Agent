@@ -517,8 +517,6 @@ function viewNounyuDone() {
 var requestId = '';
 var reqPo = '';
 
-/* 練習用の Excel（xlsx）。中身は検収状況一覧を模した 1 行だけの表。 */
-var XLSX_B64 = "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";
 
 function viewKenshuJoken() {
   app.innerHTML = header('E-Business Suite') +
@@ -589,14 +587,123 @@ function viewRequestList() {
   document.getElementById('OutputIcon0').addEventListener('click', downloadReport);
 }
 
-/* base64 の xlsx を Blob にしてダウンロードさせる。実サイトでサーバーが
-   Content-Disposition で返すのと同じく、ブラウザーの保存先に落ちる。 */
+/* ダウンロードする Excel を、その場で組み立てる。
+   固定のファイルを返すと、登録した内容と食い違って練習にならない
+   （納入番号がいつも同じ値になる、など）。
+
+   xlsx は zip なので、無圧縮（stored）で必要な部品だけ詰めれば作れる。
+   ライブラリは使わない。CRC32 だけ自前で計算する。 */
+
+var CRC_TABLE = (function () {
+  var tbl = [], c, n, k;
+  for (n = 0; n < 256; n++) {
+    c = n;
+    for (k = 0; k < 8; k++) { c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); }
+    tbl[n] = c >>> 0;
+  }
+  return tbl;
+})();
+
+function crc32(bytes) {
+  var c = 0xFFFFFFFF;
+  for (var i = 0; i < bytes.length; i++) {
+    c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  }
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+function utf8Bytes(s) {
+  var out = [], i, c;
+  for (i = 0; i < s.length; i++) {
+    c = s.charCodeAt(i);
+    if (c < 0x80) { out.push(c); }
+    else if (c < 0x800) { out.push(0xC0 | (c >> 6), 0x80 | (c & 63)); }
+    else { out.push(0xE0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63)); }
+  }
+  return new Uint8Array(out);
+}
+
+/* 無圧縮 zip を作る。files は [{name, data}]（data は Uint8Array）。 */
+function makeZip(files) {
+  var chunks = [], central = [], offset = 0;
+  var u16 = function (n) { return [n & 255, (n >> 8) & 255]; };
+  var u32 = function (n) { return [n & 255, (n >> 8) & 255, (n >> 16) & 255, (n >>> 24) & 255]; };
+  files.forEach(function (f) {
+    var name = utf8Bytes(f.name), crc = crc32(f.data), len = f.data.length;
+    var local = [].concat([0x50, 0x4B, 0x03, 0x04], u16(20), u16(0x0800), u16(0),
+      u16(0), u16(0), u32(crc), u32(len), u32(len), u16(name.length), u16(0));
+    chunks.push(new Uint8Array(local), name, f.data);
+    central.push(new Uint8Array([].concat([0x50, 0x4B, 0x01, 0x02], u16(20), u16(20),
+      u16(0x0800), u16(0), u16(0), u16(0), u32(crc), u32(len), u32(len),
+      u16(name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset))), name);
+    offset += local.length + name.length + len;
+  });
+  var cdSize = 0;
+  central.forEach(function (c) { cdSize += c.length; });
+  var end = new Uint8Array([].concat([0x50, 0x4B, 0x05, 0x06], u16(0), u16(0),
+    u16(files.length), u16(files.length), u32(cdSize), u32(offset), u16(0)));
+  var all = chunks.concat(central, [end]);
+  var total = 0;
+  all.forEach(function (x) { total += x.length; });
+  var buf = new Uint8Array(total), at = 0;
+  all.forEach(function (x) { buf.set(x, at); at += x.length; });
+  return buf;
+}
+
+function xmlEscape(s) {
+  return String(s).split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;');
+}
+
+/* 検収状況一覧の xlsx を、いまの登録内容から作る。 */
+function buildReportXlsx(rows) {
+  var sheet = '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>';
+  rows.forEach(function (row, ri) {
+    sheet += '<row r="' + (ri + 1) + '">';
+    row.forEach(function (v, ci) {
+      sheet += '<c r="' + String.fromCharCode(65 + ci) + (ri + 1) +
+        '" t="inlineStr"><is><t>' + xmlEscape(v) + '</t></is></c>';
+    });
+    sheet += '</row>';
+  });
+  sheet += '</sheetData></worksheet>';
+  var ct = '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+    '<Default Extension="xml" ContentType="application/xml"/>' +
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+    '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>';
+  var rels = '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>';
+  var wb = '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
+    'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+    '<sheets><sheet name="検収状況一覧" sheetId="1" r:id="rId1"/></sheets></workbook>';
+  var wbRels = '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>';
+  return makeZip([
+    { name: '[Content_Types].xml', data: utf8Bytes(ct) },
+    { name: '_rels/.rels', data: utf8Bytes(rels) },
+    { name: 'xl/workbook.xml', data: utf8Bytes(wb) },
+    { name: 'xl/_rels/workbook.xml.rels', data: utf8Bytes(wbRels) },
+    { name: 'xl/worksheets/sheet1.xml', data: utf8Bytes(sheet) }
+  ]);
+}
+
+/* 実サイトでサーバーが Content-Disposition で返すのと同じく、
+   ブラウザーの保存先に落ちる。 */
 function downloadReport() {
-  var bin = atob(XLSX_B64);
-  var arr = new Uint8Array(bin.length);
-  for (var i = 0; i < bin.length; i++) { arr[i] = bin.charCodeAt(i); }
+  var rec = reqLog[requestId] || {};
+  var po = poByNo(rec.po || '');
+  var rows = [
+    ['要求ID', '発注番号', '納入番号', '納入日', '検収状況', '金額'],
+    [requestId, rec.po || '-', rec.ship || '-', rec.date || '-', '検収済',
+     rec.po ? po.amt : '-']
+  ];
   var mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-  var url = URL.createObjectURL(new Blob([arr], { type: mime }));
+  var url = URL.createObjectURL(new Blob([buildReportXlsx(rows)], { type: mime }));
   var a = document.createElement('a');
   a.href = url;
   a.download = 'XXPO_検収状況一覧_' + requestId + '.xlsx';
