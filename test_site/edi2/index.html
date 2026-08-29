@@ -387,7 +387,21 @@ function viewPoDone() {
    ============================================================ */
 var shipNo = '';          /* 入力された納入番号 */
 var lastReqId = '';       /* 登録で発番された要求ID */
-var reqLog = {};          /* 要求ID → 登録内容 */
+/* 要求ID → 登録内容。
+   実サイトはサーバーに保存されるので、日をまたいでも引ける。練習サイトは
+   JavaScript の変数なので、そのままだとブラウザーを閉じた時点で消える。
+   納入登録とエビデンス取得は別々の実行に分けるため、**それでは要求 ID で
+   引けなくなる**。ブラウザーに保存して残す。
+   file:// で保存できない環境でも動くよう、失敗しても無視する。 */
+var REQ_KEY = 'edi2_practice_reqlog';
+var reqLog = (function () {
+  try { return JSON.parse(localStorage.getItem(REQ_KEY) || '{}'); }
+  catch (e) { return {}; }
+})();
+
+function saveReqLog() {
+  try { localStorage.setItem(REQ_KEY, JSON.stringify(reqLog)); } catch (e) {}
+}
 var shipDate = '';        /* 入力された納入日 */
 var shipPo = '';          /* 対象の発注番号 */
 var registered = {};      /* 納入登録済みの発注番号 */
@@ -490,6 +504,7 @@ function viewNounyuConfirm() {
        この番号で、あとから検収状況一覧を照会する。 */
     lastReqId = String(9000000 + Math.floor(Math.random() * 999999));
     reqLog[lastReqId] = { po: shipPo, ship: shipNo, date: shipDate };
+    saveReqLog();
     viewNounyuDone();
   });
 }
