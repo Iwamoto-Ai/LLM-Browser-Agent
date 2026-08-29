@@ -633,15 +633,15 @@ function robinFail(indent, capVals) {
   out = out.concat(robinShot(ind2, "FailShot"));
   out.push(ind2 + "File.WriteText File: ResultFile " +
     "TextToWrite: $'''%RowId%,%RowKey%,失敗,\"%RowError%\",\"%FailShot%\",%RecStamp%" + capVals + "''' " +
-    "AppendNewLine: True IfFileExists: File.IfFileExists.Append");
+    "AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8");
   out.push(ind2 + "File.WriteText File: LogFile " +
     "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' " +
-    "AppendNewLine: True IfFileExists: File.IfFileExists.Append");
+    "AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8");
   // WebDriver の生の応答も残す。error と message に理由がそのまま入るので、
   //「要素が見つかりません」だけでは分からないときの手がかりになる。
   out.push(ind2 + "File.WriteText File: LogFile " +
     "TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' " +
-    "AppendNewLine: True IfFileExists: File.IfFileExists.Append");
+    "AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8");
   out.push(ind2 + "NEXT LOOP");
   out.push(indent + "END");
   return out;
@@ -1075,6 +1075,7 @@ function lintRobin(lines) {
     "Display.DefaultButton": ["Button1", "Button2"],
     "Web.Method": ["Get", "Post", "Delete"],
     "File.IfFileExists": ["Append", "Overwrite"],
+    "File.FileEncoding": ["UTF8", "Unicode"],
     "File.IfExists": ["DoNothing", "Overwrite"]
   };
   var warns = [];
@@ -1347,7 +1348,7 @@ function buildRobin(batch, opt) {
   A("# 中止したとき「ログを確認してください」と案内しながらログが空になる。");
   var hdr = robinStr("===== 実行開始 上限%MaxItems%件 RetryMode=%RetryMode% Browser=%Browser% =====");
   A("File.WriteText File: LogFile TextToWrite: " + hdr +
-    " AppendNewLine: True IfFileExists: File.IfFileExists.Append");
+    " AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8");
   A("");
   A("# ドライバーをどう用意したか。ログとダイアログに出す。");
   A("SET DriverSrc TO " + robinStr("固定パス（AutoDriver=False のためブラウザー更新時は手動で入れ替え）"));
@@ -1608,7 +1609,7 @@ function buildRobin(batch, opt) {
   A("SET DriverInfo TO " + robinStr("ブラウザー=%Browser% %BrowserVer% / WebDriver=%DriverProc% " +
     "%DriverVer% / メジャー判定=%VerJudge% / 取得方法=%DriverSrc% / パス=%DriverExe%"));
   A("File.WriteText File: LogFile TextToWrite: " + robinStr("[ドライバー] %DriverInfo%") +
-    " AppendNewLine: True IfFileExists: File.IfFileExists.Append");
+    " AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8");
   A("# ダイアログにだけ補足を足す。ここはページを開く前なのでブラウザーは白紙で、");
   A("# 初めて見た人が異常だと思いやすい。ログ側は 1 行を短く保つため足さない。");
   A("SET DriverInfoMsg TO " +
@@ -1782,7 +1783,7 @@ function buildRobin(batch, opt) {
   // 画面から読み取った値も列にする。次のバッチの明細としてそのまま渡せる。
   A("    File.WriteText File: ResultFile TextToWrite: $'''" + idCol + "," + keyHead +
     ",結果,理由,エビデンス,実行日時" + capHead +
-    "''' AppendNewLine: True IfFileExists: File.IfFileExists.Overwrite");
+    "''' AppendNewLine: True IfFileExists: File.IfFileExists.Overwrite Encoding: File.FileEncoding.UTF8");
   A("    SET OkCount TO 0");
   A("    SET NgCount TO 0");
   A("    SET SkipCount TO 0");
@@ -1822,7 +1823,7 @@ function buildRobin(batch, opt) {
   A(inner + "        SET SkipCount TO SkipCount + 1");
   A(inner + "        File.WriteText File: ResultFile " +
     "TextToWrite: $'''%RowId%,%RowKey%,スキップ,,," + capBlank + "''' AppendNewLine: True " +
-    "IfFileExists: File.IfFileExists.Append");
+    "IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8");
   A(inner + "        NEXT LOOP");
   A(inner + "    END");
   A(inner + "END");
@@ -1831,7 +1832,7 @@ function buildRobin(batch, opt) {
   A(inner + "IF Attempted >= MaxItems THEN");
   A(inner + "    File.WriteText File: ResultFile " +
     "TextToWrite: $'''%RowId%,%RowKey%,未実行,\"件数上限 %MaxItems% 件に達したため\",," + capBlank + "''' " +
-    "AppendNewLine: True IfFileExists: File.IfFileExists.Append");
+    "AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8");
   A(inner + "    NEXT LOOP");
   A(inner + "END");
   A(inner + "SET Attempted TO Attempted + 1");
@@ -1885,7 +1886,7 @@ function buildRobin(batch, opt) {
   A(inner + "SET FailShot TO $'''%ShotDir%\\\\fail_%ShotName%.png'''");
   A(inner + "File.WriteText File: LogFile " +
     "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 開始''' AppendNewLine: True " +
-    "IfFileExists: File.IfFileExists.Append");
+    "IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8");
   A("");
 
   var m = 0;
@@ -1949,10 +1950,10 @@ function buildRobin(batch, opt) {
   A(inner + "SET OkCount TO OkCount + 1");
   A(inner + "File.WriteText File: ResultFile " +
     "TextToWrite: $'''%RowId%,%RowKey%,成功,,\"%ShotPath%\",%RecStamp%" + capVals + "''' " +
-    "AppendNewLine: True IfFileExists: File.IfFileExists.Append");
+    "AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8");
   A(inner + "File.WriteText File: LogFile " +
     "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 成功''' AppendNewLine: True " +
-    "IfFileExists: File.IfFileExists.Append");
+    "IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8");
   A(ind1 + "END");
   A("END");
   A("");
@@ -1992,7 +1993,7 @@ function buildRobin(batch, opt) {
     "CustomFormat: " + robinStr("yyyy/MM/dd HH:mm:ss") + " Result=> HaltStamp");
   A("    File.WriteText File: LogFile TextToWrite: " +
     robinStr("[%HaltStamp%] 中止 %HaltReason%") +
-    " AppendNewLine: True IfFileExists: File.IfFileExists.Append");
+    " AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8");
   A("    Display.ShowMessageDialog.ShowMessage Title: $'''中止''' " +
     "Message: $'''%HaltReason%のため、明細を1件も処理せず中止しました。詳細は pad_progress.log を確認してください。''' " +
     "Icon: Display.Icon.Warning Buttons: Display.Buttons.OK " +

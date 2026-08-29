@@ -735,15 +735,15 @@ def _robin_fail(indent: str, cap_vals: str = "") -> list:
         *_robin_shot(ind2, "FailShot"),
         f"{ind2}File.WriteText File: ResultFile "
         f"TextToWrite: $'''%RowId%,%RowKey%,失敗,\"%RowError%\",\"%FailShot%\",%RecStamp%{cap_vals}''' "
-        f"AppendNewLine: True IfFileExists: File.IfFileExists.Append",
+        f"AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8",
         f"{ind2}File.WriteText File: LogFile "
         f"TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' "
-        f"AppendNewLine: True IfFileExists: File.IfFileExists.Append",
+        f"AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8",
         # WebDriver の生の応答も残す。error と message に理由がそのまま入るので、
         # 「要素が見つかりません」だけでは分からないときの手がかりになる。
         f"{ind2}File.WriteText File: LogFile "
         f"TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' "
-        f"AppendNewLine: True IfFileExists: File.IfFileExists.Append",
+        f"AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8",
         f"{ind2}NEXT LOOP",
         f"{indent}END",
     ]
@@ -832,6 +832,7 @@ def _lint_robin(lines: list, log=print) -> list:
         "Display.DefaultButton": {"Button1", "Button2"},
         "Web.Method": {"Get", "Post", "Delete"},
         "File.IfFileExists": {"Append", "Overwrite"},
+        "File.FileEncoding": {"UTF8", "Unicode"},
         "File.IfExists": {"DoNothing", "Overwrite"},
     }
     warns = []
@@ -1102,7 +1103,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     _hdr = _robin_str("===== 実行開始 上限%MaxItems%件 RetryMode=%RetryMode% "
                       "Browser=%Browser% =====")
     A(f"File.WriteText File: LogFile TextToWrite: {_hdr} "
-      f"AppendNewLine: True IfFileExists: File.IfFileExists.Append")
+      f"AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
     A("")
     A("# ドライバーをどう用意したか。ログとダイアログに出す。")
     _fx = _robin_str("固定パス（AutoDriver=False のためブラウザー更新時は手動で入れ替え）")
@@ -1379,7 +1380,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"SET DriverInfo TO {_di}")
     A(f"File.WriteText File: LogFile "
       f"TextToWrite: {_robin_str('[ドライバー] %DriverInfo%')} "
-      f"AppendNewLine: True IfFileExists: File.IfFileExists.Append")
+      f"AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
     A("# ダイアログにだけ補足を足す。ここはページを開く前なのでブラウザーは白紙で、")
     A("# 初めて見た人が異常だと思いやすい。ログ側は 1 行を短く保つため足さない。")
     _note = _robin_str("%DriverInfo%  ※この時点ではまだページを開いていません"
@@ -1562,7 +1563,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     _cap_head = "".join("," + c for c in caps)
     A(f"    File.WriteText File: ResultFile "
       f"TextToWrite: $'''{id_col},{key_head},結果,理由,エビデンス,実行日時{_cap_head}''' "
-      f"AppendNewLine: True IfFileExists: File.IfFileExists.Overwrite")
+      f"AppendNewLine: True IfFileExists: File.IfFileExists.Overwrite Encoding: File.FileEncoding.UTF8")
     A("    SET OkCount TO 0")
     A("    SET NgCount TO 0")
     A("    SET SkipCount TO 0")
@@ -1605,7 +1606,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"{inner}        SET SkipCount TO SkipCount + 1")
     A(f"{inner}        File.WriteText File: ResultFile "
       f"TextToWrite: $'''%RowId%,%RowKey%,スキップ,,,{_cap_blank}''' AppendNewLine: True "
-      "IfFileExists: File.IfFileExists.Append")
+      "IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
     A(f"{inner}        NEXT LOOP")
     A(f"{inner}    END")
     A(f"{inner}END")
@@ -1614,7 +1615,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"{inner}IF Attempted >= MaxItems THEN")
     A(f"{inner}    File.WriteText File: ResultFile "
       f"TextToWrite: $'''%RowId%,%RowKey%,未実行,\"件数上限 %MaxItems% 件に達したため\",,{_cap_blank}''' "
-      "AppendNewLine: True IfFileExists: File.IfFileExists.Append")
+      "AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
     A(f"{inner}    NEXT LOOP")
     A(f"{inner}END")
     A(f"{inner}SET Attempted TO Attempted + 1")
@@ -1667,7 +1668,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"{inner}SET FailShot TO $'''%ShotDir%\\\\fail_%ShotName%.png'''")
     A(f"{inner}File.WriteText File: LogFile "
       "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 開始''' AppendNewLine: True "
-      "IfFileExists: File.IfFileExists.Append")
+      "IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
     A("")
 
     m = 0
@@ -1730,10 +1731,10 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"{inner}SET OkCount TO OkCount + 1")
     A(f"{inner}File.WriteText File: ResultFile "
       f"TextToWrite: $'''%RowId%,%RowKey%,成功,,\"%ShotPath%\",%RecStamp%{_cap_vals}''' "
-      "AppendNewLine: True IfFileExists: File.IfFileExists.Append")
+      "AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
     A(f"{inner}File.WriteText File: LogFile "
       "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 成功''' AppendNewLine: True "
-      "IfFileExists: File.IfFileExists.Append")
+      "IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
     A(f"{ind}END")
     A("END")
     A("")
@@ -1773,7 +1774,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
       f"CustomFormat: {_robin_str('yyyy/MM/dd HH:mm:ss')} Result=> HaltStamp")
     A(f"    File.WriteText File: LogFile "
       f"TextToWrite: {_robin_str('[%HaltStamp%] 中止 %HaltReason%')} "
-      f"AppendNewLine: True IfFileExists: File.IfFileExists.Append")
+      f"AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
     A("    Display.ShowMessageDialog.ShowMessage Title: $'''中止''' "
       "Message: $'''%HaltReason%のため、明細を1件も処理せず中止しました。"
       "詳細は pad_progress.log を確認してください。''' "

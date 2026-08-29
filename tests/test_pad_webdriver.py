@@ -696,3 +696,17 @@ def test_capture_uses_text_action(tmp_path):
     assert chr(34) + "text" + chr(34) in txt
     # 読めなかったときは失敗として記録する（空のまま進めない）
     assert "読み取る場所が見つかりません" in txt
+
+
+def test_result_csv_encoding_matches_reader(tmp_path):
+    """結果 CSV を書く文字コードと、明細として読む文字コードをそろえること。
+
+    File.WriteText は指定しないと Unicode（UTF-16）で書く。読み込みは
+    CSVEncoding.UTF8 なので、そのままでは結果 CSV を明細として読み直せない。
+    再実行モードも、登録結果を次のバッチへ渡す使い方も、どちらも壊れる。
+    """
+    txt = _robin_text(tmp_path)
+    for line in txt.splitlines():
+        if "File.WriteText" in line:
+            assert "Encoding: File.FileEncoding.UTF8" in line, line
+    assert "Encoding: File.CSVEncoding.UTF8" in txt
