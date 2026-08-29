@@ -24,8 +24,11 @@ const jsAct = ctx.PadConvert.jsAct();
 const csv = fs.readFileSync(path.join(ROOT, "data/edi2_practice_batch.csv"), "utf8")
   .replace(/^\uFEFF/, "").trim().split(/\r?\n/);
 const cols = csv[0].split(",");
-const row = {};
-csv[1].split(",").forEach((v, i) => { row[cols[i]] = v; });
+// 明細の 1 行目を使う。capture で書き換わるので、バッチごとに作り直す
+// （PAD では結果 CSV を経由して次のバッチへ渡る）。
+const baseRow = {};
+csv[1].split(",").forEach((v, i) => { baseRow[cols[i]] = v; });
+let row = {};
 const fill = (s) => String(s === undefined ? "" : s)
   .replace(/\{\{([^}]+)\}\}/g, (_, k) => (row[k] === undefined ? "" : row[k]));
 
@@ -59,6 +62,7 @@ for (const rel of targets) {
   }
   for (const st of batch.loop || []) { steps.push(["loop", st]); }
 
+  row = Object.assign({}, baseRow);
   // ステップ番号は生成物と同じ数え方にする（setup と loop で別々に 1 から）
   const nos = { setup: 0, loop: 0 };
   let failed = null, done = 0;
@@ -69,7 +73,11 @@ for (const rel of targets) {
     const no = nos[sec];
     const cands = (st.selectors || []).map((g) => fill(g[0]));
     let r;
-    if (st.type === "assertText") {
+    if (st.type === "capture") {
+      // 画面から読み取った値は、後続の {{名前}} に渡る（PAD では結果 CSV 経由）
+      r = act(cands, "text", "");
+      if (r && r.ok) { row[st.name] = r.text; }
+    } else if (st.type === "assertText") {
       r = act([], "exists", fill(st.text));
     } else if (st.type === "change") {
       r = act(cands, "fill", fill(st.value));

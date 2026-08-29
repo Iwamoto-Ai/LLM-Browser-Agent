@@ -197,6 +197,9 @@ var JS_ACT = [
 "    el.value = value;",
 "    el.dispatchEvent(new Event(`input`, { bubbles: true }));",
 "    el.dispatchEvent(new Event(`change`, { bubbles: true }));",
+"  } else if (action === `text`) {",
+"    var s = el.innerText || el.textContent || ``;",
+"    return { ok: true, used: cands[i], text: s.trim() };",
 "  }",
 "  return { ok: true, used: cands[i] };",
 "}",
@@ -365,6 +368,49 @@ function folderGetSorted(folderVar, filterVar, outVar) {
 // サーバーが付けるファイル名は事前に分からないので、押す前の数と比べて
 // 増えたものを拾う。書き込み中は .crdownload が残るので、それが消えるまで待つ。
 // 両方を見ないと、始まる前に「もう無い」と判断して先へ進む。
+// loop に出てくる capture の名前を、出た順に並べる。
+// 画面から読み取った値は結果 CSV の列になる。列の順番を生成の 2 か所
+// （見出しと明細行）で揃える必要があるので、ここで一度だけ決める。
+function captureNames(batch) {
+  var out = [];
+  (batch.loop || []).forEach(function (st) {
+    if (st.type !== "capture") { return; }
+    var nm = String(st.name || "").trim() || "取得値";
+    if (out.indexOf(nm) < 0) { out.push(nm); }
+  });
+  return out;
+}
+
+// 画面の文字を読み取って変数に入れる。
+// 登録の結果として発番される番号（要求 ID など）は、次の処理で使う。
+// 結果 CSV に列として残しておけば、そのまま次のバッチの明細にできる。
+// 読めなかったときは失敗として記録する。空のまま先へ進むと、
+// 次のバッチが「番号の無い行」を処理しようとして原因が分かりにくい。
+function robinCapture(cands, varName, indent, stepNo, note, cols) {
+  cands = robinFilterCandidates(cands).map(function (c) { return toRobinVar(c, cols); });
+  note = toRobinVar(note, cols).split("'").join("").split("[").join("").split("]").join("");
+  var bodyArgs = pyJson([cands, "text", ""]);
+  return [
+    indent + "# [" + stepNo + "] " + note,
+    indent + "SET ActBody TO $'''{\"script\": \"%JsAct%\", \"args\": " + bodyArgs + "}'''",
+    web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent),
+    indent + "IF ActStatus <> 200 THEN",
+    indent + "    SET RowError TO " + robinStr("ステップ" + stepNo + "（" + note +
+      "）で WebDriver がエラーを返しました（HTTP %ActStatus%）"),
+    indent + "END",
+    indent + "IF ActStatus = 200 THEN",
+    indent + "    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj",
+    indent + "    IF ActObj['value']['ok'] <> True THEN",
+    indent + "        SET RowError TO " + robinStr("ステップ" + stepNo + "（" + note +
+      "）で読み取る場所が見つかりません"),
+    indent + "    END",
+    indent + "    IF ActObj['value']['ok'] = True THEN",
+    indent + "        SET " + varName + " TO ActObj['value']['text']",
+    indent + "    END",
+    indent + "END"
+  ];
+}
+
 function robinDownload(cands, name, indent, stepNo, cols, timeout) {
   timeout = timeout || 60;
   var L = [];
@@ -528,53 +574,6 @@ function robinShot(indent, fileVar) {
   ];
 }
 
-function robinDownload(cands, name, indent, stepNo, cols, timeout) {
-  timeout = timeout || 60;
-  var L = [];
-  var A = function (s) { L.push(s); };
-  A(indent + "# [" + stepNo + "] ダウンロード " + (cands[0] || ""));
-  A(indent + "# 押す前の件数を数えておき、増えたぶんを新しいファイルとみなす。");
-  A(indent + folderGet("DlDir", "$" + Q_ + "*.*" + Q_, "DlBefore"));
-  A(indent + "SET DlCountBefore TO DlBefore.Count");
-  L = L.concat(robinAct(cands, "click", "", indent,
-                        "download " + (cands[0] || ""), stepNo, cols));
-  A(indent + "IF RowError = " + robinStr("") + " THEN");
-  A(indent + "    SET DlWait TO 0");
-  A(indent + "    SET DlDone TO False");
-  A(indent + "    LOOP WHILE DlDone = False");
-  A(indent + "        WAIT 1");
-  A(indent + "        SET DlWait TO DlWait + 1");
-  A(indent + "        " + folderGet("DlDir", "$" + Q_ + "*.crdownload" + Q_, "DlTemp"));
-  A(indent + "        " + folderGet("DlDir", "$" + Q_ + "*.*" + Q_, "DlNow"));
-  A(indent + "        IF DlTemp.Count = 0 THEN");
-  A(indent + "            IF DlNow.Count > DlCountBefore THEN");
-  A(indent + "                SET DlDone TO True");
-  A(indent + "            END");
-  A(indent + "        END");
-  A(indent + "        IF DlWait >= " + timeout + " THEN");
-  A(indent + "            SET DlDone TO True");
-  A(indent + "        END");
-  A(indent + "    END");
-  A(indent + "    " + folderGet("DlDir", "$" + Q_ + "*.*" + Q_, "DlAfter"));
-  A(indent + "    IF DlAfter.Count > DlCountBefore THEN");
-  A(indent + "        # 一番新しいものが今回落ちてきたファイル");
-  A(indent + "        " + folderGetSorted("DlDir", "$" + Q_ + "*.*" + Q_, "DlSorted"));
-  A(indent + "        SET DlFile TO DlSorted[0]");
-  A(indent + "        SET DlName TO " + robinStr(toRobinVar(name, cols)));
-  nameExpand(name, "DlName", indent + "        ").forEach(function (ln) { L.push(ln); });
-  A(indent + "        # 拡張子はそのまま残るので、Excel でも PDF でも同じ 1 行で足りる");
-  A(indent + "        File.RenameFiles.Rename Files: DlFile NewName: DlName " +
-    "KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> DlRenamed");
-  A(indent + "    END");
-  A(indent + "    IF DlAfter.Count = DlCountBefore THEN");
-  A(indent + "        SET RowError TO " +
-    robinStr("ステップ" + stepNo + "（ダウンロード）でファイルが落ちてきませんでした" +
-             "（" + timeout + " 秒待機）"));
-  A(indent + "    END");
-  A(indent + "END");
-  return L;
-}
-
 // フォルダー内のファイル取得。並べ替えの列挙は Folder.SortBy.○○（実機確認済み）
 function folderGet(folderVar, filterVar, outVar) {
   return "Folder.GetFiles Folder: " + folderVar + " FileFilter: " + filterVar +
@@ -626,13 +625,14 @@ var NAME_MARKS = [["@ID@", "RowId"], ["@KEY@", "RowKey"], ["@STAMP@", "Stamp"]];
 // 名前テンプレートの @ID@ などを、その行の値に置き換える行を返す。
 // テンプレートは先頭の設定ブロックに置きたいが、%RowId% は明細を読んでから
 // でないと値が入らない。先頭では記号のまま持っておき、1 件ごとにここで
-function robinFail(indent) {
+function robinFail(indent, capVals) {
+  capVals = capVals || "";
   var ind2 = indent + "    ";
   var out = [indent + "IF RowError <> $'''''' THEN",
              ind2 + "SET NgCount TO NgCount + 1"];
   out = out.concat(robinShot(ind2, "FailShot"));
   out.push(ind2 + "File.WriteText File: ResultFile " +
-    "TextToWrite: $'''%RowId%,%RowKey%,失敗,\"%RowError%\",\"%FailShot%\",%RecStamp%''' " +
+    "TextToWrite: $'''%RowId%,%RowKey%,失敗,\"%RowError%\",\"%FailShot%\",%RecStamp%" + capVals + "''' " +
     "AppendNewLine: True IfFileExists: File.IfFileExists.Append");
   out.push(ind2 + "File.WriteText File: LogFile " +
     "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' " +
@@ -723,7 +723,7 @@ function prescanCols(steps, cols) {
 var SECTION_STEPS = {
   setup: ["comment", "setViewport", "navigate", "click", "doubleClick", "change"],
   loop: ["comment", "screenshot", "assertText", "click", "doubleClick", "change",
-         "download"],
+         "download", "capture"],
   recover: ["comment", "navigate", "click", "doubleClick", "change"],
   teardown: ["comment", "click", "doubleClick", "change"]
 };
@@ -1185,6 +1185,11 @@ function buildRobin(batch, opt) {
   if (startUrl) { A("#           開始URL: " + startUrl); }
   var mcsv = detailsPath.split("\\").join("/").replace(/\/+$/, "").split("/").pop();
   var dl = downloadDir(outDir, opt.downloadDir || "");
+  // 画面から読み取る値。結果 CSV の列になり、次のバッチの明細に渡せる。
+  var caps = captureNames(batch);
+  var capHead = caps.map(function (c) { return "," + c; }).join("");
+  var capBlank = new Array(caps.length + 1).join(",");
+  var capVals = caps.map(function (c, i) { return ",%Cap" + (i + 1) + "%"; }).join("");
   A("#           明細CSV: " + mcsv);
   A("#           BaseDir: " + outDir);
   A("#           エビデンス名: " + shotName);
@@ -1774,8 +1779,10 @@ function buildRobin(batch, opt) {
   A("    # 結果 CSV は、そのまま明細として読み直せる列構成にする。");
   A("    # ID だけでなく業務キーも入れないと、再実行で対象を特定できない。");
   var keyHead = cols.length > 1 ? cols[1] : "業務キー";
+  // 画面から読み取った値も列にする。次のバッチの明細としてそのまま渡せる。
   A("    File.WriteText File: ResultFile TextToWrite: $'''" + idCol + "," + keyHead +
-    ",結果,理由,エビデンス,実行日時''' AppendNewLine: True IfFileExists: File.IfFileExists.Overwrite");
+    ",結果,理由,エビデンス,実行日時" + capHead +
+    "''' AppendNewLine: True IfFileExists: File.IfFileExists.Overwrite");
   A("    SET OkCount TO 0");
   A("    SET NgCount TO 0");
   A("    SET SkipCount TO 0");
@@ -1791,6 +1798,7 @@ function buildRobin(batch, opt) {
   A(inner + "SET RowId TO Col1");
   A(inner + "SET RowKey TO " + keyRef);
   A(inner + "SET RowError TO $''''''");
+  caps.forEach(function (c, i) { A(inner + "SET Cap" + (i + 1) + " TO $''''''"); });
   A("");
   A(inner + "# 再実行モードでは「失敗」行だけを対象にする");
   A(inner + "IF RetryMode THEN");
@@ -1813,7 +1821,7 @@ function buildRobin(batch, opt) {
   A(inner + "    IF Row['skip'] <> $'''''' THEN");
   A(inner + "        SET SkipCount TO SkipCount + 1");
   A(inner + "        File.WriteText File: ResultFile " +
-    "TextToWrite: $'''%RowId%,%RowKey%,スキップ,,,''' AppendNewLine: True " +
+    "TextToWrite: $'''%RowId%,%RowKey%,スキップ,,," + capBlank + "''' AppendNewLine: True " +
     "IfFileExists: File.IfFileExists.Append");
   A(inner + "        NEXT LOOP");
   A(inner + "    END");
@@ -1822,7 +1830,7 @@ function buildRobin(batch, opt) {
   A(inner + "# 件数上限。打ち切った行も記録に残す（どこから再開するか分かる）");
   A(inner + "IF Attempted >= MaxItems THEN");
   A(inner + "    File.WriteText File: ResultFile " +
-    "TextToWrite: $'''%RowId%,%RowKey%,未実行,\"件数上限 %MaxItems% 件に達したため\",,''' " +
+    "TextToWrite: $'''%RowId%,%RowKey%,未実行,\"件数上限 %MaxItems% 件に達したため\",," + capBlank + "''' " +
     "AppendNewLine: True IfFileExists: File.IfFileExists.Append");
   A(inner + "    NEXT LOOP");
   A(inner + "END");
@@ -1893,13 +1901,24 @@ function buildRobin(batch, opt) {
       A("");
       continue;
     }
+    if (lt === "capture") {
+      m += 1;
+      var cnm = String(lst.name || "").trim() || "取得値";
+      A(inner + "# 画面に出た値を読み取って、結果 CSV の「" + cnm + "」列に残す。");
+      A(inner + "# 次のバッチはこの CSV をそのまま明細として読める。");
+      L = L.concat(robinCapture(candidates(lst), "Cap" + (caps.indexOf(cnm) + 1),
+                                inner, m, "capture " + cnm, cols));
+      L = L.concat(robinFail(inner, capVals));
+      A("");
+      continue;
+    }
     if (lt === "download") {
       m += 1;
       var dc = robinFilterCandidates(candidates(lst));
       A(inner + "# ダウンロードしたファイルをエビデンスにする。");
       A(inner + "# 画面に内容が出ず、Excel や PDF を受け取って初めて分かる業務向け。");
       L = L.concat(robinDownload(dc, lst.name || shotName, inner, m, cols));
-      L = L.concat(robinFail(inner));
+      L = L.concat(robinFail(inner, capVals));
       A("");
       continue;
     }
@@ -1908,7 +1927,7 @@ function buildRobin(batch, opt) {
       var atext = lst.text || "";
       A(inner + "# 完了確認。「ボタンは押せたが実際には処理されていない」を検知する。");
       L = L.concat(robinAct([], "exists", atext, inner, "完了確認: " + atext, m, cols));
-      L = L.concat(robinFail(inner));
+      L = L.concat(robinFail(inner, capVals));
       A("");
       continue;
     }
@@ -1918,7 +1937,7 @@ function buildRobin(batch, opt) {
       var lact = lt === "change" ? "fill" : "click";
       L = L.concat(robinAct(lc, lact, lst.value === undefined ? "" : lst.value, inner,
                             lact + " " + (lc.length ? lc[0] : ""), m, cols));
-      L = L.concat(robinFail(inner));
+      L = L.concat(robinFail(inner, capVals));
       A(inner + "WAIT 1");
       A("");
       continue;
@@ -1929,7 +1948,7 @@ function buildRobin(batch, opt) {
   A(inner + "SET PrevFailed TO False");
   A(inner + "SET OkCount TO OkCount + 1");
   A(inner + "File.WriteText File: ResultFile " +
-    "TextToWrite: $'''%RowId%,%RowKey%,成功,,\"%ShotPath%\",%RecStamp%''' " +
+    "TextToWrite: $'''%RowId%,%RowKey%,成功,,\"%ShotPath%\",%RecStamp%" + capVals + "''' " +
     "AppendNewLine: True IfFileExists: File.IfFileExists.Append");
   A(inner + "File.WriteText File: LogFile " +
     "TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 成功''' AppendNewLine: True " +

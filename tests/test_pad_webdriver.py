@@ -660,3 +660,39 @@ def test_full_page_screenshot_with_fallback(tmp_path):
     assert "SET ShotB64 TO ShotObj['value']\n" in txt or True
     # 使えなかったときの落とし先がある
     assert "IF ShotSaved = False THEN" in txt
+
+
+def test_capture_writes_column_to_result_csv(tmp_path):
+    """画面から読み取った値が、結果 CSV の列として出ること。
+
+    登録すると発番される番号（要求 ID など）は、次の処理で使う。列に残せば
+    その結果 CSV をそのまま次のバッチの明細にできる。列の順番は見出しと
+    明細行の 2 か所で使うので、食い違うと列がずれる。"""
+    batch = {"title": "c", "setup": [{"type": "navigate", "url": "http://x/"}],
+             "loop": [{"type": "click", "selectors": [["#a"]]},
+                      {"type": "capture", "selectors": [["#no"]], "name": "要求ID"}]}
+    out = pad.write_robin(batch, r"C:\t\d.csv", "ID",
+                          str(tmp_path / "f.robin.txt"))
+    txt = open(out, encoding="utf-8").read()
+    # 見出しに列が出る
+    assert "結果,理由,エビデンス,実行日時,要求ID" in txt
+    # 読み取った値を変数に入れる
+    assert "SET Cap1 TO ActObj['value']['text']" in txt
+    # 成功行に値、スキップ・未実行の行は空欄で列数をそろえる
+    assert "%RecStamp%,%Cap1%" in txt
+    assert "スキップ,,,," in txt
+    # 件ごとに空へ戻す（前の行の値が残らないように）
+    q6 = chr(39) * 6
+    assert "SET Cap1 TO $" + q6 in txt
+
+
+def test_capture_uses_text_action(tmp_path):
+    """読み取りは共通 JavaScript の text で行うこと。"""
+    batch = {"title": "c", "setup": [{"type": "navigate", "url": "http://x/"}],
+             "loop": [{"type": "capture", "selectors": [["#no"]], "name": "番号"}]}
+    out = pad.write_robin(batch, r"C:\t\d.csv", "ID",
+                          str(tmp_path / "f.robin.txt"))
+    txt = open(out, encoding="utf-8").read()
+    assert chr(34) + "text" + chr(34) in txt
+    # 読めなかったときは失敗として記録する（空のまま進めない）
+    assert "読み取る場所が見つかりません" in txt

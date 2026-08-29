@@ -9,7 +9,7 @@
 #           BaseDir: C:\temp
 #           エビデンス名: @ID@__@KEY@__@STAMP@
 #           ダウンロード保存先: C:\temp\download
-# 備考：2026/08/25 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
+# 備考：2026/08/29 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
 # ============================================================
 # LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
 # Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).
@@ -133,8 +133,9 @@ SET JsAct TO $'''%JsAct%dy && (body.innerText || body.textContent)) || ``; retur
 SET JsAct TO $'''%JsAct%}; } for (var i = 0; i < cands.length; i++) { var el = find(cands[i]); if (!el) { continue; } if (ac'''
 SET JsAct TO $'''%JsAct%tion === `click`) { try { el.scrollIntoView({ block: `center` }); } catch (e) {} el.click(); } else '''
 SET JsAct TO $'''%JsAct%if (action === `fill`) { el.focus(); el.value = value; el.dispatchEvent(new Event(`input`, { bubbles'''
-SET JsAct TO $'''%JsAct%: true })); el.dispatchEvent(new Event(`change`, { bubbles: true })); } return { ok: true, used: can'''
-SET JsAct TO $'''%JsAct%ds[i] }; } return { ok: false, used: null };'''
+SET JsAct TO $'''%JsAct%: true })); el.dispatchEvent(new Event(`change`, { bubbles: true })); } else if (action === `text`) '''
+SET JsAct TO $'''%JsAct%{ var s = el.innerText || el.textContent || ``; return { ok: true, used: cands[i], text: s.trim() };'''
+SET JsAct TO $'''%JsAct% } return { ok: true, used: cands[i] }; } return { ok: false, used: null };'''
 # ※ 継ぎ足しがうまくいかない場合は、共通 JavaScript（変換器のコピー機能、または
 #   Python 版が同時に出力する .jsact ファイル）の中身を「変数の設定」アクション
 #   （変数名 JsAct）の値の欄に手で貼り付けてもよい。

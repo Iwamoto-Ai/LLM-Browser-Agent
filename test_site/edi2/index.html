@@ -386,6 +386,8 @@ function viewPoDone() {
      → 納入番号・納入日を入力 → 発行確認 → 発行 → 完了
    ============================================================ */
 var shipNo = '';          /* 入力された納入番号 */
+var lastReqId = '';       /* 登録で発番された要求ID */
+var reqLog = {};          /* 要求ID → 登録内容 */
 var shipDate = '';        /* 入力された納入日 */
 var shipPo = '';          /* 対象の発注番号 */
 var registered = {};      /* 納入登録済みの発注番号 */
@@ -484,6 +486,10 @@ function viewNounyuConfirm() {
   bindHome();
   document.getElementById('ShipSubmitBtn').addEventListener('click', function () {
     registered[shipPo] = shipNo;
+    /* 実サイトと同じく、登録すると要求 ID が発番される。
+       この番号で、あとから検収状況一覧を照会する。 */
+    lastReqId = String(9000000 + Math.floor(Math.random() * 999999));
+    reqLog[lastReqId] = { po: shipPo, ship: shipNo, date: shipDate };
     viewNounyuDone();
   });
 }
@@ -493,7 +499,10 @@ function viewNounyuDone() {
     '<div class="crumb">納入: 納入登録 &gt;</div>' +
     '<div class="main"><h2>納入登録完了</h2>' +
     '<p>納入番号 <b>' + shipNo + '</b> で登録しました。</p>' +
-    '<p class="note">エビデンスは「検収状況一覧」（EBS ホーム → 帳票出力）から取得します。</p></div>';
+    '<table class="grid"><tr><th>発注番号</th><td>' + shipPo + '</td></tr>' +
+    '<tr><th>納入番号</th><td>' + shipNo + '</td></tr>' +
+    '<tr><th>要求ID</th><td id="ShipDoneNo">' + lastReqId + '</td></tr></table>' +
+    '<p class="note">この要求IDで、あとから検収状況一覧を照会します。</p></div>';
   bindHome();
 }
 
@@ -515,6 +524,8 @@ function viewKenshuJoken() {
   app.innerHTML = header('E-Business Suite') +
     '<div class="crumb">帳票出力 &gt;</div>' +
     '<div class="main"><h2>検収状況一覧</h2>' +
+    '<p>要求ID <input id="ReqIdField" size="16" autocomplete="off"> ' +
+    '<span class="note">納入登録で発番された番号</span></p>' +
     '<p>ステータス <input id="StatusField" size="10" value="ALL"></p>' +
     '<p>発注番号(From) <input id="PoFromField" size="16" autocomplete="off"> ' +
     '発注番号(To) <input id="PoToField" size="16" autocomplete="off"></p>' +
@@ -524,6 +535,20 @@ function viewKenshuJoken() {
     '<div id="reportArea"></div></div>';
   bindHome();
   document.getElementById('ContinueBtn').addEventListener('click', function () {
+    /* 要求IDが入っていれば、その登録内容を引く。実サイトと同じ使い方。 */
+    var rid = document.getElementById('ReqIdField').value.trim();
+    if (rid) {
+      requestId = rid;
+      var rec = reqLog[rid] || {};
+      document.getElementById('reportArea').innerHTML =
+        '<table class="grid"><tr><th>要求ID</th><th>発注番号</th><th>納入日</th>' +
+        '<th>検収状況</th></tr><tr><td>' + rid + '</td><td>' + (rec.po || '-') +
+        '</td><td>' + (rec.date || '-') + '</td><td>検収済</td></tr></table>' +
+        '<p><a class="polink" id="OutputIcon0">出力</a>' +
+        ' <span class="note">Excel がダウンロードされます</span></p>';
+      document.getElementById('OutputIcon0').addEventListener('click', downloadReport);
+      return;
+    }
     reqPo = document.getElementById('PoFromField').value.trim();
     document.getElementById('reportArea').innerHTML =
       '<table class="grid"><tr><th>発注番号</th><th>納入日</th><th>検収状況</th></tr>' +
