@@ -801,7 +801,7 @@ function batchToSteps(batch) {
   (batch.recover || []).forEach(function (st) { recSigs[sig(st)] = true; });
 
   var add = function (st, sec) {
-    // screenshot は直前の行の「この後にエビデンス」として畳む
+    // screenshot は直前の行の「この後にスクリーンショット保存」として畳む
     if (st.type === "screenshot" && steps.length) {
       assigns[assigns.length - 1].shot = true;
       assigns[assigns.length - 1].shotName = st.name || "";
@@ -2173,8 +2173,8 @@ root.PadConvert = {
       }
     }
     var rows = ['<tr><th>#</th><th>起点</th><th>操作</th><th>録画された指定</th><th>箱</th>' +
-                '<th>値の扱い</th><th>この後にエビデンス</th>' +
-                '<th>ダウンロード</th><th>値を記録</th></tr>'];
+                '<th>値の扱い</th><th>この後にスクリーンショット保存</th>' +
+                '<th>ファイルダウンロード</th><th>結果CSVに記録</th></tr>'];
     for (var i = 0; i < recSteps.length; i++) {
       var d = PadConvert.describeStep(recSteps[i]), as = recAssign[i];
       var sel = '<select data-i="' + i + '" class="secSel">';
