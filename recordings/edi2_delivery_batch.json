@@ -216,6 +216,15 @@
       "name": "要求ID"
     },
     {
+      "type": "capture",
+      "selectors": [
+        [
+          "#ShipDoneDate"
+        ]
+      ],
+      "name": "納入日"
+    },
+    {
       "type": "screenshot",
       "name": "エビデンス"
     },

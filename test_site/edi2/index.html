@@ -387,21 +387,14 @@ function viewPoDone() {
    ============================================================ */
 var shipNo = '';          /* 入力された納入番号 */
 var lastReqId = '';       /* 登録で発番された要求ID */
-/* 要求ID → 登録内容。
-   実サイトはサーバーに保存されるので、日をまたいでも引ける。練習サイトは
-   JavaScript の変数なので、そのままだとブラウザーを閉じた時点で消える。
-   納入登録とエビデンス取得は別々の実行に分けるため、**それでは要求 ID で
-   引けなくなる**。ブラウザーに保存して残す。
-   file:// で保存できない環境でも動くよう、失敗しても無視する。 */
-var REQ_KEY = 'edi2_practice_reqlog';
-var reqLog = (function () {
-  try { return JSON.parse(localStorage.getItem(REQ_KEY) || '{}'); }
-  catch (e) { return {}; }
-})();
-
-function saveReqLog() {
-  try { localStorage.setItem(REQ_KEY, JSON.stringify(reqLog)); } catch (e) {}
-}
+/* 要求ID → 登録内容（同じ実行の中だけ）。
+   実サイトはサーバーが持っているので、日をまたいでも要求 ID だけで引ける。
+   練習サイトにはサーバーが無い。ブラウザーに保存する手も試したが、
+   **WebDriver は毎回新しいプロファイルで起動する**ので引き継がれない。
+   そこで、照会の画面では入力された値から一覧を組み立てる。
+   納入登録バッチの結果 CSV に発注番号と納入番号が残っているので、
+   それを渡せば実サイトと同じ結果になる。 */
+var reqLog = {};
 var shipDate = '';        /* 入力された納入日 */
 var shipPo = '';          /* 対象の発注番号 */
 var registered = {};      /* 納入登録済みの発注番号 */
@@ -504,7 +497,6 @@ function viewNounyuConfirm() {
        この番号で、あとから検収状況一覧を照会する。 */
     lastReqId = String(9000000 + Math.floor(Math.random() * 999999));
     reqLog[lastReqId] = { po: shipPo, ship: shipNo, date: shipDate };
-    saveReqLog();
     viewNounyuDone();
   });
 }
@@ -516,6 +508,7 @@ function viewNounyuDone() {
     '<p>納入番号 <b>' + shipNo + '</b> で登録しました。</p>' +
     '<table class="grid"><tr><th>発注番号</th><td>' + shipPo + '</td></tr>' +
     '<tr><th>納入番号</th><td>' + shipNo + '</td></tr>' +
+    '<tr><th>納入日</th><td id="ShipDoneDate">' + shipDate + '</td></tr>' +
     '<tr><th>要求ID</th><td id="ShipDoneNo">' + lastReqId + '</td></tr></table>' +
     '<p class="note">この要求IDで、あとから検収状況一覧を照会します。</p></div>';
   bindHome();
@@ -539,6 +532,7 @@ function viewKenshuJoken() {
     '<div class="main"><h2>検収状況一覧</h2>' +
     '<p>要求ID <input id="ReqIdField" size="16" autocomplete="off"> ' +
     '<span class="note">納入登録で発番された番号</span></p>' +
+    '<p>納入番号 <input id="ShipNoField" size="16" autocomplete="off"></p>' +
     '<p>ステータス <input id="StatusField" size="10" value="ALL"></p>' +
     '<p>発注番号(From) <input id="PoFromField" size="16" autocomplete="off"> ' +
     '発注番号(To) <input id="PoToField" size="16" autocomplete="off"></p>' +
@@ -552,11 +546,19 @@ function viewKenshuJoken() {
     var rid = document.getElementById('ReqIdField').value.trim();
     if (rid) {
       requestId = rid;
-      var rec = reqLog[rid] || {};
+      /* 同じ実行の中で登録したものは reqLog から引ける。
+         別々の実行に分けたときは入力された値を使う（実サイトはサーバーが
+         持っているが、練習サイトには無いため）。 */
+      var rec = reqLog[rid] || {
+        po: document.getElementById('PoFromField').value.trim(),
+        ship: document.getElementById('ShipNoField').value.trim(),
+        date: document.getElementById('DateFromField').value.trim()
+      };
+      reqLog[rid] = rec;
       document.getElementById('reportArea').innerHTML =
-        '<table class="grid"><tr><th>要求ID</th><th>発注番号</th><th>納入日</th>' +
+        '<table class="grid"><tr><th>要求ID</th><th>発注番号</th><th>納入番号</th>' +
         '<th>検収状況</th></tr><tr><td>' + rid + '</td><td>' + (rec.po || '-') +
-        '</td><td>' + (rec.date || '-') + '</td><td>検収済</td></tr></table>' +
+        '</td><td>' + (rec.ship || '-') + '</td><td>検収済</td></tr></table>' +
         '<p><a class="polink" id="OutputIcon0">出力</a>' +
         ' <span class="note">Excel がダウンロードされます</span></p>';
       document.getElementById('OutputIcon0').addEventListener('click', downloadReport);
