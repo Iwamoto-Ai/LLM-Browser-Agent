@@ -1611,16 +1611,21 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"{inner}    END")
     A(f"{inner}END")
     A("")
-    A(f"{inner}# skip 列に値がある行は飛ばす（再実行 CSV には skip 列が無いので除外）")
-    A(f"{inner}IF RetryMode = False THEN")
-    A(f"{inner}    IF Row['skip'] <> $'''''' THEN")
-    A(f"{inner}        SET SkipCount TO SkipCount + 1")
-    A(f"{inner}        File.WriteText File: ResultFile "
-      f"TextToWrite: $'''%RowId%,%RowKey%,スキップ,,,{_cap_blank}''' AppendNewLine: True "
-      "IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
-    A(f"{inner}        NEXT LOOP")
-    A(f"{inner}    END")
-    A(f"{inner}END")
+    # 結果 CSV を明細にする場合も skip 列が無い。判定ごと出さない。
+    # 「列が見つかりません」で止まり、原因が分かりにくいため。
+    if details_from_result:
+        A(f"{inner}# 明細が結果 CSV なので skip 列は無い。判定は出していない。")
+    else:
+        A(f"{inner}# skip 列に値がある行は飛ばす（再実行 CSV には skip 列が無いので除外）")
+        A(f"{inner}IF RetryMode = False THEN")
+        A(f"{inner}    IF Row['skip'] <> $'''''' THEN")
+        A(f"{inner}        SET SkipCount TO SkipCount + 1")
+        A(f"{inner}        File.WriteText File: ResultFile "
+          f"TextToWrite: $'''%RowId%,%RowKey%,スキップ,,,{_cap_blank}''' AppendNewLine: True "
+          "IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
+        A(f"{inner}        NEXT LOOP")
+        A(f"{inner}    END")
+        A(f"{inner}END")
     A("")
     A(f"{inner}# 件数上限。打ち切った行も記録に残す（どこから再開するか分かる）")
     A(f"{inner}IF Attempted >= MaxItems THEN")

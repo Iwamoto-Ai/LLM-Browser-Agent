@@ -1840,16 +1840,22 @@ function buildRobin(batch, opt) {
   A(inner + "    END");
   A(inner + "END");
   A("");
-  A(inner + "# skip 列に値がある行は飛ばす（再実行 CSV には skip 列が無いので除外）");
-  A(inner + "IF RetryMode = False THEN");
-  A(inner + "    IF Row['skip'] <> $'''''' THEN");
-  A(inner + "        SET SkipCount TO SkipCount + 1");
-  A(inner + "        File.WriteText File: ResultFile " +
-    "TextToWrite: $'''%RowId%,%RowKey%,スキップ,,," + capBlank + "''' AppendNewLine: True " +
-    "IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8");
-  A(inner + "        NEXT LOOP");
-  A(inner + "    END");
-  A(inner + "END");
+  // 結果 CSV を明細にする場合も skip 列が無い。判定ごと出さない。
+  // 「列が見つかりません」で止まり、原因が分かりにくいため。
+  if (opt.detailsFromResult) {
+    A(inner + "# 明細が結果 CSV なので skip 列は無い。判定は出していない。");
+  } else {
+    A(inner + "# skip 列に値がある行は飛ばす（再実行 CSV には skip 列が無いので除外）");
+    A(inner + "IF RetryMode = False THEN");
+    A(inner + "    IF Row['skip'] <> $'''''' THEN");
+    A(inner + "        SET SkipCount TO SkipCount + 1");
+    A(inner + "        File.WriteText File: ResultFile " +
+      "TextToWrite: $'''%RowId%,%RowKey%,スキップ,,," + capBlank + "''' AppendNewLine: True " +
+      "IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8");
+    A(inner + "        NEXT LOOP");
+    A(inner + "    END");
+    A(inner + "END");
+  }
   A("");
   A(inner + "# 件数上限。打ち切った行も記録に残す（どこから再開するか分かる）");
   A(inner + "IF Attempted >= MaxItems THEN");

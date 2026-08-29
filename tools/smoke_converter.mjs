@@ -88,6 +88,21 @@ const back = P.batchToSteps(sample);
 const rebuilt = P.buildBatch(back.steps, back.assigns, sample.title);
 const norm = (arr) => JSON.stringify((arr || []).map((s) =>
   JSON.stringify(Object.keys(s).sort().reduce((o, k) => (o[k] = s[k], o), {}))));
+// 結果 CSV を明細にするとき skip 列を見ないこと。
+// 結果 CSV に skip 列は無いので、判定を出すと「列が見つかりません」で止まる。
+// Python 版と食い違いやすい箇所なので、ブラウザ版でも確かめる。
+const optOn = { detailsPath: "C:\\t\\d.csv", idCol: "ID", driverExe: "C:\\t\\e.exe",
+                outDir: "C:\\t", proxy: "", autoDriver: false, browser: "edge",
+                detailsFromResult: true };
+const robinOn = P.buildRobin(P.loadRecording(
+  fs.readFileSync("recordings/edi2_report_batch.json", "utf8")), optOn).robin;
+if (robinOn.indexOf("Row['skip']") >= 0) {
+  errors.push("結果 CSV を明細にするのに skip 列を見ている");
+}
+if (robinOn.indexOf("pad_result_2.csv") < 0) {
+  errors.push("結果 CSV を明細にするのに出力先が切り替わっていない");
+}
+
 // capture の列名が往復で消えないこと（消えると結果 CSV の見出しが
 // 「取得値」になり、次のバッチが列を引けなくなる）
 const capsIn = (sample.loop || []).filter((s) => s.type === "capture").map((s) => s.name);
