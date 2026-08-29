@@ -108,6 +108,11 @@
   <div><label for="shotName">エビデンスのファイル名</label>
     <input type="text" id="shotName" value="@ID@__@KEY@__@STAMP@">
     <span class="hint">@ID@ / @KEY@ / @STAMP@ を差し込める</span></div>
+  <div><label for="detailsFromResult">明細の読み込み元</label>
+    <label style="font-weight:normal">
+      <input type="checkbox" id="detailsFromResult">
+      前のバッチの結果 CSV（pad_result.csv）を明細にする</label>
+    <span class="hint">登録側が記録した要求 ID などを使うとき。結果は pad_result_2.csv へ</span></div>
   <div><label for="downloadDir">ダウンロード保存先</label>
     <input type="text" id="downloadDir" placeholder="空なら BaseDir の下の download">
     <span class="hint">ログや結果CSVと同じ場所にしないこと</span></div>
@@ -1270,8 +1275,19 @@ function buildRobin(batch, opt) {
   A("    SET DriverExe TO ChromeDriverExe");
   A("END");
   A("SET DriverUrl TO $'''http://127.0.0.1:9515'''");
-  A("SET DetailsFile TO " + robinUnderBase(detailsPath, outDir));
-  A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''");
+  if (opt.detailsFromResult) {
+    A("# --- 明細の読み込み元 ---");
+    A("# **前のバッチ（登録側）の結果 CSV を明細として読む。**");
+    A("# 登録側が記録した番号（要求 ID など）を、そのまま使うため。");
+    A("#   前のバッチ  pad_result.csv       … 要求 ID などの列つき");
+    A("#   このバッチ  pad_result_2.csv     … こちらの結果はここへ");
+    A("# 同じファイルを読みながら書くと壊れるので、出力先を分けてある。");
+    A("SET DetailsFile TO $'''%BaseDir%\\\\pad_result.csv'''");
+    A("SET ResultFile TO $'''%BaseDir%\\\\pad_result_2.csv'''");
+  } else {
+    A("SET DetailsFile TO " + robinUnderBase(detailsPath, outDir));
+    A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''");
+  }
   A("SET LogFile TO $'''%BaseDir%\\\\pad_progress.log'''");
   var vw = null;
   for (var vi = 0; vi < setup.length; vi++) {
@@ -2361,6 +2377,7 @@ root.PadConvert = {
         outDir: $("outdir").value.trim(),
         shotName: $("shotName").value.trim(),
         downloadDir: $("downloadDir").value.trim(),
+        detailsFromResult: $("detailsFromResult").checked,
         proxy: $("proxy").value.trim(),
         autoDriver: $("autodrv").checked,
         browser: $("browser").value

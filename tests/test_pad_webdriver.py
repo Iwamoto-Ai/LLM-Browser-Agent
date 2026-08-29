@@ -710,3 +710,24 @@ def test_result_csv_encoding_matches_reader(tmp_path):
         if "File.WriteText" in line:
             assert "Encoding: File.FileEncoding.UTF8" in line, line
     assert "Encoding: File.CSVEncoding.UTF8" in txt
+
+
+def test_details_from_result_splits_output(tmp_path):
+    """結果 CSV を明細にするとき、出力先を別のファイルにすること。
+
+    同じファイルを読みながら書くと壊れる。登録側の結果を明細にする使い方は、
+    要求 ID のような「登録して初めて分かる値」を次の処理へ渡すためのもので、
+    元のファイルは残しておく必要がある。"""
+    batch = {"title": "r", "setup": [{"type": "navigate", "url": "http://x/"}],
+             "loop": [{"type": "click", "selectors": [["#a"]]}]}
+    out = pad.write_robin(batch, r"C:\t\d.csv", "ID",
+                          str(tmp_path / "f.robin.txt"),
+                          details_from_result=True)
+    txt = open(out, encoding="utf-8").read()
+    q3 = chr(39) * 3
+    assert "SET DetailsFile TO $" + q3 + "%BaseDir%" + chr(92) * 2 + "pad_result.csv" in txt
+    assert "SET ResultFile TO $" + q3 + "%BaseDir%" + chr(92) * 2 + "pad_result_2.csv" in txt
+    # 指定しなければ従来どおり
+    out2 = pad.write_robin(batch, r"C:\t\d.csv", "ID", str(tmp_path / "g.robin.txt"))
+    txt2 = open(out2, encoding="utf-8").read()
+    assert "pad_result_2.csv" not in txt2

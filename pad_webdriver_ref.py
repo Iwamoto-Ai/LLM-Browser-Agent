@@ -885,6 +885,7 @@ Q_ = "'''"   # Robin のリテラル区切り
 def write_robin(batch: dict, details_path: str, id_col: str, path: str,
                 shot_name: str = "@ID@__@KEY@__@STAMP@",
                 download_dir: str = "",
+                details_from_result: bool = False,
                 driver_exe: str = r"C:\temp\msedgedriver.exe",
                 out_dir: str = r"C:\temp", proxy: str = "",
                 auto_driver: bool = False,
@@ -1026,8 +1027,18 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("    SET DriverExe TO ChromeDriverExe")
     A("END")
     A("SET DriverUrl TO $'''http://127.0.0.1:9515'''")
-    A(f"SET DetailsFile TO {_robin_under_base(details_path, out_dir)}")
-    A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''")
+    if details_from_result:
+        A("# --- 明細の読み込み元 ---")
+        A("# **前のバッチ（登録側）の結果 CSV を明細として読む。**")
+        A("# 登録側が記録した番号（要求 ID など）を、そのまま使うため。")
+        A("#   前のバッチ  pad_result.csv       … 要求 ID などの列つき")
+        A("#   このバッチ  pad_result_2.csv     … こちらの結果はここへ")
+        A("# 同じファイルを読みながら書くと壊れるので、出力先を分けてある。")
+        A("SET DetailsFile TO $'''%BaseDir%\\\\pad_result.csv'''")
+        A("SET ResultFile TO $'''%BaseDir%\\\\pad_result_2.csv'''")
+    else:
+        A(f"SET DetailsFile TO {_robin_under_base(details_path, out_dir)}")
+        A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''")
     A("SET LogFile TO $'''%BaseDir%\\\\pad_progress.log'''")
     _vw = next((s for s in setup if s.get("type") == "setViewport"), {})
     A("# ブラウザーのウィンドウサイズ。**エビデンスに写る範囲はここで決まる。**")
@@ -1962,6 +1973,10 @@ def main() -> None:
                    help="エビデンスのファイル名（拡張子なし）。"
                         "@ID@ / @KEY@ / @STAMP@ を差し込める。"
                         "例: 【注文受諾】@ID@_〇〇株式会社")
+    p.add_argument("--details-from-result", action="store_true",
+                   help="明細として、前のバッチの結果 CSV（pad_result.csv）を読む。"
+                        "登録側が capture で記録した番号をそのまま使うとき。"
+                        "こちらの結果は pad_result_2.csv に出る")
     p.add_argument("--download-dir", default="",
                    help="ダウンロードの受け取り先（既定: BaseDir の下の download）。"
                         "実行環境のパスを渡すこと。"
@@ -1995,6 +2010,7 @@ def main() -> None:
     if args.robin:
         out = write_robin(batch, args.details, id_col, args.robin,
                           args.shot_name, args.download_dir,
+                          args.details_from_result,
                           args.driver_exe, args.pad_out_dir, args.proxy,
                           args.auto_driver, args.pad_browser)
         js_out = out[:-len(".robin.txt")] + ".jsact.js" if out.endswith(".robin.txt") \
