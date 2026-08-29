@@ -809,7 +809,9 @@ function batchToSteps(batch) {
     }
     var as = { sec: sec, secret: "", varCol: "", selLit: "", shot: false,
                shotName: "", dl: st.type === "download",
-               dlName: st.type === "download" ? (st.name || "") : "" };
+               dlName: st.type === "download" ? (st.name || "") : "",
+               cap: st.type === "capture",
+               capName: st.type === "capture" ? (st.name || "") : "" };
     if (sec === "loop" && recSigs[sig(st)]) { as.sec = "loop+recover"; }
     var v = String(st.value === undefined ? "" : st.value);
     var m = /\{\{([^}]+)\}\}/.exec(v);
@@ -1037,6 +1039,11 @@ function buildBatch(steps, assigns, title) {
       if (as.dl) {
         copy.type = "download";
         if (as.dlName) { copy.name = as.dlName; }
+      }
+      // 値を記録する行。押さずに文字だけ読むので click ではなくなる。
+      if (as.cap) {
+        copy.type = "capture";
+        if (as.capName) { copy.name = as.capName; }
       }
       copy.selectors = st.selectors || [];
       if (as.selLit && as.varCol && as.varCol !== "?") {
@@ -1833,16 +1840,22 @@ function buildRobin(batch, opt) {
   A(inner + "    END");
   A(inner + "END");
   A("");
-  A(inner + "# skip 列に値がある行は飛ばす（再実行 CSV には skip 列が無いので除外）");
-  A(inner + "IF RetryMode = False THEN");
-  A(inner + "    IF Row['skip'] <> $'''''' THEN");
-  A(inner + "        SET SkipCount TO SkipCount + 1");
-  A(inner + "        File.WriteText File: ResultFile " +
-    "TextToWrite: $'''%RowId%,%RowKey%,スキップ,,," + capBlank + "''' AppendNewLine: True " +
-    "IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8");
-  A(inner + "        NEXT LOOP");
-  A(inner + "    END");
-  A(inner + "END");
+  // 結果 CSV を明細にする場合も skip 列が無い。判定ごと出さない。
+  // 「列が見つかりません」で止まり、原因が分かりにくいため。
+  if (opt.detailsFromResult) {
+    A(inner + "# 明細が結果 CSV なので skip 列は無い。判定は出していない。");
+  } else {
+    A(inner + "# skip 列に値がある行は飛ばす（再実行 CSV には skip 列が無いので除外）");
+    A(inner + "IF RetryMode = False THEN");
+    A(inner + "    IF Row['skip'] <> $'''''' THEN");
+    A(inner + "        SET SkipCount TO SkipCount + 1");
+    A(inner + "        File.WriteText File: ResultFile " +
+      "TextToWrite: $'''%RowId%,%RowKey%,スキップ,,," + capBlank + "''' AppendNewLine: True " +
+      "IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8");
+    A(inner + "        NEXT LOOP");
+    A(inner + "    END");
+    A(inner + "END");
+  }
   A("");
   A(inner + "# 件数上限。打ち切った行も記録に残す（どこから再開するか分かる）");
   A(inner + "IF Attempted >= MaxItems THEN");
@@ -2161,7 +2174,7 @@ root.PadConvert = {
     }
     var rows = ['<tr><th>#</th><th>起点</th><th>操作</th><th>録画された指定</th><th>箱</th>' +
                 '<th>値の扱い</th><th>この後にエビデンス</th>' +
-                '<th>ダウンロード</th></tr>'];
+                '<th>ダウンロード</th><th>値を記録</th></tr>'];
     for (var i = 0; i < recSteps.length; i++) {
       var d = PadConvert.describeStep(recSteps[i]), as = recAssign[i];
       var sel = '<select data-i="' + i + '" class="secSel">';
@@ -2194,6 +2207,17 @@ root.PadConvert = {
       var shot = '<input type="checkbox" class="shotChk" data-i="' + i + '"' +
                  (as.shot ? " checked" : "") + ">";
       // クリックの行だけ「この操作でダウンロード」を選べる
+      // 押す代わりに、その場所の文字を読んで結果 CSV の列にする。
+      // 登録して発番された番号を次のバッチへ渡すときに使う。
+      var cap = "";
+      if (recSteps[i].type === "click" || recSteps[i].type === "doubleClick" ||
+          recSteps[i].type === "capture") {
+        cap = '<input type="checkbox" class="capChk" data-i="' + i + '"' + off +
+              (as.cap ? " checked" : "") + '>' +
+              ' <input type="text" class="capTxt" data-i="' + i + '" placeholder="列名"' +
+              ' value="' + (as.capName || "") + '"' + off +
+              (as.cap ? "" : " hidden") + ">";
+      }
       var dl = "";
       if (recSteps[i].type === "click" || recSteps[i].type === "doubleClick") {
         dl = '<input type="checkbox" class="dlChk" data-i="' + i + '"' + off +
@@ -2209,7 +2233,7 @@ root.PadConvert = {
                 mark + "<td>" + (d.jp || "（名前なし）") +
                 '</td><td class="raw">' + (d.raw || "") + "</td><td>" + sel +
                 "</td><td>" + val + "</td><td>" + shot + "</td>" +
-                "<td>" + dl + "</td></tr>");
+                "<td>" + dl + "</td><td>" + cap + "</td></tr>");
     }
     $("assignTable").innerHTML = rows.join("");
     var od = origin >= 0 ? PadConvert.describeStep(recSteps[origin]) : null;
@@ -2281,6 +2305,21 @@ root.PadConvert = {
     Array.prototype.forEach.call(q(".dlTxt"), function (el) {
       el.addEventListener("input", function () {
         recAssign[+el.dataset.i].dlName = el.value;
+        batchReady = false;
+      });
+    });
+    Array.prototype.forEach.call(q(".capChk"), function (el) {
+      el.addEventListener("change", function () {
+        var i = +el.dataset.i;
+        recAssign[i].cap = el.checked;
+        var txt = $("assignTable").querySelector('.capTxt[data-i="' + i + '"]');
+        if (txt) { txt.hidden = !el.checked; }
+        batchReady = false;
+      });
+    });
+    Array.prototype.forEach.call(q(".capTxt"), function (el) {
+      el.addEventListener("input", function () {
+        recAssign[+el.dataset.i].capName = el.value;
         batchReady = false;
       });
     });

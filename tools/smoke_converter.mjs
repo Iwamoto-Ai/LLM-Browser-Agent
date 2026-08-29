@@ -82,12 +82,34 @@ if (j.indexOf("{{発注番号}}") < 0) { errors.push("列名の差し込みが�
 if (j.indexOf('"u"') >= 0 || j.indexOf('"p"') >= 0) { errors.push("録画時の実値が残っている"); }
 
 // バッチ定義 → 振り分け → バッチ定義 が元に戻るか（読み込んで直せること）
-const sample = JSON.parse(fs.readFileSync("recordings/edi2_accept_batch.json", "utf8")
+const sample = JSON.parse(fs.readFileSync("recordings/edi2_delivery_batch.json", "utf8")
   .split("\n").filter((l) => !l.trim().startsWith("//")).join("\n"));
 const back = P.batchToSteps(sample);
 const rebuilt = P.buildBatch(back.steps, back.assigns, sample.title);
 const norm = (arr) => JSON.stringify((arr || []).map((s) =>
   JSON.stringify(Object.keys(s).sort().reduce((o, k) => (o[k] = s[k], o), {}))));
+// 結果 CSV を明細にするとき skip 列を見ないこと。
+// 結果 CSV に skip 列は無いので、判定を出すと「列が見つかりません」で止まる。
+// Python 版と食い違いやすい箇所なので、ブラウザ版でも確かめる。
+const optOn = { detailsPath: "C:\\t\\d.csv", idCol: "ID", driverExe: "C:\\t\\e.exe",
+                outDir: "C:\\t", proxy: "", autoDriver: false, browser: "edge",
+                detailsFromResult: true };
+const robinOn = P.buildRobin(P.loadRecording(
+  fs.readFileSync("recordings/edi2_report_batch.json", "utf8")), optOn).robin;
+if (robinOn.indexOf("Row['skip']") >= 0) {
+  errors.push("結果 CSV を明細にするのに skip 列を見ている");
+}
+if (robinOn.indexOf("pad_result_2.csv") < 0) {
+  errors.push("結果 CSV を明細にするのに出力先が切り替わっていない");
+}
+
+// capture の列名が往復で消えないこと（消えると結果 CSV の見出しが
+// 「取得値」になり、次のバッチが列を引けなくなる）
+const capsIn = (sample.loop || []).filter((s) => s.type === "capture").map((s) => s.name);
+const capsOut = (rebuilt.loop || []).filter((s) => s.type === "capture").map((s) => s.name);
+if (JSON.stringify(capsIn) !== JSON.stringify(capsOut)) {
+  errors.push("capture の列名が変わる: " + capsIn + " → " + capsOut);
+}
 for (const key of ["setup", "loop", "recover"]) {
   if (norm(sample[key]) !== norm(rebuilt[key])) {
     errors.push("バッチ定義の復元で " + key + " が変わる");
