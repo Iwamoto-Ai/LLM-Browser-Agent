@@ -92,6 +92,17 @@ function find(sel) {
       return byXPath(`//*[not(self::script) and (@aria-label=` + lit(n)
                      + ` or @title=` + lit(n) + ` or normalize-space(text())=` + lit(n) + `)]`);
     }
+    if (sel.indexOf(`row/`) === 0) {
+      var key = sel.slice(4).trim();
+      var rows = document.querySelectorAll(`tr`);
+      for (var r = 0; r < rows.length; r++) {
+        var txt = rows[r].innerText || rows[r].textContent || ``;
+        if (txt.indexOf(key) < 0) { continue; }
+        var hit = rows[r].querySelector(`a, img, button, input[type=image]`);
+        if (hit) { return hit; }
+      }
+      return null;
+    }
     if (sel.indexOf(`pierce/`) === 0) { sel = sel.slice(7); }
     return document.querySelector(sel);
   } catch (e) { return null; }
@@ -636,7 +647,7 @@ def _capture_names(batch: dict) -> list:
 
 
 def _robin_capture(cands: list, var: str, indent: str, step_no: int,
-                   note: str, cols: list) -> list:
+                   note: str, cols: list, extract: str = "") -> list:
     """画面の文字を読み取って変数に入れる。
 
     登録の結果として発番される番号（要求 ID など）は、次の処理で使う。
@@ -667,6 +678,15 @@ def _robin_capture(cands: list, var: str, indent: str, step_no: int,
         f"{indent}    END",
         f"{indent}END",
     ]
+    if extract == "digits":
+        # 文章の中から番号だけを取り出す。
+        # 「要求IDは 131982564 です。」のように、読んだ文字がそのままでは
+        # 次のバッチで使えないことがある。数字以外を落とせば番号だけ残る。
+        L.append(f"{indent}# 数字以外を落として番号だけにする")
+        L.append(f"{indent}Text.Replace.ReplaceTextWithRegex Text: {var} "
+                 f"TextToFind: {_robin_str('[^0-9]')} IgnoreCase: False "
+                 f"ReplaceWith: {_robin_str('')} "
+                 f"ActivateEscapeSequences: False Result=> {var}")
     return L
 
 
@@ -681,7 +701,8 @@ def _robin_download(cands: list, name: str, indent: str, step_no: int,
     L = []
     def A(s):
         L.append(s)
-    A(f"{indent}# [{step_no}] ダウンロード {cands[0] if cands else ''}")
+    _dlnote = _to_robin_var(cands[0], cols) if cands else ""
+    A(f"{indent}# [{step_no}] ダウンロード {_dlnote}")
     A(f"{indent}# 押す前の件数を数えておき、増えたぶんを新しいファイルとみなす。")
     A(f"{indent}" + _folder_get("DlDir", "$" + Q_ + "*.*" + Q_, "DlBefore"))
     A(f"{indent}SET DlCountBefore TO DlBefore.Count")
@@ -1708,7 +1729,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             A(f"{inner}# 画面に出た値を読み取って、結果 CSV の「{nm}」列に残す。")
             A(f"{inner}# 次のバッチはこの CSV をそのまま明細として読める。")
             L.extend(_robin_capture(cands, f"Cap{caps.index(nm) + 1}", inner, m,
-                                    f"capture {nm}", cols))
+                                    f"capture {nm}", cols,
+                                    str(st.get("extract", ""))))
             L.extend(_robin_fail(inner, _cap_vals))
             A("")
             continue

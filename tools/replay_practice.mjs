@@ -29,13 +29,16 @@ const cols = csv[0].split(",");
 const baseRow = {};
 csv[1].split(",").forEach((v, i) => { baseRow[cols[i]] = v; });
 let row = {};
+// capture した値。次のバッチへ持ち越す（PAD では結果 CSV 経由）。
+let carried = {};
 const fill = (s) => String(s === undefined ? "" : s)
   .replace(/\{\{([^}]+)\}\}/g, (_, k) => (row[k] === undefined ? "" : row[k]));
 
 const targets = process.argv.slice(2).length ? process.argv.slice(2) : [
   "recordings/edi2_accept_batch.json",
   "recordings/edi2_delivery_batch.json",
-  "recordings/edi2_report_batch.json",
+  "recordings/edi2_publish_batch.json",
+  "recordings/edi2_fetch_batch.json",
 ];
 
 let ng = 0;
@@ -62,7 +65,9 @@ for (const rel of targets) {
   }
   for (const st of batch.loop || []) { steps.push(["loop", st]); }
 
-  row = Object.assign({}, baseRow);
+  // ②が発番した値は結果 CSV を経由して③へ渡る。ここではその受け渡しを
+  // 模して、直前のバッチが capture した値を引き継ぐ。
+  row = Object.assign({}, baseRow, carried);
   // ステップ番号は生成物と同じ数え方にする（setup と loop で別々に 1 から）
   const nos = { setup: 0, loop: 0 };
   let failed = null, done = 0;
@@ -76,7 +81,12 @@ for (const rel of targets) {
     if (st.type === "capture") {
       // 画面から読み取った値は、後続の {{名前}} に渡る（PAD では結果 CSV 経由）
       r = act(cands, "text", "");
-      if (r && r.ok) { row[st.name] = r.text; }
+      if (r && r.ok) {
+        let v = r.text;
+        if (st.extract === "digits") { v = v.replace(/[^0-9]/g, ""); }
+        row[st.name] = v;
+        carried[st.name] = v;
+      }
     } else if (st.type === "assertText") {
       r = act([], "exists", fill(st.text));
     } else if (st.type === "change") {

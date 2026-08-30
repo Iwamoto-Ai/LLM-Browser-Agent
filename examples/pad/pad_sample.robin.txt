@@ -9,7 +9,7 @@
 #           BaseDir: C:\temp
 #           エビデンス名: @ID@__@KEY@__@STAMP@
 #           ダウンロード保存先: C:\temp\download
-# 備考：2026/08/29 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
+# 備考：2026/08/30 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
 # ============================================================
 # LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
 # Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).
@@ -126,16 +126,20 @@ SET JsAct TO $'''%JsAct%XPath(sel.slice(6)); } if (sel.indexOf(`text/`) === 0) {
 SET JsAct TO $'''%JsAct%(`//*[not(self::script) and normalize-space(text())=` + lit(t) + `]`); } if (sel.indexOf(`aria/`) =='''
 SET JsAct TO $'''%JsAct%= 0) { var n = sel.slice(5).split(`[`)[0].trim(); var el = document.querySelector(`[aria-label=` + l'''
 SET JsAct TO $'''%JsAct%it(n) + `]`); if (el) { return el; } return byXPath(`//*[not(self::script) and (@aria-label=` + lit('''
-SET JsAct TO $'''%JsAct%n) + ` or @title=` + lit(n) + ` or normalize-space(text())=` + lit(n) + `)]`); } if (sel.indexOf(`pi'''
-SET JsAct TO $'''%JsAct%erce/`) === 0) { sel = sel.slice(7); } return document.querySelector(sel); } catch (e) { return null'''
-SET JsAct TO $'''%JsAct%; } } if (action === `exists`) { var body = document.body || document.documentElement; var txt = (bo'''
-SET JsAct TO $'''%JsAct%dy && (body.innerText || body.textContent)) || ``; return { ok: txt.indexOf(value) >= 0, used: null '''
-SET JsAct TO $'''%JsAct%}; } for (var i = 0; i < cands.length; i++) { var el = find(cands[i]); if (!el) { continue; } if (ac'''
-SET JsAct TO $'''%JsAct%tion === `click`) { try { el.scrollIntoView({ block: `center` }); } catch (e) {} el.click(); } else '''
-SET JsAct TO $'''%JsAct%if (action === `fill`) { el.focus(); el.value = value; el.dispatchEvent(new Event(`input`, { bubbles'''
-SET JsAct TO $'''%JsAct%: true })); el.dispatchEvent(new Event(`change`, { bubbles: true })); } else if (action === `text`) '''
-SET JsAct TO $'''%JsAct%{ var s = el.innerText || el.textContent || ``; return { ok: true, used: cands[i], text: s.trim() };'''
-SET JsAct TO $'''%JsAct% } return { ok: true, used: cands[i] }; } return { ok: false, used: null };'''
+SET JsAct TO $'''%JsAct%n) + ` or @title=` + lit(n) + ` or normalize-space(text())=` + lit(n) + `)]`); } if (sel.indexOf(`ro'''
+SET JsAct TO $'''%JsAct%w/`) === 0) { var key = sel.slice(4).trim(); var rows = document.querySelectorAll(`tr`); for (var r '''
+SET JsAct TO $'''%JsAct%= 0; r < rows.length; r++) { var txt = rows[r].innerText || rows[r].textContent || ``; if (txt.index'''
+SET JsAct TO $'''%JsAct%Of(key) < 0) { continue; } var hit = rows[r].querySelector(`a, img, button, input[type=image]`); if '''
+SET JsAct TO $'''%JsAct%(hit) { return hit; } } return null; } if (sel.indexOf(`pierce/`) === 0) { sel = sel.slice(7); } ret'''
+SET JsAct TO $'''%JsAct%urn document.querySelector(sel); } catch (e) { return null; } } if (action === `exists`) { var body '''
+SET JsAct TO $'''%JsAct%= document.body || document.documentElement; var txt = (body && (body.innerText || body.textContent)'''
+SET JsAct TO $'''%JsAct%) || ``; return { ok: txt.indexOf(value) >= 0, used: null }; } for (var i = 0; i < cands.length; i++'''
+SET JsAct TO $'''%JsAct%) { var el = find(cands[i]); if (!el) { continue; } if (action === `click`) { try { el.scrollIntoVie'''
+SET JsAct TO $'''%JsAct%w({ block: `center` }); } catch (e) {} el.click(); } else if (action === `fill`) { el.focus(); el.va'''
+SET JsAct TO $'''%JsAct%lue = value; el.dispatchEvent(new Event(`input`, { bubbles: true })); el.dispatchEvent(new Event(`ch'''
+SET JsAct TO $'''%JsAct%ange`, { bubbles: true })); } else if (action === `text`) { var s = el.innerText || el.textContent |'''
+SET JsAct TO $'''%JsAct%| ``; return { ok: true, used: cands[i], text: s.trim() }; } return { ok: true, used: cands[i] }; } '''
+SET JsAct TO $'''%JsAct%return { ok: false, used: null };'''
 # ※ 継ぎ足しがうまくいかない場合は、共通 JavaScript（変換器のコピー機能、または
 #   Python 版が同時に出力する .jsact ファイル）の中身を「変数の設定」アクション
 #   （変数名 JsAct）の値の欄に手で貼り付けてもよい。
