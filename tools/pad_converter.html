@@ -188,6 +188,17 @@ var JS_ACT = [
 "      return byXPath(`//*[not(self::script) and (@aria-label=` + lit(n)",
 "                     + ` or @title=` + lit(n) + ` or normalize-space(text())=` + lit(n) + `)]`);",
 "    }",
+"    if (sel.indexOf(`row/`) === 0) {",
+"      var key = sel.slice(4).trim();",
+"      var rows = document.querySelectorAll(`tr`);",
+"      for (var r = 0; r < rows.length; r++) {",
+"        var txt = rows[r].innerText || rows[r].textContent || ``;",
+"        if (txt.indexOf(key) < 0) { continue; }",
+"        var hit = rows[r].querySelector(`a, img, button, input[type=image]`);",
+"        if (hit) { return hit; }",
+"      }",
+"      return null;",
+"    }",
 "    if (sel.indexOf(`pierce/`) === 0) { sel = sel.slice(7); }",
 "    return document.querySelector(sel);",
 "  } catch (e) { return null; }",
@@ -397,11 +408,11 @@ function captureNames(batch) {
 // 結果 CSV に列として残しておけば、そのまま次のバッチの明細にできる。
 // 読めなかったときは失敗として記録する。空のまま先へ進むと、
 // 次のバッチが「番号の無い行」を処理しようとして原因が分かりにくい。
-function robinCapture(cands, varName, indent, stepNo, note, cols) {
+function robinCapture(cands, varName, indent, stepNo, note, cols, extract) {
   cands = robinFilterCandidates(cands).map(function (c) { return toRobinVar(c, cols); });
   note = toRobinVar(note, cols).split("'").join("").split("[").join("").split("]").join("");
   var bodyArgs = pyJson([cands, "text", ""]);
-  return [
+  var out = [
     indent + "# [" + stepNo + "] " + note,
     indent + "SET ActBody TO $'''{\"script\": \"%JsAct%\", \"args\": " + bodyArgs + "}'''",
     web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent),
@@ -420,13 +431,25 @@ function robinCapture(cands, varName, indent, stepNo, note, cols) {
     indent + "    END",
     indent + "END"
   ];
+  if (extract === "digits") {
+    // 文章の中から番号だけを取り出す。
+    // 「要求IDは 131982564 です。」のように、読んだ文字がそのままでは
+    // 次のバッチで使えないことがある。数字以外を落とせば番号だけ残る。
+    out.push(indent + "# 数字以外を落として番号だけにする");
+    out.push(indent + "Text.Replace.ReplaceTextWithRegex Text: " + varName +
+      " TextToFind: " + robinStr("[^0-9]") + " IgnoreCase: False" +
+      " ReplaceWith: " + robinStr("") +
+      " ActivateEscapeSequences: False Result=> " + varName);
+  }
+  return out;
 }
 
 function robinDownload(cands, name, indent, stepNo, cols, timeout) {
   timeout = timeout || 60;
   var L = [];
   var A = function (s) { L.push(s); };
-  A(indent + "# [" + stepNo + "] ダウンロード " + (cands[0] || ""));
+  A(indent + "# [" + stepNo + "] ダウンロード " +
+    (cands[0] ? toRobinVar(cands[0], cols) : ""));
   A(indent + "# 押す前の件数を数えておき、増えたぶんを新しいファイルとみなす。");
   A(indent + folderGet("DlDir", "$" + Q_ + "*.*" + Q_, "DlBefore"));
   A(indent + "SET DlCountBefore TO DlBefore.Count");
@@ -817,7 +840,8 @@ function batchToSteps(batch) {
                shotName: "", dl: st.type === "download",
                dlName: st.type === "download" ? (st.name || "") : "",
                cap: st.type === "capture",
-               capName: st.type === "capture" ? (st.name || "") : "" };
+               capName: st.type === "capture" ? (st.name || "") : "",
+               capDigits: st.type === "capture" && st.extract === "digits" };
     if (sec === "loop" && recSigs[sig(st)]) { as.sec = "loop+recover"; }
     var v = String(st.value === undefined ? "" : st.value);
     var m = /\{\{([^}]+)\}\}/.exec(v);
@@ -1050,6 +1074,7 @@ function buildBatch(steps, assigns, title) {
       if (as.cap) {
         copy.type = "capture";
         if (as.capName) { copy.name = as.capName; }
+        if (as.capDigits) { copy.extract = "digits"; }
       }
       copy.selectors = st.selectors || [];
       if (as.selLit && as.varCol && as.varCol !== "?") {
@@ -1943,7 +1968,8 @@ function buildRobin(batch, opt) {
       A(inner + "# 画面に出た値を読み取って、結果 CSV の「" + cnm + "」列に残す。");
       A(inner + "# 次のバッチはこの CSV をそのまま明細として読める。");
       L = L.concat(robinCapture(candidates(lst), "Cap" + (caps.indexOf(cnm) + 1),
-                                inner, m, "capture " + cnm, cols));
+                                inner, m, "capture " + cnm, cols,
+                                String(lst.extract || "")));
       L = L.concat(robinFail(inner, capVals));
       A("");
       continue;
@@ -2226,7 +2252,11 @@ root.PadConvert = {
               (as.cap ? " checked" : "") + '>' +
               ' <input type="text" class="capTxt" data-i="' + i + '" placeholder="列名"' +
               ' value="' + (as.capName || "") + '"' + off +
-              (as.cap ? "" : " hidden") + ">";
+              (as.cap ? "" : " hidden") + ">" +
+              '<label class="capNum" data-i="' + i + '"' +
+              (as.cap ? "" : " hidden") + ' style="font-weight:normal">' +
+              '<input type="checkbox" class="capNumChk" data-i="' + i + '"' + off +
+              (as.capDigits ? " checked" : "") + "> 数字だけ</label>";
       }
       var dl = "";
       if (isAct) {
@@ -2325,12 +2355,20 @@ root.PadConvert = {
         recAssign[i].cap = el.checked;
         var txt = $("assignTable").querySelector('.capTxt[data-i="' + i + '"]');
         if (txt) { txt.hidden = !el.checked; }
+        var num = $("assignTable").querySelector('.capNum[data-i="' + i + '"]');
+        if (num) { num.hidden = !el.checked; }
         batchReady = false;
       });
     });
     Array.prototype.forEach.call(q(".capTxt"), function (el) {
       el.addEventListener("input", function () {
         recAssign[+el.dataset.i].capName = el.value;
+        batchReady = false;
+      });
+    });
+    Array.prototype.forEach.call(q(".capNumChk"), function (el) {
+      el.addEventListener("change", function () {
+        recAssign[+el.dataset.i].capDigits = el.checked;
         batchReady = false;
       });
     });

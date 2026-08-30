@@ -731,3 +731,38 @@ def test_details_from_result_splits_output(tmp_path):
     out2 = pad.write_robin(batch, r"C:\t\d.csv", "ID", str(tmp_path / "g.robin.txt"))
     txt2 = open(out2, encoding="utf-8").read()
     assert "pad_result_2.csv" not in txt2
+
+
+def test_capture_extract_digits(tmp_path):
+    """読んだ文章から番号だけを取り出せること。
+
+    実 EDI の要求 ID は「XXPO:検収状況一覧 への要求は予定されました。
+    要求IDは 131982564 です。」という文でポップアップに出る。そのままでは
+    次のバッチで使えないので、数字以外を落とす。"""
+    batch = {"title": "c", "setup": [{"type": "navigate", "url": "http://x/"}],
+             "loop": [{"type": "capture", "selectors": [["aria/情報"]],
+                       "name": "要求ID", "extract": "digits"}]}
+    out = pad.write_robin(batch, r"C:\t\d.csv", "ID",
+                          str(tmp_path / "f.robin.txt"))
+    txt = open(out, encoding="utf-8").read()
+    q3 = chr(39) * 3
+    assert "TextToFind: $" + q3 + "[^0-9]" + q3 in txt
+    # 指定しなければ出さない
+    batch["loop"][0].pop("extract")
+    out2 = pad.write_robin(batch, r"C:\t\d.csv", "ID",
+                           str(tmp_path / "g.robin.txt"))
+    assert "[^0-9]" not in open(out2, encoding="utf-8").read()
+
+
+def test_row_selector_in_shared_js():
+    """行を文字で探すセレクタが共通 JavaScript にあること。
+
+    実 EDI の要求要約表には検索欄が無く、要求 ID の行を目で探すしかない。
+    XPath で書くと単引用符が Robin リテラルを壊すので、専用の書き方を用意した。
+    その行の最初のリンクやアイコンを押す。"""
+    js = pad.js_act_oneline()
+    assert "row/" in js
+    assert "querySelectorAll(`tr`)" in js
+    # リテラルを壊す文字が入っていないこと
+    assert chr(92) not in js
+    assert chr(34) not in js
