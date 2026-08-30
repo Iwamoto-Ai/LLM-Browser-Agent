@@ -1,16 +1,18 @@
 // ============================================================
-// EDI2 ① 納入登録
-//  ・行の先頭が // または # の行はコメント（読み飛ばされる）
-//  ・{{列名}} は明細 CSV の列に置き換わる
+// EDI2 ③ 要求 ID の行から Excel をダウンロードする
 //
-// 発注番号で検索し、納入番号（プロジェクト番号）と納入日を入れて発行する。
-// **要求 ID はここでは出ない。** 検収状況一覧の「発行」で発番される。
+// ②の結果 CSV をそのまま明細として読む。
+// 変換するときは「前のバッチの結果 CSV を明細にする」にチェックを入れる。
 //
-// 明細 CSV に要る列: プロジェクト番号 / 発注番号 / 納入日
+// 要求要約表には検索欄が無く、目的の行を目で探すしかない。
+// row/{{要求ID}} で「その文字を含む行の、最初のリンクやアイコン」を押す。
+//
+// 明細 CSV に要る列: プロジェクト番号 / 発注番号 / 納入日 / 要求ID
+//   （②の pad_result.csv がそのまま使える）
 // ============================================================
 {
-  "originHint": "納入",
-  "title": "EDI2 ① 納入登録",
+  "originHint": "検収状況一覧",
+  "title": "EDI2 ③ 要求 ID の行から Excel をダウンロードする",
   "setup": [
     {
       "type": "setViewport",
@@ -58,108 +60,29 @@
   "loop": [
     {
       "type": "comment",
-      "text": "発注 {{発注番号}}（{{プロジェクト番号}}）の納入登録"
+      "text": "要求 {{要求ID}}（{{プロジェクト番号}}）の Excel を取得"
     },
     {
       "type": "click",
       "selectors": [
         [
-          "#POS_SHIPMENTS"
+          "#LI帳票出力"
         ],
         [
-          "text/納入"
+          "text/帳票出力"
         ]
       ]
     },
     {
-      "type": "click",
-      "selectors": [
-        [
-          "#POS_DELIVERY"
-        ],
-        [
-          "text/納入"
-        ]
-      ]
-    },
-    {
-      "type": "click",
-      "selectors": [
-        [
-          "#PosShipCreate"
-        ],
-        [
-          "text/納入登録"
-        ]
-      ]
-    },
-    {
-      "type": "click",
-      "selectors": [
-        [
-          "#ShipSrchBtn"
-        ],
-        [
-          "text/拡張検索"
-        ]
-      ]
+      "type": "comment",
+      "text": "練習サイトはサーバーを持たないので、条件を入れて中身を作る"
     },
     {
       "type": "change",
       "value": "{{発注番号}}",
       "selectors": [
         [
-          "#ShipPoField"
-        ]
-      ]
-    },
-    {
-      "type": "click",
-      "selectors": [
-        [
-          "#ShipGoBtn"
-        ],
-        [
-          "text/進む"
-        ]
-      ]
-    },
-    {
-      "type": "click",
-      "selectors": [
-        [
-          "#M__Idb"
-        ]
-      ]
-    },
-    {
-      "type": "click",
-      "selectors": [
-        [
-          "#AddToShipBtn"
-        ],
-        [
-          "text/納入に追加"
-        ]
-      ]
-    },
-    {
-      "type": "click",
-      "selectors": [
-        [
-          "#ShipHeaderBtn"
-        ],
-        [
-          "text/納入ヘッダー"
-        ]
-      ]
-    },
-    {
-      "type": "change",
-      "value": "{{プロジェクト番号}}",
-      "selectors": [
-        [
-          "#ShipNumField"
+          "#PoFromField"
         ]
       ]
     },
@@ -168,7 +91,25 @@
       "value": "{{納入日}}",
       "selectors": [
         [
-          "#ShipDateField"
+          "#DateFromField"
+        ]
+      ]
+    },
+    {
+      "type": "change",
+      "value": "{{プロジェクト番号}}",
+      "selectors": [
+        [
+          "#ShipNoField"
+        ]
+      ]
+    },
+    {
+      "type": "change",
+      "value": "{{要求ID}}",
+      "selectors": [
+        [
+          "#ReqIdField"
         ]
       ]
     },
@@ -176,31 +117,29 @@
       "type": "click",
       "selectors": [
         [
-          "#ShipConfirmBtn"
+          "#ShowReqBtn"
         ],
         [
-          "text/発行確認"
-        ]
-      ]
-    },
-    {
-      "type": "click",
-      "selectors": [
-        [
-          "#ShipSubmitBtn"
-        ],
-        [
-          "text/発行"
+          "text/要求の表示"
         ]
       ]
     },
     {
       "type": "assertText",
-      "text": "納入登録完了"
+      "text": "{{要求ID}}"
     },
     {
-      "type": "screenshot",
-      "name": "エビデンス"
+      "type": "comment",
+      "text": "要求要約表には検索欄が無い。row/ で目的の行を探す"
+    },
+    {
+      "type": "download",
+      "selectors": [
+        [
+          "row/{{要求ID}}"
+        ]
+      ],
+      "name": "{{プロジェクト番号}}_XXPO_検収状況一覧_{{要求ID}}"
     },
     {
       "type": "click",

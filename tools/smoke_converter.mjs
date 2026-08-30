@@ -95,7 +95,7 @@ const optOn = { detailsPath: "C:\\t\\d.csv", idCol: "ID", driverExe: "C:\\t\\e.e
                 outDir: "C:\\t", proxy: "", autoDriver: false, browser: "edge",
                 detailsFromResult: true };
 const robinOn = P.buildRobin(P.loadRecording(
-  fs.readFileSync("recordings/edi2_report_batch.json", "utf8")), optOn).robin;
+  fs.readFileSync("recordings/edi2_fetch_batch.json", "utf8")), optOn).robin;
 if (robinOn.indexOf("Row['skip']") >= 0) {
   errors.push("結果 CSV を明細にするのに skip 列を見ている");
 }

@@ -386,7 +386,6 @@ function viewPoDone() {
      → 納入番号・納入日を入力 → 発行確認 → 発行 → 完了
    ============================================================ */
 var shipNo = '';          /* 入力された納入番号 */
-var lastReqId = '';       /* 登録で発番された要求ID */
 /* 要求ID → 登録内容（同じ実行の中だけ）。
    実サイトはサーバーが持っているので、日をまたいでも要求 ID だけで引ける。
    練習サイトにはサーバーが無い。ブラウザーに保存する手も試したが、
@@ -495,8 +494,6 @@ function viewNounyuConfirm() {
     registered[shipPo] = shipNo;
     /* 実サイトと同じく、登録すると要求 ID が発番される。
        この番号で、あとから検収状況一覧を照会する。 */
-    lastReqId = String(9000000 + Math.floor(Math.random() * 999999));
-    reqLog[lastReqId] = { po: shipPo, ship: shipNo, date: shipDate };
     viewNounyuDone();
   });
 }
@@ -508,100 +505,157 @@ function viewNounyuDone() {
     '<p>納入番号 <b>' + shipNo + '</b> で登録しました。</p>' +
     '<table class="grid"><tr><th>発注番号</th><td>' + shipPo + '</td></tr>' +
     '<tr><th>納入番号</th><td>' + shipNo + '</td></tr>' +
-    '<tr><th>納入日</th><td id="ShipDoneDate">' + shipDate + '</td></tr>' +
-    '<tr><th>要求ID</th><td id="ShipDoneNo">' + lastReqId + '</td></tr></table>' +
-    '<p class="note">この要求IDで、あとから検収状況一覧を照会します。</p></div>';
+    '<tr><th>納入日</th><td id="ShipDoneDate">' + shipDate + '</td></tr></table>' +
+    '<p class="note">エビデンスは「検収状況一覧」から取ります。' +
+    '**要求 ID はそちらの「発行」で発番されます。**</p></div>';
   bindHome();
 }
 
 /* ============================================================
-   検収状況一覧（フロー3の練習・ファイルのダウンロードまで）
+   検収状況一覧（フロー3の練習）
    実サイトの流れ:
-     帳票出力 → 検収状況一覧 → 条件入力 → 続行 → 発行
-     → 要求IDがポップアップで出る → OK
-     → 要求一覧で出力アイコン → Excel がダウンロードされる
-   実サイトでは発行から出力まで 1〜5 時間かかるが、練習ではすぐ落とせる。
-   ============================================================ */
-var requestId = '';
-var reqPo = '';
+     帳票出力 → 検収状況一覧（要求の計画: 定義）
+     → ステータス・発注番号(From/To)・納入日(From/To) を入れて続行(C)
+     → レビュー画面 → 発行 → **ここで要求 ID が発番され**、ポップアップに出る
+     → OK
+     （出力できるようになるまで 1 分〜3 時間）
+     → 要求の表示 → 要求要約表から自分の要求 ID の行を探して出力 → Excel
 
+   **要求 ID は納入登録では出ない。** 検収状況一覧の「発行」で発番される。
+   そのため、発行までと取得とを別々の実行に分ける。
+   ============================================================ */
+
+/* 発番済みの要求。実サイトはサーバーが持っている。
+   練習サイトには無いので、取得の画面では入力された値から一覧を作る。 */
+var reqLog = {};          /* 要求ID → 発行したときの条件 */
+var requestId = '';       /* いま扱っている要求ID */
+var reviewPo = '';        /* レビュー画面へ渡す発注番号 */
+var reviewDate = '';      /* 同じく納入日 */
+var reviewShip = '';      /* 同じく納入番号 */
 
 function viewKenshuJoken() {
-  app.innerHTML = header('E-Business Suite') +
+  app.innerHTML = header('帳票出力') +
     '<div class="crumb">帳票出力 &gt;</div>' +
-    '<div class="main"><h2>検収状況一覧</h2>' +
-    '<p>要求ID <input id="ReqIdField" size="16" autocomplete="off"> ' +
-    '<span class="note">納入登録で発番された番号</span></p>' +
-    '<p>納入番号 <input id="ShipNoField" size="16" autocomplete="off"></p>' +
-    '<p>ステータス <input id="StatusField" size="10" value="ALL"></p>' +
-    '<p>発注番号(From) <input id="PoFromField" size="16" autocomplete="off"> ' +
-    '発注番号(To) <input id="PoToField" size="16" autocomplete="off"></p>' +
-    '<p>納入日(From) <input id="DateFromField" size="16" autocomplete="off"> ' +
-    '納入日(To) <input id="DateToField" size="16" autocomplete="off"></p>' +
-    '<p><button id="ContinueBtn">続行(C)</button></p>' +
-    '<div id="reportArea"></div></div>';
+    '<div class="main"><div class="secthead"><h2>要求の計画: 定義</h2>' +
+    '<span class="allbtn"><a class="polink" id="ShowReqBtn">要求の表示</a> ' +
+    '<button id="ContinueBtn">続行(C)</button></span></div>' +
+    '<p class="note">* 必須フィールドを示します</p>' +
+    '<p>プログラム名　XXPO:検収状況一覧</p>' +
+    '<table><tr><td>* ステータス</td>' +
+    '<td><input id="StatusField" size="20" value="ALL"></td></tr>' +
+    '<tr><td>発注番号(From)</td>' +
+    '<td><input id="PoFromField" size="20" autocomplete="off"></td></tr>' +
+    '<tr><td>発注番号(To)</td>' +
+    '<td><input id="PoToField" size="20" autocomplete="off"></td></tr>' +
+    '<tr><td>* 納入日(From)</td>' +
+    '<td><input id="DateFromField" size="20" autocomplete="off"></td></tr>' +
+    '<tr><td>* 納入日(To)</td>' +
+    '<td><input id="DateToField" size="20" autocomplete="off"></td></tr>' +
+    '<tr><td>検収日(From)</td><td><input size="20"></td></tr>' +
+    '<tr><td>検収日(To)</td><td><input size="20"></td></tr>' +
+    '<tr><td>納入番号</td><td><input id="ShipNoField" size="20" autocomplete="off">' +
+    ' <span class="note">練習用。実サイトには無い欄です</span></td></tr>' +
+    '<tr><td>要求ID</td><td><input id="ReqIdField" size="20" autocomplete="off">' +
+    ' <span class="note">練習用。取得だけを別に流すとき、この番号を一覧に出します</span>' +
+    '</td></tr></table>' +
+    '<p class="note">条件を入れて「続行(C)」。次の画面で「発行」を押すと要求 ID が出ます。</p>' +
+    '</div>';
   bindHome();
-  document.getElementById('ContinueBtn').addEventListener('click', function () {
-    /* 要求IDが入っていれば、その登録内容を引く。実サイトと同じ使い方。 */
-    var rid = document.getElementById('ReqIdField').value.trim();
-    if (rid) {
-      requestId = rid;
-      /* 同じ実行の中で登録したものは reqLog から引ける。
-         別々の実行に分けたときは入力された値を使う（実サイトはサーバーが
-         持っているが、練習サイトには無いため）。 */
-      var rec = reqLog[rid] || {
-        po: document.getElementById('PoFromField').value.trim(),
-        ship: document.getElementById('ShipNoField').value.trim(),
-        date: document.getElementById('DateFromField').value.trim()
-      };
-      reqLog[rid] = rec;
-      document.getElementById('reportArea').innerHTML =
-        '<table class="grid"><tr><th>要求ID</th><th>発注番号</th><th>納入番号</th>' +
-        '<th>検収状況</th></tr><tr><td>' + rid + '</td><td>' + (rec.po || '-') +
-        '</td><td>' + (rec.ship || '-') + '</td><td>検収済</td></tr></table>' +
-        '<p><a class="polink" id="OutputIcon0">出力</a>' +
-        ' <span class="note">Excel がダウンロードされます</span></p>';
-      document.getElementById('OutputIcon0').addEventListener('click', downloadReport);
-      return;
+  document.getElementById('ContinueBtn').addEventListener('click', viewKenshuReview);
+  document.getElementById('ShowReqBtn').addEventListener('click', function () {
+    /* 取得だけを別の実行で流すときは、ここで入れた条件が Excel の中身になる。
+       実サイトはサーバーが持っているが、練習サイトには無いため。 */
+    reviewPo = document.getElementById('PoFromField').value.trim();
+    reviewDate = document.getElementById('DateFromField').value.trim();
+    reviewShip = document.getElementById('ShipNoField').value.trim();
+    /* 実サイトはサーバーが要求を持っているので、時間をおいても一覧に出る。
+       練習サイトには無いので、探したい番号をここで受け取って並べる。 */
+    var want = document.getElementById('ReqIdField').value.trim();
+    if (want && !reqLog[want]) {
+      reqLog[want] = { po: reviewPo, date: reviewDate, ship: reviewShip };
     }
-    reqPo = document.getElementById('PoFromField').value.trim();
-    document.getElementById('reportArea').innerHTML =
-      '<table class="grid"><tr><th>発注番号</th><th>納入日</th><th>検収状況</th></tr>' +
-      '<tr><td>' + reqPo + '</td><td>' +
-      document.getElementById('DateFromField').value + '</td><td>検収済</td></tr></table>' +
-      '<p><button id="ReportSubmitBtn">発行</button></p>';
-    document.getElementById('ReportSubmitBtn')
-      .addEventListener('click', viewRequestPopup);
+    viewRequestList();
   });
 }
 
-function viewRequestPopup() {
-  /* 要求 ID を発番する。実サイトと同じく、この番号でエビデンスを探す。 */
-  requestId = String(9000000 + Math.floor(Math.random() * 999999));
-  app.innerHTML = header('E-Business Suite') +
-    '<div class="crumb">帳票出力 &gt; 検収状況一覧 &gt;</div>' +
-    '<div class="main"><h2>要求の発行</h2>' +
-    '<div style="border:1px solid #b7cfe3;background:#eef4fa;padding:14px;width:420px">' +
-    '<p>要求 <b id="reqId">' + requestId + '</b> を発行しました。</p>' +
-    '<p><button id="OkBtn">OK</button></p></div>' +
-    '<p class="note">実サイトでは、出力できるようになるまで 1〜5 時間かかります。' +
-    '練習ではすぐ取得できます。</p></div>';
+/* 発行の前の確認画面。実サイトの「要求の計画: レビュー」。 */
+function viewKenshuReview() {
+  var po = document.getElementById('PoFromField').value.trim();
+  var d1 = document.getElementById('DateFromField').value.trim();
+  reviewPo = po;
+  reviewDate = d1;
+  reviewShip = document.getElementById('ShipNoField').value.trim();
+  app.innerHTML = header('帳票出力') +
+    '<div class="crumb">帳票出力 &gt;</div>' +
+    '<div class="main"><div class="secthead"><h2>要求の計画: レビュー</h2>' +
+    '<span class="allbtn"><button>戻る(K)</button> ' +
+    '<button id="PublishBtn">発行</button></span></div>' +
+    '<h3>名称</h3><p>コンカレント・プログラム名　XXPO:検収状況一覧</p>' +
+    '<h3>パラメータ</h3><table class="grid">' +
+    '<tr><th>ステータス</th><td>ALL</td></tr>' +
+    '<tr><th>発注番号(From)</th><td>' + po + '</td></tr>' +
+    '<tr><th>発注番号(To)</th><td>' +
+    document.getElementById('PoToField').value.trim() + '</td></tr>' +
+    '<tr><th>納入日(From)</th><td>' + d1 + '</td></tr>' +
+    '<tr><th>納入日(To)</th><td>' +
+    document.getElementById('DateToField').value.trim() + '</td></tr></table>' +
+    '<h3>レイアウト</h3><table class="grid">' +
+    '<tr><th>対象言語</th><th>テンプレート名</th><th>言語</th><th>出力形式</th></tr>' +
+    '<tr><td>日本語</td><td>検収状況一覧テンプレート</td><td>日本語</td><td>EXCEL</td></tr>' +
+    '</table><div id="popupArea"></div></div>';
   bindHome();
-  document.getElementById('OkBtn').addEventListener('click', viewRequestList);
+  document.getElementById('PublishBtn').addEventListener('click', viewReqPopup);
 }
 
+/* 発行するとポップアップで要求 ID が出る。実サイトと同じ文面にしてある。
+   番号だけを取り出す練習になるよう、文章の中に埋める。 */
+function viewReqPopup() {
+  requestId = String(131900000 + Math.floor(Math.random() * 99999));
+  reqLog[requestId] = { po: reviewPo, date: reviewDate, ship: reviewShip };
+  document.getElementById('popupArea').innerHTML =
+    '<div style="border:1px solid #b7cfe3;background:#eef4fa;padding:14px;' +
+    'width:560px;margin-top:20px">' +
+    '<p><b>ℹ 情報</b></p>' +
+    '<p id="ReqInfoMsg">XXPO:検収状況一覧 への要求は予定されました。 ' +
+    '要求IDは ' + requestId + ' です。</p>' +
+    '<p><button id="OkBtn">OK</button></p></div>' +
+    '<p class="note">実サイトでは、出力できるようになるまで 1 分〜3 時間かかります。' +
+    '練習ではすぐ取得できます。</p>';
+  document.getElementById('OkBtn').addEventListener('click', viewKenshuJoken);
+}
+
+/* 要求要約表。検索欄が無く、目的の要求 ID を目で探すのは実サイトと同じ。
+   練習では、これまでに発行したものと、それらしいダミーを混ぜて並べる。 */
 function viewRequestList() {
-  app.innerHTML = header('E-Business Suite') +
+  var ids = Object.keys(reqLog);
+  if (!ids.length) { ids = [String(131900000 + Math.floor(Math.random() * 99999))]; }
+  var rows = ids.concat(['131982499', '131976487', '131959683', '131958402'])
+    .slice(0, 10).map(function (id, i) {
+      return '<tr><td><a class="polink" id="OutputIcon' + i + '">出力</a></td>' +
+        '<td>' + id + '</td><td>XXPO:検収状況一覧</td>' +
+        '<td>完了</td><td>通常</td><td>2026/08/04 15:20:46</td></tr>';
+    }).join('');
+  app.innerHTML = header('帳票出力') +
     '<div class="crumb">帳票出力 &gt; 要求 &gt;</div>' +
-    '<div class="main"><h2>要求</h2>' +
+    '<div class="main"><h2>要求</h2><h3>要求要約表</h3>' +
+    '<p><button>リフレッシュ</button> <span class="note">行1から10</span></p>' +
     '<table class="grid" id="RequestSummarySearchVO:Content">' +
-    '<tr><th>出力</th><th>要求ID</th><th>名称</th><th>フェーズ</th><th>ステータス</th></tr>' +
-    '<tr><td><a class="polink" id="OutputIcon0">出力</a></td>' +
-    '<td>' + requestId + '</td><td>検収状況一覧</td>' +
-    '<td>完了</td><td>正常</td></tr></table>' +
-    '<p class="note">「出力」を押すと Excel がダウンロードされます。</p></div>';
+    '<tr><th>出力</th><th>要求ID</th><th>名称</th>' +
+    '<th>フェーズ</th><th>ステータス</th><th>予定日</th></tr>' +
+    rows + '</table>' +
+    '<p class="note">目的の要求 ID の行を探して「出力」を押すと Excel が落ちます。' +
+    '検索欄はありません（実サイトと同じ）。</p></div>';
   bindHome();
-  document.getElementById('OutputIcon0').addEventListener('click', downloadReport);
+  ids.concat(['131982499', '131976487', '131959683', '131958402'])
+    .slice(0, 10).forEach(function (id, i) {
+      var el = document.getElementById('OutputIcon' + i);
+      if (el) {
+        el.addEventListener('click', function () {
+          requestId = id;
+          downloadReport();
+        });
+      }
+    });
 }
 
 /* ダウンロードする Excel を、その場で組み立てる。
@@ -712,11 +766,14 @@ function buildReportXlsx(rows) {
 /* 実サイトでサーバーが Content-Disposition で返すのと同じく、
    ブラウザーの保存先に落ちる。 */
 function downloadReport() {
-  var rec = reqLog[requestId] || {};
+  /* 同じ実行の中で発行したものは reqLog から引ける。
+     別々の実行に分けたときは、明細から渡された値を使う（実サイトはサーバーが
+     持っているが、練習サイトには無いため）。 */
+  var rec = reqLog[requestId] || { po: reviewPo, date: reviewDate, ship: reviewShip };
   var po = poByNo(rec.po || '');
   var rows = [
     ['要求ID', '発注番号', '納入番号', '納入日', '検収状況', '金額'],
-    [requestId, rec.po || '-', rec.ship || '-', rec.date || '-', '検収済',
+    [requestId, rec.po || '-', rec.ship || registered[rec.po] || '-', rec.date || '-', '検収済',
      rec.po ? po.amt : '-']
   ];
   var mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
