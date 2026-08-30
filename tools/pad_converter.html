@@ -71,6 +71,12 @@
   <p class="hint">録画された操作を 4 つの箱に振り分けます。
      <strong>推測で選んであるので、違うところだけ直してください。</strong>
      キー入力の記録など、変換に使わないものは隠しています。</p>
+  <p class="hint"><strong>ファイルダウンロードの保存名</strong>には
+     <code>{{列名}}</code> で明細の値を、<code>@ID@</code>（ID 列）
+     <code>@KEY@</code>（業務キー）<code>@STAMP@</code>（日時）を差し込めます。
+     例: <code>{{プロジェクト番号}}_XXPO_検収状況一覧_{{要求ID}}</code>。
+     <strong>空にすると、下で決めたエビデンスのファイル名と同じ書式</strong>になります。
+     拡張子はそのまま残るので付けません。</p>
   <div class="hint" id="assignInfo"></div>
   <table id="assignTable"></table>
   <p class="hint">
@@ -2209,9 +2215,13 @@ root.PadConvert = {
       // クリックの行だけ「この操作でダウンロード」を選べる
       // 押す代わりに、その場所の文字を読んで結果 CSV の列にする。
       // 登録して発番された番号を次のバッチへ渡すときに使う。
+      // click / doubleClick と、それを置き換えた download / capture の行に出す。
+      // 読み込んだバッチ定義では type が download / capture になっているので、
+      // ここに入れておかないとチェックが出ず、作り直したときに失われる。
+      var isAct = (recSteps[i].type === "click" || recSteps[i].type === "doubleClick" ||
+                   recSteps[i].type === "download" || recSteps[i].type === "capture");
       var cap = "";
-      if (recSteps[i].type === "click" || recSteps[i].type === "doubleClick" ||
-          recSteps[i].type === "capture") {
+      if (isAct) {
         cap = '<input type="checkbox" class="capChk" data-i="' + i + '"' + off +
               (as.cap ? " checked" : "") + '>' +
               ' <input type="text" class="capTxt" data-i="' + i + '" placeholder="列名"' +
@@ -2219,10 +2229,11 @@ root.PadConvert = {
               (as.cap ? "" : " hidden") + ">";
       }
       var dl = "";
-      if (recSteps[i].type === "click" || recSteps[i].type === "doubleClick") {
+      if (isAct) {
         dl = '<input type="checkbox" class="dlChk" data-i="' + i + '"' + off +
              (as.dl ? " checked" : "") + '>' +
-             ' <input type="text" class="dlTxt" data-i="' + i + '" placeholder="保存名"' +
+             ' <input type="text" class="dlTxt" data-i="' + i + '" size="28"' +
+             ' placeholder="空ならエビデンス名と同じ"' +
              ' value="' + (as.dlName || "") + '"' + off +
              (as.dl ? "" : " hidden") + ">";
       }
