@@ -2209,9 +2209,13 @@ root.PadConvert = {
       // クリックの行だけ「この操作でダウンロード」を選べる
       // 押す代わりに、その場所の文字を読んで結果 CSV の列にする。
       // 登録して発番された番号を次のバッチへ渡すときに使う。
+      // click / doubleClick と、それを置き換えた download / capture の行に出す。
+      // 読み込んだバッチ定義では type が download / capture になっているので、
+      // ここに入れておかないとチェックが出ず、作り直したときに失われる。
+      var isAct = (recSteps[i].type === "click" || recSteps[i].type === "doubleClick" ||
+                   recSteps[i].type === "download" || recSteps[i].type === "capture");
       var cap = "";
-      if (recSteps[i].type === "click" || recSteps[i].type === "doubleClick" ||
-          recSteps[i].type === "capture") {
+      if (isAct) {
         cap = '<input type="checkbox" class="capChk" data-i="' + i + '"' + off +
               (as.cap ? " checked" : "") + '>' +
               ' <input type="text" class="capTxt" data-i="' + i + '" placeholder="列名"' +
@@ -2219,7 +2223,7 @@ root.PadConvert = {
               (as.cap ? "" : " hidden") + ">";
       }
       var dl = "";
-      if (recSteps[i].type === "click" || recSteps[i].type === "doubleClick") {
+      if (isAct) {
         dl = '<input type="checkbox" class="dlChk" data-i="' + i + '"' + off +
              (as.dl ? " checked" : "") + '>' +
              ' <input type="text" class="dlTxt" data-i="' + i + '" placeholder="保存名"' +
