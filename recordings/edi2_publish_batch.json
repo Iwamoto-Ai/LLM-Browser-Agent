@@ -133,6 +133,19 @@
       "text": "レビュー画面。発行を押すと要求 ID がポップアップで出る"
     },
     {
+      "type": "comment",
+      "text": "レビュー画面の納入日を記録する。③がこの値で中身を作る"
+    },
+    {
+      "type": "capture",
+      "selectors": [
+        [
+          "#ReviewDate"
+        ]
+      ],
+      "name": "納入日"
+    },
+    {
       "type": "click",
       "selectors": [
         [

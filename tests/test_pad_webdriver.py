@@ -766,3 +766,35 @@ def test_row_selector_in_shared_js():
     # リテラルを壊す文字が入っていないこと
     assert chr(92) not in js
     assert chr(34) not in js
+
+
+def test_practice_batches_chain_columns(tmp_path):
+    """受け取る側が使う列を、渡す側の結果 CSV が持っていること。
+
+    ②の結果 CSV をそのまま③の明細にする使い方では、③が {{列名}} で参照する
+    列がすべて②の見出しに要る。足りないと「列またはプロパティ … が
+    見つかりません」で止まる。実際、納入日が抜けていて止まった。"""
+    import re
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def headers_of(name):
+        """そのバッチの結果 CSV の見出しを、生成物から読み取る。"""
+        b = load_recording(os.path.join(here, 'recordings', name))
+        out = pad.write_robin(b, r'C:\t\d.csv', 'プロジェクト番号',
+                              str(tmp_path / (name + '.txt')))
+        for line in open(out, encoding='utf-8').read().splitlines():
+            if 'ResultFile' in line and '結果,理由' in line:
+                m = re.search(chr(39) * 3 + "(.*?)" + chr(39) * 3, line)
+                return m.group(1).split(',')
+        raise AssertionError('見出しが見つからない: ' + name)
+
+    def used_columns(name):
+        """そのバッチが {{列名}} で参照している列。"""
+        raw = open(os.path.join(here, 'recordings', name), encoding='utf-8').read()
+        return set(re.findall(r'\{\{([^}]+)\}\}', raw))
+
+    have = set(headers_of('edi2_publish_batch.json'))
+    want = used_columns('edi2_fetch_batch.json')
+    missing = want - have
+    assert not missing, ('③が使う列が②の結果 CSV に無い: ' + str(sorted(missing)) +
+                         ' / ②の見出し: ' + str(sorted(have)))
