@@ -134,23 +134,34 @@ function viewEbsHome() {
     document.getElementById('naviTree').innerHTML =
       '<div style="margin-left:16px">📄 納入一括登録（練習では未実装）<br>' +
       '<a id="LI取引情報入力・照会" class="polink">' +
-      '<div class="textdiv">📁 取引情報入力・照会</div></a></div>';
+      '<div class="textdiv">📁 取引情報入力・照会</div></a>' +
+      '<div id="naviTree2"></div></div>';
     document.getElementById('LI取引情報入力・照会')
-      .addEventListener('click', viewPosHpg);
+      .addEventListener('click', function () {
+        /* 実サイトはツリーを開くだけで画面は変わらない。
+           下に「ホームページ」と「帳票出力」が並ぶ。
+             ホームページ → 仕入先ホーム（注文受諾・納入登録の起点）
+             帳票出力     → 検収状況一覧（帳票の発行・取得の起点）
+           **行き先が違うので、業務によって辿る道が変わる。** */
+        document.getElementById('naviTree2').innerHTML =
+          '<div style="margin-left:16px">' +
+          '<a id="PosHpgGenericUrl3c" class="polink">' +
+          '<div class="textdiv">ホームページ</div></a>' +
+          '<a id="LI帳票出力" class="polink">' +
+          '<div class="textdiv">📁 帳票出力</div></a>' +
+          '<div id="naviTree3"></div></div>';
+        document.getElementById('PosHpgGenericUrl3c')
+          .addEventListener('click', viewIspHome);
+        document.getElementById('LI帳票出力').addEventListener('click', function () {
+          document.getElementById('naviTree3').innerHTML =
+            '<div style="margin-left:16px">' +
+            '<a id="LI検収状況一覧" class="polink">' +
+            '<div class="textdiv">検収状況一覧</div></a></div>';
+          document.getElementById('LI検収状況一覧')
+            .addEventListener('click', viewKenshuJoken);
+        });
+      });
   });
-}
-
-/* 取引情報入力・照会。ここから「ホームページ」で仕入先ホームへ入る。
-   実サイトでも #PosHpgGenericUrl3c を 1 回押す必要がある。 */
-function viewPosHpg() {
-  app.innerHTML = header('E-Business Suite') +
-    '<div class="crumb">取引情報入力・照会 &gt;</div>' +
-    '<div class="main"><h2>取引情報入力・照会</h2>' +
-    '<p><a class="polink" id="PosHpgGenericUrl3c">ホームページ</a></p>' +
-    '<p class="note">「ホームページ」から仕入先ホーム（繰り返しの起点）へ進みます。</p></div>';
-  bindHome();
-  document.getElementById('PosHpgGenericUrl3c')
-    .addEventListener('click', viewIspHome);
 }
 
 /* 仕入先ホーム＝繰り返しの起点。実サイトと同じく、通知・発注一覧・納入一覧と
@@ -184,7 +195,7 @@ function viewIspHome() {
     '<li><a class="polink">購買履歴</a></li></ul>' +
     '<h3>納入</h3><ul><li><a class="polink">納入予定</a></li>' +
     '<li><a class="polink">納期遅延受入</a></li><li><a class="polink">納入</a></li></ul>' +
-    '<h3>検収</h3><ul><li><a class="polink" id="LI帳票出力">検収状況一覧</a></li>' +
+    '<h3>検収</h3><ul><li><a class="polink">検収</a></li>' +
     '<li><a class="polink">返品</a></li><li><a class="polink">納期実績</a></li></ul>' +
     '<h3>請求書</h3><ul><li><a class="polink">請求書</a></li></ul>' +
     '<h3>支払</h3><ul><li><a class="polink">支払</a></li></ul>' +
@@ -192,7 +203,6 @@ function viewIspHome() {
   bindHome();
   document.getElementById('POS_ORDERS').addEventListener('click', viewHattyuTab);
   document.getElementById('POS_SHIPMENTS').addEventListener('click', viewNounyuTab);
-  document.getElementById('LI帳票出力').addEventListener('click', viewKenshuJoken);
 }
 
 function viewHattyuTab() {

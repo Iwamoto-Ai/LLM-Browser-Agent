@@ -48,10 +48,21 @@
       "type": "click",
       "selectors": [
         [
-          "#PosHpgGenericUrl3c"
+          "#LI帳票出力"
         ],
         [
-          "text/ホームページ"
+          "text/📁 帳票出力"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI検収状況一覧"
+        ],
+        [
+          "text/検収状況一覧"
         ]
       ]
     }
@@ -60,17 +71,6 @@
     {
       "type": "comment",
       "text": "発注 {{発注番号}}（{{プロジェクト番号}}）の帳票を発行"
-    },
-    {
-      "type": "click",
-      "selectors": [
-        [
-          "#LI帳票出力"
-        ],
-        [
-          "text/帳票出力"
-        ]
-      ]
     },
     {
       "type": "change",
@@ -226,10 +226,21 @@
       "type": "click",
       "selectors": [
         [
-          "#PosHpgGenericUrl3c"
+          "#LI帳票出力"
         ],
         [
-          "text/ホームページ"
+          "text/📁 帳票出力"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI検収状況一覧"
+        ],
+        [
+          "text/検収状況一覧"
         ]
       ]
     }
@@ -272,10 +283,21 @@
       "type": "click",
       "selectors": [
         [
-          "#PosHpgGenericUrl3c"
+          "#LI帳票出力"
         ],
         [
-          "text/ホームページ"
+          "text/📁 帳票出力"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI検収状況一覧"
+        ],
+        [
+          "text/検収状況一覧"
         ]
       ]
     }
