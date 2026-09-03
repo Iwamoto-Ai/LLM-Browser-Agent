@@ -49,10 +49,21 @@
       "type": "click",
       "selectors": [
         [
-          "#PosHpgGenericUrl3c"
+          "#LI帳票出力"
         ],
         [
-          "text/ホームページ"
+          "text/📁 帳票出力"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI検収状況一覧"
+        ],
+        [
+          "text/検収状況一覧"
         ]
       ]
     }
@@ -61,17 +72,6 @@
     {
       "type": "comment",
       "text": "要求 {{要求ID}}（{{プロジェクト番号}}）の Excel を取得"
-    },
-    {
-      "type": "click",
-      "selectors": [
-        [
-          "#LI帳票出力"
-        ],
-        [
-          "text/帳票出力"
-        ]
-      ]
     },
     {
       "type": "comment",
@@ -178,10 +178,21 @@
       "type": "click",
       "selectors": [
         [
-          "#PosHpgGenericUrl3c"
+          "#LI帳票出力"
         ],
         [
-          "text/ホームページ"
+          "text/📁 帳票出力"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI検収状況一覧"
+        ],
+        [
+          "text/検収状況一覧"
         ]
       ]
     }
@@ -224,10 +235,21 @@
       "type": "click",
       "selectors": [
         [
-          "#PosHpgGenericUrl3c"
+          "#LI帳票出力"
         ],
         [
-          "text/ホームページ"
+          "text/📁 帳票出力"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI検収状況一覧"
+        ],
+        [
+          "text/検収状況一覧"
         ]
       ]
     }
