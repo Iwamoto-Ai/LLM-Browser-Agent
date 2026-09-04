@@ -13,6 +13,11 @@
 {
   "originHint": "検収状況一覧",
   "title": "EDI2 ③ 要求 ID の行から Excel をダウンロードする",
+  "options": {
+    "idCol": "プロジェクト番号",
+    "browser": "edge",
+    "detailsFromResult": true
+  },
   "setup": [
     {
       "type": "setViewport",

@@ -103,6 +103,22 @@ if (robinOn.indexOf("pad_result_2.csv") < 0) {
   errors.push("結果 CSV を明細にするのに出力先が切り替わっていない");
 }
 
+// バッチ定義に持たせた設定が往復で保たれること。
+// 読み込んだときに画面へ戻す仕組みなので、消えると毎回入力し直しになる。
+const withOpt = P.buildBatch(back.steps, back.assigns, sample.title,
+  { idCol: "プロジェクト番号", browser: "chrome", shotName: "@ID@",
+    detailsFromResult: true });
+const readBack = P.batchOptions(withOpt);
+if (readBack.idCol !== "プロジェクト番号" || readBack.browser !== "chrome" ||
+    readBack.shotName !== "@ID@" || readBack.detailsFromResult !== true) {
+  errors.push("バッチ定義の設定が往復で変わる: " + JSON.stringify(readBack));
+}
+// PC ごとに違うものは入らないこと（配ったときに人のフォルダが混ざらないように）
+const j2 = JSON.stringify(withOpt);
+["outDir", "driverExe", "detailsPath", "proxy", "downloadDir"].forEach((k) => {
+  if (j2.indexOf(k) >= 0) { errors.push("PC 固有の設定が入っている: " + k); }
+});
+
 // capture の列名が往復で消えないこと（消えると結果 CSV の見出しが
 // 「取得値」になり、次のバッチが列を引けなくなる）
 const capsIn = (sample.loop || []).filter((s) => s.type === "capture").map((s) => s.name);

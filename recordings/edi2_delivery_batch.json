@@ -11,6 +11,10 @@
 {
   "originHint": "納入",
   "title": "EDI2 ① 納入登録",
+  "options": {
+    "idCol": "プロジェクト番号",
+    "browser": "edge"
+  },
   "setup": [
     {
       "type": "setViewport",

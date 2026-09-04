@@ -874,6 +874,22 @@ function batchToSteps(batch) {
   return { steps: steps, assigns: assigns };
 }
 
+// バッチ定義に持たせる設定。**業務に紐づくものだけ**を入れる。
+// BaseDir やドライバーのパスは PC ごとに違うので入れない。入れてしまうと、
+// 他の人に配ったときに合わず、毎回消すことになる。
+var BATCH_OPTION_KEYS = ["idCol", "browser", "shotName", "downloadName",
+                         "detailsFromResult"];
+
+// バッチ定義から設定を読む。無ければ空。
+function batchOptions(batch) {
+  var o = (batch && batch.options) || {};
+  var out = {};
+  BATCH_OPTION_KEYS.forEach(function (k) {
+    if (o[k] !== undefined && o[k] !== null && o[k] !== "") { out[k] = o[k]; }
+  });
+  return out;
+}
+
 function isRecording(obj) {
   return !!(obj && Array.isArray(obj.steps) && !obj.loop && !obj.setup);
 }
@@ -1045,8 +1061,22 @@ function guessAssignments(steps) {
 }
 
 // 振り分け結果からバッチ定義を組み立てる
-function buildBatch(steps, assigns, title) {
-  var out = { title: title || "", setup: [], loop: [], recover: [], teardown: [] };
+function buildBatch(steps, assigns, title, options) {
+  var out = { title: title || "" };
+  // 画面で選んだ設定を持たせておく。次に読み込んだとき初期値として入る。
+  if (options) {
+    var keep = {};
+    BATCH_OPTION_KEYS.forEach(function (k) {
+      if (options[k] !== undefined && options[k] !== null && options[k] !== "") {
+        keep[k] = options[k];
+      }
+    });
+    if (Object.keys(keep).length) { out.options = keep; }
+  }
+  out.setup = [];
+  out.loop = [];
+  out.recover = [];
+  out.teardown = [];
   for (var i = 0; i < steps.length; i++) {
     var st = steps[i], as = assigns[i];
     if (as.sec === "skip") { continue; }
@@ -2099,6 +2129,7 @@ function csvHeaders(text) {
 }
 
 root.PadConvert = {
+  batchOptions: batchOptions,
   batchToSteps: batchToSteps,
   hasCredentials: hasCredentials,
   // 共通 JavaScript の本文。練習サイトでの再生テストから使う
@@ -2134,6 +2165,55 @@ root.PadConvert = {
     var r = new FileReader();
     r.onload = function () { cb(r.result); };
     r.readAsText(file, "utf-8");
+  }
+
+  // ---- 設定の覚え方は 2 通り ----
+  // 業務に紐づくもの（ID 列・ブラウザーなど）はバッチ定義の options に入れて、
+  // 読み込んだときに画面へ戻す。他の人に配ってもそのまま使える。
+  // PC に紐づくもの（BaseDir・パス類）はこの PC のブラウザーに覚えさせる。
+  // 混ぜると、配ったときに人のフォルダが混ざって毎回消すことになる。
+  var PC_KEYS = ["details", "driver", "outdir", "downloadDir", "proxy"];
+  var PC_STORE = "pad_converter_paths";
+
+  function loadPcSettings() {
+    var saved;
+    try { saved = JSON.parse(localStorage.getItem(PC_STORE) || "{}"); }
+    catch (e) { return; }        // file:// で保存できない環境では何もしない
+    PC_KEYS.forEach(function (k) {
+      if (saved[k] && $(k) && !$(k).value) { $(k).value = saved[k]; }
+    });
+    if (saved.autodrv !== undefined && $("autodrv")) {
+      $("autodrv").checked = !!saved.autodrv;
+    }
+  }
+
+  function savePcSettings() {
+    var o = {};
+    PC_KEYS.forEach(function (k) { if ($(k)) { o[k] = $(k).value.trim(); } });
+    if ($("autodrv")) { o.autodrv = $("autodrv").checked; }
+    try { localStorage.setItem(PC_STORE, JSON.stringify(o)); } catch (e) {}
+  }
+
+  // バッチ定義に入っていた設定を画面へ戻す
+  function applyBatchOptions(batch) {
+    var o = PadConvert.batchOptions(batch);
+    if (o.idCol && $("idCol")) { $("idCol").value = o.idCol; }
+    if (o.browser && $("browser")) { $("browser").value = o.browser; }
+    if (o.shotName && $("shotName")) { $("shotName").value = o.shotName; }
+    if (o.detailsFromResult !== undefined && $("detailsFromResult")) {
+      $("detailsFromResult").checked = !!o.detailsFromResult;
+    }
+    return Object.keys(o).length;
+  }
+
+  // いま画面で選んでいる、業務に紐づく設定
+  function currentBatchOptions() {
+    return {
+      idCol: $("idCol") ? $("idCol").value.trim() : "",
+      browser: $("browser") ? $("browser").value : "",
+      shotName: $("shotName") ? $("shotName").value.trim() : "",
+      detailsFromResult: $("detailsFromResult") ? $("detailsFromResult").checked : false
+    };
   }
 
   var recSteps = null, recAssign = null, recTitle = "", lastTotal = 0;
@@ -2179,7 +2259,9 @@ root.PadConvert = {
         recAssign = restored.assigns;
         batchReady = true;          // 読み込んだ時点で変換できる
         renderAssign(recSteps.length);
+        var applied = applyBatchOptions(obj);
         show("ok", "バッチ定義 JSON として読み込みました（loop " + n + " 手順）。" +
+             (applied ? "<br><strong>保存されていた設定を反映しました。</strong>" : "") +
              "そのまま「変換する」を押せます。<br>" +
              "振り分けを直す場合は、下の表を変えてから" +
              "「この振り分けでバッチ定義を作る」を押し直してください。<br>" +
@@ -2415,7 +2497,8 @@ root.PadConvert = {
         "同じ名前を入れてください。そのままでよければ「そのまま」に変えてください。</div>";
       return;
     }
-    var batch = PadConvert.buildBatch(recSteps, recAssign, recTitle);
+    var batch = PadConvert.buildBatch(recSteps, recAssign, recTitle,
+                                      currentBatchOptions());
     batchText = JSON.stringify(batch, null, 2);
     // 振り分け画面はそのまま残す。実行結果を見てから直して作り直せるように。
     batchReady = true;
@@ -2472,6 +2555,7 @@ root.PadConvert = {
       });
     } catch (err) { show("err", "変換に失敗しました: " + err.message); return; }
 
+    savePcSettings();     // 次に開いたときのために、この PC のパスを覚える
     $("out").value = result.robin;
     ["copy", "save", "copyJs"].forEach(function (id) { $(id).disabled = false; });
 
@@ -2520,6 +2604,9 @@ root.PadConvert = {
     show("ok", "最初からやり直せます。実行環境のパスはそのまま残してあります。");
   });
   $("save").addEventListener("click", function () { saveText(result.robin, "pad_flow.robin.txt"); });
+
+  // 前回この PC で入れたパスを戻す。空欄のところだけ埋める。
+  loadPcSettings();
 })();
 </script>
 </body>
