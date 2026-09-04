@@ -10,6 +10,10 @@
 {
   "originHint": "発注",
   "title": "練習EDI2 注文受諾 バッチ — 受諾後にもう一度開いて発注情報をエビデンスにする",
+  "options": {
+    "idCol": "プロジェクト番号",
+    "browser": "edge"
+  },
   "setup": [
     {
       "type": "setViewport",

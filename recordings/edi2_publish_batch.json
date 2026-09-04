@@ -12,6 +12,10 @@
 {
   "originHint": "検収状況一覧",
   "title": "EDI2 ② 検収状況一覧を発行して要求 ID を記録する",
+  "options": {
+    "idCol": "プロジェクト番号",
+    "browser": "edge"
+  },
   "setup": [
     {
       "type": "setViewport",
