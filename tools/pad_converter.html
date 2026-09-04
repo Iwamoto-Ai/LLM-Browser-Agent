@@ -2197,7 +2197,7 @@ root.PadConvert = {
   // バッチ定義に入っていた設定を画面へ戻す
   function applyBatchOptions(batch) {
     var o = PadConvert.batchOptions(batch);
-    if (o.idCol && $("idCol")) { $("idCol").value = o.idCol; }
+    if (o.idCol && $("idcol")) { $("idcol").value = o.idCol; }
     if (o.browser && $("browser")) { $("browser").value = o.browser; }
     if (o.shotName && $("shotName")) { $("shotName").value = o.shotName; }
     if (o.detailsFromResult !== undefined && $("detailsFromResult")) {
@@ -2209,7 +2209,7 @@ root.PadConvert = {
   // いま画面で選んでいる、業務に紐づく設定
   function currentBatchOptions() {
     return {
-      idCol: $("idCol") ? $("idCol").value.trim() : "",
+      idCol: $("idcol") ? $("idcol").value.trim() : "",
       browser: $("browser") ? $("browser").value : "",
       shotName: $("shotName") ? $("shotName").value.trim() : "",
       detailsFromResult: $("detailsFromResult") ? $("detailsFromResult").checked : false

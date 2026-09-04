@@ -103,6 +103,18 @@ if (robinOn.indexOf("pad_result_2.csv") < 0) {
   errors.push("結果 CSV を明細にするのに出力先が切り替わっていない");
 }
 
+// 画面の入力欄と、設定を書き戻す先の id がそろっていること。
+// idCol / idcol のように大文字小文字を取り違えると、読み込んでも入らない。
+const uiHtml = fs.readFileSync("tools/pad_converter.html", "utf8");
+["idcol", "browser", "shotName", "detailsFromResult"].forEach((id) => {
+  if (uiHtml.indexOf('id="' + id + '"') < 0) {
+    errors.push("入力欄が見つからない: " + id);
+  }
+  if (uiHtml.indexOf('$("' + id + '")') < 0) {
+    errors.push("設定を書き戻していない: " + id);
+  }
+});
+
 // バッチ定義に持たせた設定が往復で保たれること。
 // 読み込んだときに画面へ戻す仕組みなので、消えると毎回入力し直しになる。
 const withOpt = P.buildBatch(back.steps, back.assigns, sample.title,
