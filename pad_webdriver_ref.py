@@ -646,6 +646,44 @@ def _capture_names(batch: dict) -> list:
     return out
 
 
+def _robin_assert_wait(text: str, indent: str, step_no: int,
+                       cols: list, timeout: int) -> list:
+    """文字が出るまで待ってから確認する。
+
+    実サイトは、押してからサーバーの処理が終わるまで時間がかかる場面がある。
+    要求 ID のポップアップのように、押した直後にはまだ出ていないものは
+    1 回見ただけでは失敗になる。1 秒ごとに見直して、出たら先へ進む。
+    """
+    val = _to_robin_var(text, cols)
+    body_args = json.dumps([[], "exists", val], ensure_ascii=False)
+    note = val.replace("'", "").replace("[", "").replace("]", "")
+    _ng = _robin_str("ステップ%d（完了確認: %s）画面に文字列がありません（%d 秒待機）"
+                     % (step_no, note, timeout))
+    return [
+        f"{indent}# [{step_no}] 完了確認: {note}（最大 {timeout} 秒待つ）",
+        f"{indent}SET AstFound TO False",
+        f"{indent}SET AstWaited TO 0",
+        f"{indent}LOOP WHILE AstFound = False AND AstWaited < {timeout}",
+        f"{indent}    SET ActBody TO $'''{{\"script\": \"%JsAct%\", \"args\": {body_args}}}'''",
+        _web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent + "    "),
+        f"{indent}    IF ActStatus = 200 THEN",
+        f"{indent}        Variables.ConvertJsonToCustomObject Json: ActResp "
+        f"CustomObject=> ActObj",
+        f"{indent}        IF ActObj['value']['ok'] = True THEN",
+        f"{indent}            SET AstFound TO True",
+        f"{indent}        END",
+        f"{indent}    END",
+        f"{indent}    IF AstFound = False THEN",
+        f"{indent}        WAIT 1",
+        f"{indent}        SET AstWaited TO AstWaited + 1",
+        f"{indent}    END",
+        f"{indent}END",
+        f"{indent}IF AstFound = False THEN",
+        f"{indent}    SET RowError TO {_ng}",
+        f"{indent}END",
+    ]
+
+
 def _robin_capture(cands: list, var: str, indent: str, step_no: int,
                    note: str, cols: list, extract: str = "") -> list:
     """画面の文字を読み取って変数に入れる。
@@ -1748,8 +1786,13 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             m += 1
             text = st.get("text", "")
             A(f"{inner}# 完了確認。「ボタンは押せたが実際には処理されていない」を検知する。")
-            L.extend(_robin_act([], "exists", text, inner,
-                                f"完了確認: {text}", m, cols))
+            _tmo = int(st.get("timeout", 0) or 0)
+            if _tmo > 0:
+                # 押してから出るまで時間がかかる画面。出るまで見直す。
+                L.extend(_robin_assert_wait(text, inner, m, cols, _tmo))
+            else:
+                L.extend(_robin_act([], "exists", text, inner,
+                                    f"完了確認: {text}", m, cols))
             L.extend(_robin_fail(inner, _cap_vals))
             A("")
             continue

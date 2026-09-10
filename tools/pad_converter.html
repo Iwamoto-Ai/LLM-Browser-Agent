@@ -408,6 +408,40 @@ function captureNames(batch) {
 // 結果 CSV に列として残しておけば、そのまま次のバッチの明細にできる。
 // 読めなかったときは失敗として記録する。空のまま先へ進むと、
 // 次のバッチが「番号の無い行」を処理しようとして原因が分かりにくい。
+// 文字が出るまで待ってから確認する。
+// 実サイトは、押してからサーバーの処理が終わるまで時間がかかる場面がある。
+// 要求 ID のポップアップのように、押した直後にはまだ出ていないものは
+// 1 回見ただけでは失敗になる。1 秒ごとに見直して、出たら先へ進む。
+function robinAssertWait(text, indent, stepNo, cols, timeout) {
+  var val = toRobinVar(text, cols);
+  var bodyArgs = pyJson([[], "exists", val]);
+  var note = val.split("'").join("").split("[").join("").split("]").join("");
+  return [
+    indent + "# [" + stepNo + "] 完了確認: " + note + "（最大 " + timeout + " 秒待つ）",
+    indent + "SET AstFound TO False",
+    indent + "SET AstWaited TO 0",
+    indent + "LOOP WHILE AstFound = False AND AstWaited < " + timeout,
+    indent + "    SET ActBody TO $'''{\"script\": \"%JsAct%\", \"args\": " +
+      bodyArgs + "}'''",
+    web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent + "    "),
+    indent + "    IF ActStatus = 200 THEN",
+    indent + "        Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj",
+    indent + "        IF ActObj['value']['ok'] = True THEN",
+    indent + "            SET AstFound TO True",
+    indent + "        END",
+    indent + "    END",
+    indent + "    IF AstFound = False THEN",
+    indent + "        WAIT 1",
+    indent + "        SET AstWaited TO AstWaited + 1",
+    indent + "    END",
+    indent + "END",
+    indent + "IF AstFound = False THEN",
+    indent + "    SET RowError TO " + robinStr("ステップ" + stepNo + "（完了確認: " +
+      note + "）画面に文字列がありません（" + timeout + " 秒待機）"),
+    indent + "END"
+  ];
+}
+
 function robinCapture(cands, varName, indent, stepNo, note, cols, extract) {
   cands = robinFilterCandidates(cands).map(function (c) { return toRobinVar(c, cols); });
   note = toRobinVar(note, cols).split("'").join("").split("[").join("").split("]").join("");
@@ -2018,7 +2052,13 @@ function buildRobin(batch, opt) {
       m += 1;
       var atext = lst.text || "";
       A(inner + "# 完了確認。「ボタンは押せたが実際には処理されていない」を検知する。");
-      L = L.concat(robinAct([], "exists", atext, inner, "完了確認: " + atext, m, cols));
+      var tmo = parseInt(lst.timeout, 10) || 0;
+      if (tmo > 0) {
+        // 押してから出るまで時間がかかる画面。出るまで見直す。
+        L = L.concat(robinAssertWait(atext, inner, m, cols, tmo));
+      } else {
+        L = L.concat(robinAct([], "exists", atext, inner, "完了確認: " + atext, m, cols));
+      }
       L = L.concat(robinFail(inner, capVals));
       A("");
       continue;

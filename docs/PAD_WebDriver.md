@@ -543,6 +543,15 @@ SET ShotNameFmt TO $'''【注文受諾】@ID@_〇〇株式会社'''
 | `setViewport` | ウィンドウサイズ | `{"type": "setViewport", "width": 1366, "height": 900}` |
 | `screenshot` | **エビデンスを保存する** | `{"type": "screenshot", "name": "受諾完了"}` |
 | `assertText` | 画面に文字があるか確認 | `{"type": "assertText", "text": "発行しました"}` |
+
+**押してから出るまで時間がかかる画面**では、`timeout` を付ける。
+
+```json
+{"type": "assertText", "text": "要求IDは", "timeout": 60}
+```
+
+1 秒ごとに見直して、出たら先へ進む。**サーバーの処理を待つ画面では必須。**
+付けないと 1 回見ただけで失敗になる。
 | `download` | **ダウンロードして保存する** | `{"type": "download", "selectors": [["#OutputIcon0"]], "name": "【一覧】{{プロジェクト番号}}"}` |
 | `capture` | **画面の値を読み取って記録する** | `{"type": "capture", "selectors": [["#ShipDoneNo"]], "name": "要求ID"}` |
 | `comment` | 生成コードにメモを残す | `{"type": "comment", "text": "受諾を開始"}` |
