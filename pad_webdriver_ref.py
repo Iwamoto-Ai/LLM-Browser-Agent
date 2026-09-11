@@ -110,9 +110,10 @@ function findIn(doc, sel) {
       var key = sel.slice(4).trim();
       var rows = doc.querySelectorAll(`tr`);
       for (var r = 0; r < rows.length; r++) {
-        var txt = rows[r].innerText || rows[r].textContent || ``;
+        var txt = (rows[r].innerText || ``) + (rows[r].textContent || ``);
         if (txt.indexOf(key) < 0) { continue; }
-        var hit = rows[r].querySelector(`a, img, button, input[type=image]`);
+        var hit = rows[r].querySelector(`a[href], button, input[type=image]`);
+        if (!hit) { hit = rows[r].querySelector(`a, img`); }
         if (hit) { return hit; }
       }
       return null;
@@ -129,12 +130,29 @@ function find(sel) {
   }
   return null;
 }
+if (action === `scroll`) {
+  var docs = allDocs();
+  var moved = 0;
+  for (var j = 0; j < docs.length; j++) {
+    var all = docs[j].querySelectorAll(`div, table, tbody`);
+    for (var k = 0; k < all.length; k++) {
+      var el = all[k];
+      if (el.scrollHeight > el.clientHeight + 10 && el.clientHeight > 40) {
+        var before = el.scrollTop;
+        el.scrollTop = before + el.clientHeight;
+        if (el.scrollTop !== before) { moved = moved + 1; }
+      }
+    }
+    if (docs[j].defaultView) { docs[j].defaultView.scrollBy(0, 400); }
+  }
+  return { ok: true, used: null, moved: moved };
+}
 if (action === `exists`) {
   var docs = allDocs();
   var txt = ``;
   for (var j = 0; j < docs.length; j++) {
     var b = docs[j].body || docs[j].documentElement;
-    if (b) { txt = txt + ((b.innerText || b.textContent) || ``); }
+    if (b) { txt = txt + (b.innerText || ``) + (b.textContent || ``); }
   }
   return { ok: txt.indexOf(value) >= 0, used: null };
 }
@@ -708,6 +726,64 @@ def _robin_assert_wait(text: str, indent: str, step_no: int,
         f"{indent}    SET RowError TO {_ng}",
         f"{indent}END",
     ]
+
+
+def _robin_scroll_until(text: str, indent: str, step_no: int,
+                        cols: list, tries: int) -> list:
+    """文字が見つかるまでスクロールして探す。
+
+    実 EDI の要求要約表は、スクロールしないと次の行が読み込まれない。
+    一覧に検索欄も件数を増やす設定も無いので、目的の行が下の方にあると
+    どうやっても見つからない。少しずつ下げながら、出てくるまで探す。
+
+    **遡れる範囲には限りがある。** 新しい順に並ぶ一覧で他の人の分も積まれる
+    画面では、時間が経つと現実的に届かなくなる。記録した番号を使う処理は、
+    間を空けずに流すのが前提。
+    """
+    val = _to_robin_var(text, cols)
+    note = val.replace("'", "").replace("[", "").replace("]", "")
+    find_args = json.dumps([[], "exists", val], ensure_ascii=False)
+    scroll_args = json.dumps([[], "scroll", ""], ensure_ascii=False)
+    _ng = _robin_str("ステップ%d（探す: %s）%d 回スクロールしても見つかりません"
+                     % (step_no, note, tries))
+
+    def _body(args: str, ind: str) -> str:
+        """本文を組み立てる。エスケープは他の生成箇所と同じ書き方にそろえる。
+        流用元は indent + 4 で出すので、その分を引いて渡す。"""
+        body_args = args
+        indent = ind[:-4] if len(ind) >= 4 else ind
+        return f"{indent}    SET ActBody TO $'''{{\"script\": \"%JsAct%\", \"args\": {body_args}}}'''"
+
+    L = [
+        f"{indent}# [{step_no}] 見つかるまでスクロールして探す: {note}（最大 {tries} 回）",
+        f"{indent}SET SclFound TO False",
+        f"{indent}SET SclTries TO 0",
+        f"{indent}LOOP WHILE SclFound = False AND SclTries < {tries}",
+    ]
+    L.append(_body(find_args, indent + "    "))
+    L.extend([
+        _web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent + "    "),
+        f"{indent}    IF ActStatus = 200 THEN",
+        f"{indent}        Variables.ConvertJsonToCustomObject Json: ActResp "
+        f"CustomObject=> ActObj",
+        f"{indent}        IF ActObj['value']['ok'] = True THEN",
+        f"{indent}            SET SclFound TO True",
+        f"{indent}        END",
+        f"{indent}    END",
+        f"{indent}    IF SclFound = False THEN",
+    ])
+    L.append(_body(scroll_args, indent + "        "))
+    L.extend([
+        _web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent + "        "),
+        f"{indent}        WAIT 1",
+        f"{indent}        SET SclTries TO SclTries + 1",
+        f"{indent}    END",
+        f"{indent}END",
+        f"{indent}IF SclFound = False THEN",
+        f"{indent}    SET RowError TO {_ng}",
+        f"{indent}END",
+    ])
+    return L
 
 
 def _robin_capture(cands: list, var: str, indent: str, step_no: int,
@@ -1749,6 +1825,9 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     else:
         A(f"{inner}    # ★ 復帰手順が定義されていない。batch に recover を追加すること。")
         A(f"{inner}    #   このままでは 1 件失敗すると以降が連鎖して失敗する。")
+    A(f"{inner}    # 復帰の直後は画面がまだ切り替わりきっていないことがある。")
+    A(f"{inner}    # 実 EDI では、戻った直後にメニューを押そうとして空振りした。")
+    A(f"{inner}    WAIT 2")
     A(f"{inner}    SET PrevFailed TO False")
     A(f"{inner}END")
     A(f"{inner}# 悲観的に置く。最後まで通れば False に戻る（フラグを立てる箇所が 1 行で済む）")
@@ -1784,6 +1863,15 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             A(f"{inner}# デスクトップや他ウィンドウは写らず、フォーカスにも依存しない。")
             A(f"{inner}# 逆にスクロールしないと見えない範囲は写らない点に注意。")
             L.extend(_robin_shot(inner, "ShotPath"))
+            A("")
+            continue
+        if t == "scrollFind":
+            m += 1
+            text = st.get("text", "")
+            A(f"{inner}# 一覧に検索欄が無い画面で、目的の行を探す。")
+            L.extend(_robin_scroll_until(text, inner, m, cols,
+                                         int(st.get("tries", 20) or 20)))
+            L.extend(_robin_fail(inner, _cap_vals))
             A("")
             continue
         if t == "capture":
@@ -2016,7 +2104,7 @@ def _use_utf8_stdout() -> None:
 SECTION_STEPS = {
     "setup": {"comment", "setViewport", "navigate", "click", "doubleClick", "change"},
     "loop": {"comment", "screenshot", "assertText", "click", "doubleClick", "change",
-             "download", "capture"},
+             "download", "capture", "scrollFind"},
     "recover": {"comment", "navigate", "click", "doubleClick", "change"},
     "teardown": {"comment", "click", "doubleClick", "change"},
 }
