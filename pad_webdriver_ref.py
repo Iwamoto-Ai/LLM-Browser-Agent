@@ -73,28 +73,42 @@ JS_ACT = r"""
 var cands = arguments[0], action = arguments[1], value = arguments[2];
 var Q = String.fromCharCode(39), DQ = String.fromCharCode(34);
 function lit(s) { if (s.indexOf(Q) < 0) { return Q + s + Q; } return DQ + s + DQ; }
-function byXPath(xp) {
-  try { return document.evaluate(xp, document, null, 9, null).singleNodeValue; }
+function docsOf(root, out) {
+  out.push(root);
+  var fs;
+  try { fs = root.querySelectorAll(`iframe, frame`); } catch (e) { return out; }
+  for (var k = 0; k < fs.length; k++) {
+    var d = null;
+    try { d = fs[k].contentDocument; } catch (e) { d = null; }
+    if (d && out.indexOf(d) < 0) { docsOf(d, out); }
+  }
+  return out;
+}
+function allDocs() {
+  try { return docsOf(document, []); } catch (e) { return [document]; }
+}
+function byXPath(doc, xp) {
+  try { return doc.evaluate(xp, doc, null, 9, null).singleNodeValue; }
   catch (e) { return null; }
 }
-function find(sel) {
+function findIn(doc, sel) {
   try {
-    if (sel.indexOf(`id/`) === 0) { return document.getElementById(sel.slice(3)); }
-    if (sel.indexOf(`xpath/`) === 0) { return byXPath(sel.slice(6)); }
+    if (sel.indexOf(`id/`) === 0) { return doc.getElementById(sel.slice(3)); }
+    if (sel.indexOf(`xpath/`) === 0) { return byXPath(doc, sel.slice(6)); }
     if (sel.indexOf(`text/`) === 0) {
       var t = sel.slice(5).trim();
-      return byXPath(`//*[not(self::script) and normalize-space(text())=` + lit(t) + `]`);
+      return byXPath(doc, `//*[not(self::script) and normalize-space(text())=` + lit(t) + `]`);
     }
     if (sel.indexOf(`aria/`) === 0) {
       var n = sel.slice(5).split(`[`)[0].trim();
-      var el = document.querySelector(`[aria-label=` + lit(n) + `]`);
+      var el = doc.querySelector(`[aria-label=` + lit(n) + `]`);
       if (el) { return el; }
-      return byXPath(`//*[not(self::script) and (@aria-label=` + lit(n)
+      return byXPath(doc, `//*[not(self::script) and (@aria-label=` + lit(n)
                      + ` or @title=` + lit(n) + ` or normalize-space(text())=` + lit(n) + `)]`);
     }
     if (sel.indexOf(`row/`) === 0) {
       var key = sel.slice(4).trim();
-      var rows = document.querySelectorAll(`tr`);
+      var rows = doc.querySelectorAll(`tr`);
       for (var r = 0; r < rows.length; r++) {
         var txt = rows[r].innerText || rows[r].textContent || ``;
         if (txt.indexOf(key) < 0) { continue; }
@@ -104,12 +118,24 @@ function find(sel) {
       return null;
     }
     if (sel.indexOf(`pierce/`) === 0) { sel = sel.slice(7); }
-    return document.querySelector(sel);
+    return doc.querySelector(sel);
   } catch (e) { return null; }
 }
+function find(sel) {
+  var docs = allDocs();
+  for (var j = 0; j < docs.length; j++) {
+    var hit = findIn(docs[j], sel);
+    if (hit) { return hit; }
+  }
+  return null;
+}
 if (action === `exists`) {
-  var body = document.body || document.documentElement;
-  var txt = (body && (body.innerText || body.textContent)) || ``;
+  var docs = allDocs();
+  var txt = ``;
+  for (var j = 0; j < docs.length; j++) {
+    var b = docs[j].body || docs[j].documentElement;
+    if (b) { txt = txt + ((b.innerText || b.textContent) || ``); }
+  }
   return { ok: txt.indexOf(value) >= 0, used: null };
 }
 for (var i = 0; i < cands.length; i++) {
@@ -644,6 +670,44 @@ def _capture_names(batch: dict) -> list:
             if nm not in out:
                 out.append(nm)
     return out
+
+
+def _robin_assert_wait(text: str, indent: str, step_no: int,
+                       cols: list, timeout: int) -> list:
+    """文字が出るまで待ってから確認する。
+
+    実サイトは、押してからサーバーの処理が終わるまで時間がかかる場面がある。
+    要求 ID のポップアップのように、押した直後にはまだ出ていないものは
+    1 回見ただけでは失敗になる。1 秒ごとに見直して、出たら先へ進む。
+    """
+    val = _to_robin_var(text, cols)
+    body_args = json.dumps([[], "exists", val], ensure_ascii=False)
+    note = val.replace("'", "").replace("[", "").replace("]", "")
+    _ng = _robin_str("ステップ%d（完了確認: %s）画面に文字列がありません（%d 秒待機）"
+                     % (step_no, note, timeout))
+    return [
+        f"{indent}# [{step_no}] 完了確認: {note}（最大 {timeout} 秒待つ）",
+        f"{indent}SET AstFound TO False",
+        f"{indent}SET AstWaited TO 0",
+        f"{indent}LOOP WHILE AstFound = False AND AstWaited < {timeout}",
+        f"{indent}    SET ActBody TO $'''{{\"script\": \"%JsAct%\", \"args\": {body_args}}}'''",
+        _web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent + "    "),
+        f"{indent}    IF ActStatus = 200 THEN",
+        f"{indent}        Variables.ConvertJsonToCustomObject Json: ActResp "
+        f"CustomObject=> ActObj",
+        f"{indent}        IF ActObj['value']['ok'] = True THEN",
+        f"{indent}            SET AstFound TO True",
+        f"{indent}        END",
+        f"{indent}    END",
+        f"{indent}    IF AstFound = False THEN",
+        f"{indent}        WAIT 1",
+        f"{indent}        SET AstWaited TO AstWaited + 1",
+        f"{indent}    END",
+        f"{indent}END",
+        f"{indent}IF AstFound = False THEN",
+        f"{indent}    SET RowError TO {_ng}",
+        f"{indent}END",
+    ]
 
 
 def _robin_capture(cands: list, var: str, indent: str, step_no: int,
@@ -1748,8 +1812,13 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             m += 1
             text = st.get("text", "")
             A(f"{inner}# 完了確認。「ボタンは押せたが実際には処理されていない」を検知する。")
-            L.extend(_robin_act([], "exists", text, inner,
-                                f"完了確認: {text}", m, cols))
+            _tmo = int(st.get("timeout", 0) or 0)
+            if _tmo > 0:
+                # 押してから出るまで時間がかかる画面。出るまで見直す。
+                L.extend(_robin_assert_wait(text, inner, m, cols, _tmo))
+            else:
+                L.extend(_robin_act([], "exists", text, inner,
+                                    f"完了確認: {text}", m, cols))
             L.extend(_robin_fail(inner, _cap_vals))
             A("")
             continue

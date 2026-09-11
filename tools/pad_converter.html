@@ -169,28 +169,42 @@ var JS_ACT = [
 "var cands = arguments[0], action = arguments[1], value = arguments[2];",
 "var Q = String.fromCharCode(39), DQ = String.fromCharCode(34);",
 "function lit(s) { if (s.indexOf(Q) < 0) { return Q + s + Q; } return DQ + s + DQ; }",
-"function byXPath(xp) {",
-"  try { return document.evaluate(xp, document, null, 9, null).singleNodeValue; }",
+"function docsOf(root, out) {",
+"  out.push(root);",
+"  var fs;",
+"  try { fs = root.querySelectorAll(`iframe, frame`); } catch (e) { return out; }",
+"  for (var k = 0; k < fs.length; k++) {",
+"    var d = null;",
+"    try { d = fs[k].contentDocument; } catch (e) { d = null; }",
+"    if (d && out.indexOf(d) < 0) { docsOf(d, out); }",
+"  }",
+"  return out;",
+"}",
+"function allDocs() {",
+"  try { return docsOf(document, []); } catch (e) { return [document]; }",
+"}",
+"function byXPath(doc, xp) {",
+"  try { return doc.evaluate(xp, doc, null, 9, null).singleNodeValue; }",
 "  catch (e) { return null; }",
 "}",
-"function find(sel) {",
+"function findIn(doc, sel) {",
 "  try {",
-"    if (sel.indexOf(`id/`) === 0) { return document.getElementById(sel.slice(3)); }",
-"    if (sel.indexOf(`xpath/`) === 0) { return byXPath(sel.slice(6)); }",
+"    if (sel.indexOf(`id/`) === 0) { return doc.getElementById(sel.slice(3)); }",
+"    if (sel.indexOf(`xpath/`) === 0) { return byXPath(doc, sel.slice(6)); }",
 "    if (sel.indexOf(`text/`) === 0) {",
 "      var t = sel.slice(5).trim();",
-"      return byXPath(`//*[not(self::script) and normalize-space(text())=` + lit(t) + `]`);",
+"      return byXPath(doc, `//*[not(self::script) and normalize-space(text())=` + lit(t) + `]`);",
 "    }",
 "    if (sel.indexOf(`aria/`) === 0) {",
 "      var n = sel.slice(5).split(`[`)[0].trim();",
-"      var el = document.querySelector(`[aria-label=` + lit(n) + `]`);",
+"      var el = doc.querySelector(`[aria-label=` + lit(n) + `]`);",
 "      if (el) { return el; }",
-"      return byXPath(`//*[not(self::script) and (@aria-label=` + lit(n)",
+"      return byXPath(doc, `//*[not(self::script) and (@aria-label=` + lit(n)",
 "                     + ` or @title=` + lit(n) + ` or normalize-space(text())=` + lit(n) + `)]`);",
 "    }",
 "    if (sel.indexOf(`row/`) === 0) {",
 "      var key = sel.slice(4).trim();",
-"      var rows = document.querySelectorAll(`tr`);",
+"      var rows = doc.querySelectorAll(`tr`);",
 "      for (var r = 0; r < rows.length; r++) {",
 "        var txt = rows[r].innerText || rows[r].textContent || ``;",
 "        if (txt.indexOf(key) < 0) { continue; }",
@@ -200,12 +214,24 @@ var JS_ACT = [
 "      return null;",
 "    }",
 "    if (sel.indexOf(`pierce/`) === 0) { sel = sel.slice(7); }",
-"    return document.querySelector(sel);",
+"    return doc.querySelector(sel);",
 "  } catch (e) { return null; }",
 "}",
+"function find(sel) {",
+"  var docs = allDocs();",
+"  for (var j = 0; j < docs.length; j++) {",
+"    var hit = findIn(docs[j], sel);",
+"    if (hit) { return hit; }",
+"  }",
+"  return null;",
+"}",
 "if (action === `exists`) {",
-"  var body = document.body || document.documentElement;",
-"  var txt = (body && (body.innerText || body.textContent)) || ``;",
+"  var docs = allDocs();",
+"  var txt = ``;",
+"  for (var j = 0; j < docs.length; j++) {",
+"    var b = docs[j].body || docs[j].documentElement;",
+"    if (b) { txt = txt + ((b.innerText || b.textContent) || ``); }",
+"  }",
 "  return { ok: txt.indexOf(value) >= 0, used: null };",
 "}",
 "for (var i = 0; i < cands.length; i++) {",
@@ -408,6 +434,40 @@ function captureNames(batch) {
 // 結果 CSV に列として残しておけば、そのまま次のバッチの明細にできる。
 // 読めなかったときは失敗として記録する。空のまま先へ進むと、
 // 次のバッチが「番号の無い行」を処理しようとして原因が分かりにくい。
+// 文字が出るまで待ってから確認する。
+// 実サイトは、押してからサーバーの処理が終わるまで時間がかかる場面がある。
+// 要求 ID のポップアップのように、押した直後にはまだ出ていないものは
+// 1 回見ただけでは失敗になる。1 秒ごとに見直して、出たら先へ進む。
+function robinAssertWait(text, indent, stepNo, cols, timeout) {
+  var val = toRobinVar(text, cols);
+  var bodyArgs = pyJson([[], "exists", val]);
+  var note = val.split("'").join("").split("[").join("").split("]").join("");
+  return [
+    indent + "# [" + stepNo + "] 完了確認: " + note + "（最大 " + timeout + " 秒待つ）",
+    indent + "SET AstFound TO False",
+    indent + "SET AstWaited TO 0",
+    indent + "LOOP WHILE AstFound = False AND AstWaited < " + timeout,
+    indent + "    SET ActBody TO $'''{\"script\": \"%JsAct%\", \"args\": " +
+      bodyArgs + "}'''",
+    web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent + "    "),
+    indent + "    IF ActStatus = 200 THEN",
+    indent + "        Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj",
+    indent + "        IF ActObj['value']['ok'] = True THEN",
+    indent + "            SET AstFound TO True",
+    indent + "        END",
+    indent + "    END",
+    indent + "    IF AstFound = False THEN",
+    indent + "        WAIT 1",
+    indent + "        SET AstWaited TO AstWaited + 1",
+    indent + "    END",
+    indent + "END",
+    indent + "IF AstFound = False THEN",
+    indent + "    SET RowError TO " + robinStr("ステップ" + stepNo + "（完了確認: " +
+      note + "）画面に文字列がありません（" + timeout + " 秒待機）"),
+    indent + "END"
+  ];
+}
+
 function robinCapture(cands, varName, indent, stepNo, note, cols, extract) {
   cands = robinFilterCandidates(cands).map(function (c) { return toRobinVar(c, cols); });
   note = toRobinVar(note, cols).split("'").join("").split("[").join("").split("]").join("");
@@ -2018,7 +2078,13 @@ function buildRobin(batch, opt) {
       m += 1;
       var atext = lst.text || "";
       A(inner + "# 完了確認。「ボタンは押せたが実際には処理されていない」を検知する。");
-      L = L.concat(robinAct([], "exists", atext, inner, "完了確認: " + atext, m, cols));
+      var tmo = parseInt(lst.timeout, 10) || 0;
+      if (tmo > 0) {
+        // 押してから出るまで時間がかかる画面。出るまで見直す。
+        L = L.concat(robinAssertWait(atext, inner, m, cols, tmo));
+      } else {
+        L = L.concat(robinAct([], "exists", atext, inner, "完了確認: " + atext, m, cols));
+      }
       L = L.concat(robinFail(inner, capVals));
       A("");
       continue;

@@ -12,7 +12,7 @@
 ## 📖 目次
 
 **設計**　[🔌 使う HTTP 呼び出しは 6 種類だけ](#-使う-http-呼び出しは-6-種類だけ) / [📜 共通 JavaScript（変数 `%JsAct%` に入れておく）](#-共通-javascript変数-jsact-に入れておく) / [🔁 フローの組み立て](#-フローの組み立て) / [📸 エビデンスの撮り方](#-エビデンスの撮り方) / [🔐 資格情報を「読まない」設計](#-資格情報を読まない設計) / [🔄 WebDriver の自動取得](#-webdriver-の自動取得) / [📥 ファイルのダウンロード（エビデンスが画面に出ない場合）](#-ファイルのダウンロードエビデンスが画面に出ない場合) / [🕒 日時とファイル名](#-日時とファイル名)
-**実機で分かったこと**　[⚠️ Web.InvokeWebService の引数（最重要）](#-webinvokewebservice-の引数最重要) / [🩺 WebDriver の応答を先に見る](#-webdriver-の応答を先に見る) / [🧪 バッチ定義を練習サイトで再生する](#-バッチ定義を練習サイトで再生する) / [📌 Robin リテラルのエスケープ（実機で判明）](#-robin-リテラルのエスケープ実機で判明) / [✅ 実機で確認できたアクション書式（PAD 無料版 / Windows 11）](#-実機で確認できたアクション書式pad-無料版--windows-11)
+**実機で分かったこと**　[⚠️ Web.InvokeWebService の引数（最重要）](#-webinvokewebservice-の引数最重要) / [🩺 WebDriver の応答を先に見る](#-webdriver-の応答を先に見る) / [🖼 iframe の中も見る](#-iframe-の中も見る) / [🧪 バッチ定義を練習サイトで再生する](#-バッチ定義を練習サイトで再生する) / [📌 Robin リテラルのエスケープ（実機で判明）](#-robin-リテラルのエスケープ実機で判明) / [✅ 実機で確認できたアクション書式（PAD 無料版 / Windows 11）](#-実機で確認できたアクション書式pad-無料版--windows-11)
 **Python 版限定**　[📄 手順書の自動生成（Pythonが使える環境で使う）](#-手順書の自動生成pythonが使える環境で使う)
 ---
 
@@ -660,6 +660,35 @@ OK  recordings/edi2_accept_batch.json → 27 ステップ通過
 あるので、PAD が出すエラーとそのまま突き合わせられる。
 
 ログインだけは人がやる部分なので、テストでは直接操作している。
+
+---
+
+## 🖼 iframe の中も見る
+
+実 EDI（Oracle EBS）のポップアップは iframe に入っている。
+
+```html
+<span id="defaultDialogPopup">
+  <iframe id="iframedefaultDialogPopup"
+          src="…region=/oracle/apps/fnd/framework/webui/OADialogPopupRN…">
+```
+
+`document.body.innerText` には**中身が入らない。** 要求 ID のメッセージを
+いくら待っても見つからず、`#OADialogPopupRN` を指定しても外側には存在しない。
+
+同じオリジンなら `contentDocument` で中へ入れる。共通 JavaScript は
+**すべてのフレームを順に見る。**
+
+```
+docsOf(document, [])   → [外側, iframe の中, さらにその中 …]
+```
+
+読めないフレーム（別オリジン）は黙って飛ばす。要素を探すときも、画面の文字を
+数えるときも、同じ一覧を使う。
+
+**WebDriver のフレーム切り替え（`POST /session/{id}/frame`）は使っていない。**
+切り替えると元に戻す処理が要り、どのフレームにいるかを追う必要が出る。
+JavaScript の中で完結させたほうが単純で、失敗しても元の状態が壊れない。
 
 ---
 

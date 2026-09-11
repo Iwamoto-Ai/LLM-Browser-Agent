@@ -798,3 +798,18 @@ def test_practice_batches_chain_columns(tmp_path):
     missing = want - have
     assert not missing, ('③が使う列が②の結果 CSV に無い: ' + str(sorted(missing)) +
                          ' / ②の見出し: ' + str(sorted(have)))
+
+
+def test_shared_js_looks_into_iframes():
+    """共通 JavaScript が iframe の中も見ること。
+
+    実 EDI のポップアップは iframe に入っている。要求 ID のメッセージも
+    その中なので、外側の body だけ見ても永久に見つからない。同じオリジンなら
+    contentDocument で中へ入れる。読めないフレームは黙って飛ばす。
+    """
+    js = pad.js_act_oneline()
+    assert "contentDocument" in js
+    assert "allDocs" in js
+    # リテラルを壊す文字が入っていないこと
+    assert chr(92) not in js
+    assert chr(34) not in js
