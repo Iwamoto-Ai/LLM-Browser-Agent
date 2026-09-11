@@ -763,6 +763,11 @@ def test_row_selector_in_shared_js():
     js = pad.js_act_oneline()
     assert "row/" in js
     assert "querySelectorAll(`tr`)" in js
+    # 押せるリンクを選ぶ。実 EDI の要求要約表は行の先頭に中身も href も無い
+    # <a class="xh"></a> があり、それを押しても何も起きない。
+    assert "a[href]" in js
+    # 隠れている部分も数える。スクロール式の表は画面外の行が innerText に出ない。
+    assert "textContent" in js
     # リテラルを壊す文字が入っていないこと
     assert chr(92) not in js
     assert chr(34) not in js
@@ -813,3 +818,39 @@ def test_shared_js_looks_into_iframes():
     # リテラルを壊す文字が入っていないこと
     assert chr(92) not in js
     assert chr(34) not in js
+
+
+def test_scroll_find(tmp_path):
+    """見つかるまでスクロールして探せること。
+
+    実 EDI の要求要約表は、スクロールしないと次の行が読み込まれない。
+    検索欄も件数を増やす設定も無いので、目的の行が下にあると届かない。
+    """
+    batch = {"title": "s", "setup": [{"type": "navigate", "url": "http://x/"}],
+             "loop": [{"type": "scrollFind", "text": "{{要求ID}}", "tries": 30}]}
+    out = pad.write_robin(batch, r"C:\t\d.csv", "ID",
+                          str(tmp_path / "f.robin.txt"))
+    txt = open(out, encoding="utf-8").read()
+    assert "LOOP WHILE SclFound = False AND SclTries < 30" in txt
+    assert chr(34) + "scroll" + chr(34) in txt
+    assert "scrollTop" in pad.js_act_oneline()
+
+
+def test_recover_waits(tmp_path):
+    """復帰したあと、画面が落ち着くのを待つこと。
+
+    実 EDI では、戻った直後にメニューを押そうとして空振りした。
+    起点に戻れていて押したい項目も見えているのに、切り替わりきっていなかった。
+    """
+    batch = {"title": "r", "originHint": "起点",
+             "setup": [{"type": "navigate", "url": "http://x/"},
+                       {"type": "click", "selectors": [["#home"]]}],
+             "loop": [{"type": "click", "selectors": [["#a"]]}],
+             "recover": [{"type": "click", "selectors": [["#home"]]}]}
+    out = pad.write_robin(batch, r"C:\t\d.csv", "ID",
+                          str(tmp_path / "f.robin.txt"))
+    txt = open(out, encoding="utf-8").read()
+    # 最初の一致は件数カウンタの初期化。復帰ブロックの中を見る。
+    i = txt.index("復帰の直後は画面がまだ切り替わりきっていないことがある")
+    assert "WAIT 2" in txt[i:i + 300]
+    assert "SET PrevFailed TO False" in txt[i:i + 300]
