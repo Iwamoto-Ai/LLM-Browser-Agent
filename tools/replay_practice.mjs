@@ -95,12 +95,25 @@ for (const rel of targets) {
     let r;
     if (st.type === "capture") {
       // 画面から読み取った値は、後続の {{名前}} に渡る（PAD では結果 CSV 経由）
-      r = act(cands, "text", "");
+      if (st.key) {
+        // キーで場所を決める。生成物と同じく、画面の文字からキーの直後を取り出す
+        r = act([], st.extract === "digits" ? "afterDigits" : "after", fill(st.key));
+      } else {
+        r = act(cands, "text", "");
+      }
       if (r && r.ok) {
         let v = r.text;
-        if (st.extract === "digits") { v = v.replace(/[^0-9]/g, ""); }
+        if (st.extract === "digits" && !st.key) { v = v.replace(/[^0-9]/g, ""); }
         row[st.name] = v;
         carried[st.name] = v;
+      }
+    } else if (st.type === "scrollFind") {
+      // 見つかるまで少しずつ下げながら探す（生成物と同じ回数まで）
+      const tries = parseInt(st.tries, 10) || 20;
+      for (let k = 0; k <= tries; k++) {
+        r = act([], "exists", fill(st.text));
+        if (r && r.ok) { break; }
+        act([], "scroll", "");
       }
     } else if (st.type === "assertText") {
       r = act([], "exists", fill(st.text));
