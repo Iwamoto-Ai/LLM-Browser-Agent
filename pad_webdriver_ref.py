@@ -147,6 +147,41 @@ if (action === `scroll`) {
   }
   return { ok: true, used: null, moved: moved };
 }
+if (action === `after` || action === `afterDigits`) {
+  var docs = allDocs();
+  var src = ``;
+  for (var j = 0; j < docs.length; j++) {
+    var b = docs[j].body || docs[j].documentElement;
+    if (b) { src = src + (b.innerText || ``) + ` ` + (b.textContent || ``) + ` `; }
+  }
+  var at = value ? src.indexOf(value) : -1;
+  if (at < 0) { return { ok: false, used: null }; }
+  var rest = src.slice(at + value.length, at + value.length + 80);
+  var out = ``;
+  var p = 0;
+  if (action === `afterDigits`) {
+    var isNum = function (c) { return c >= `0` && c <= `9`; };
+    while (p < rest.length && p < 10 && !isNum(rest.charAt(p))) { p = p + 1; }
+    while (p < rest.length && isNum(rest.charAt(p))) {
+      out = out + rest.charAt(p);
+      p = p + 1;
+    }
+  } else {
+    var skip = `:：=　`;
+    var blank = function (c) { return c.charCodeAt(0) <= 32; };
+    while (p < rest.length && (blank(rest.charAt(p)) || skip.indexOf(rest.charAt(p)) >= 0)) {
+      p = p + 1;
+    }
+    var stop = `。、　`;
+    while (p < rest.length && out.length < 50 && !blank(rest.charAt(p)) &&
+           stop.indexOf(rest.charAt(p)) < 0) {
+      out = out + rest.charAt(p);
+      p = p + 1;
+    }
+  }
+  if (!out) { return { ok: false, used: null }; }
+  return { ok: true, used: null, text: out };
+}
 if (action === `exists`) {
   var docs = allDocs();
   var txt = ``;
@@ -787,20 +822,36 @@ def _robin_scroll_until(text: str, indent: str, step_no: int,
 
 
 def _robin_capture(cands: list, var: str, indent: str, step_no: int,
-                   note: str, cols: list, extract: str = "") -> list:
+                   note: str, cols: list, extract: str = "",
+                   key: str = "") -> list:
     """画面の文字を読み取って変数に入れる。
 
     登録の結果として発番される番号（要求 ID など）は、次の処理で使う。
     結果 CSV に列として残しておけば、そのまま次のバッチの明細にできる。
     読めなかったときは失敗として記録する。空のまま先へ進むと、
-    次のバッチが「番号の無い行」を処理しようとして原因が分かりにくい。"""
+    次のバッチが「番号の無い行」を処理しようとして原因が分かりにくい。
+
+    key を渡すと、要素ではなく**画面の文字**で場所を決める。画面全体
+    （iframe の中も）から key を探し、その直後を取り出す。ポップアップの
+    ように要素の指定が分かりにくいものでも、見えている文字で指せる。
+      extract="digits" … 直後の最初の数字の連続（他の数字が混ざらない）
+      それ以外        … 直後から、空白・改行・「。」「、」まで（最大 50 字）
+    """
     cands = [_to_robin_var(c, cols) for c in _robin_filter_candidates(cands)]
     note = _to_robin_var(note, cols).replace("'", "").replace("[", "").replace("]", "")
-    body_args = json.dumps([cands, "text", ""], ensure_ascii=False)
+    if key:
+        act = "afterDigits" if extract == "digits" else "after"
+        body_args = json.dumps([[], act, _to_robin_var(key, cols)], ensure_ascii=False)
+    else:
+        body_args = json.dumps([cands, "text", ""], ensure_ascii=False)
     _err_http = _robin_str("ステップ%d（%s）で WebDriver がエラーを返しました"
                            "（HTTP %%ActStatus%%）" % (step_no, note))
-    _err_find = _robin_str("ステップ%d（%s）で読み取る場所が見つかりません"
-                           % (step_no, note))
+    _err_find = _robin_str(("ステップ%d（%s）で「%s」の後に読み取る文字がありません"
+                            % (step_no, note, _to_robin_var(key, cols)
+                               .replace("'", "")))
+                           if key else
+                           ("ステップ%d（%s）で読み取る場所が見つかりません"
+                            % (step_no, note)))
     L = [
         f"{indent}# [{step_no}] {note}",
         f"{indent}SET ActBody TO $'''{{\"script\": \"%JsAct%\", \"args\": {body_args}}}'''",
@@ -818,8 +869,8 @@ def _robin_capture(cands: list, var: str, indent: str, step_no: int,
         f"{indent}    END",
         f"{indent}END",
     ]
-    if extract == "digits":
-        # 文章の中から番号だけを取り出す。
+    if extract == "digits" and not key:
+        # 文章の中から番号だけを取り出す（キーを使うときは JavaScript 側で済む）。
         # 「要求IDは 131982564 です。」のように、読んだ文字がそのままでは
         # 次のバッチで使えないことがある。数字以外を落とせば番号だけ残る。
         L.append(f"{indent}# 数字以外を落として番号だけにする")
@@ -1882,7 +1933,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             A(f"{inner}# 次のバッチはこの CSV をそのまま明細として読める。")
             L.extend(_robin_capture(cands, f"Cap{caps.index(nm) + 1}", inner, m,
                                     f"capture {nm}", cols,
-                                    str(st.get("extract", ""))))
+                                    str(st.get("extract", "")),
+                                    str(st.get("key", "") or "")))
             L.extend(_robin_fail(inner, _cap_vals))
             A("")
             continue

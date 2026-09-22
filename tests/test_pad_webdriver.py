@@ -854,3 +854,39 @@ def test_recover_waits(tmp_path):
     i = txt.index("復帰の直後は画面がまだ切り替わりきっていないことがある")
     assert "WAIT 2" in txt[i:i + 300]
     assert "SET PrevFailed TO False" in txt[i:i + 300]
+
+
+def test_capture_by_key_text(tmp_path):
+    """画面の文字（キー）を探して、その直後を記録できること。
+
+    ポップアップのように要素の指定が分かりにくいものでも、見えている文字で指せる。
+    実 EDI では要求 ID のポップアップの要素を推定で指定していて、そこでつまずいた。
+    """
+    batch = {"title": "k", "setup": [{"type": "navigate", "url": "http://x/"}],
+             "loop": [{"type": "capture", "key": "要求IDは", "extract": "digits",
+                       "name": "要求ID"},
+                      {"type": "capture", "key": "納入番号", "name": "納入番号"}]}
+    out = pad.write_robin(batch, r"C:\t\d.csv", "ID",
+                          str(tmp_path / "f.robin.txt"))
+    txt = open(out, encoding="utf-8").read()
+    q = chr(34)
+    assert "[[], " + q + "afterDigits" + q + ", " + q + "要求IDは" + q + "]" in txt
+    assert "[[], " + q + "after" + q + ", " + q + "納入番号" + q + "]" in txt
+    # キーを使うときは、数字以外を落とす後処理は要らない（JavaScript 側で済む）
+    assert "[^0-9]" not in txt
+    # 読めなかったときは、どのキーで探したかが分かるように書く
+    assert "「要求IDは」の後に読み取る文字がありません" in txt
+    # 結果 CSV の列になる
+    assert "実行日時,要求ID,納入番号" in txt
+
+
+def test_capture_key_in_shared_js():
+    """共通 JavaScript にキーの直後を取り出す手段があること。
+
+    数字だけのときは直後の最初の数字の連続だけを取る。読んだ文字の数字を
+    全部つなげると、同じ画面の発注番号などが混ざってしまう。
+    """
+    js = pad.js_act_oneline()
+    assert "afterDigits" in js
+    assert "allDocs()" in js        # iframe の中も探す
+    assert chr(92) not in js and chr(34) not in js and chr(39) not in js
