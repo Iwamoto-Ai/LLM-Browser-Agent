@@ -8,7 +8,7 @@
 // PAD で動かしたときと同じ結果になる。
 import fs from "node:fs";
 import path from "node:path";
-import { JSDOM } from "jsdom";
+import { JSDOM, VirtualConsole } from "jsdom";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const html = fs.readFileSync(path.join(ROOT, "tools/pad_converter.html"), "utf8");
@@ -46,7 +46,18 @@ for (const rel of targets) {
   const batch = ctx.PadConvert.loadRecording(
     fs.readFileSync(path.join(ROOT, rel), "utf8"));
   const site = fs.readFileSync(path.join(ROOT, "test_site/edi2/index.html"), "utf8");
-  const dom = new JSDOM(site, { runScripts: "dangerously" });
+  // jsdom が持っていない機能の知らせは出さない。それ以外のエラーはそのまま出す。
+  const vc = new VirtualConsole();
+  vc.sendTo(console, { omitJSDOMErrors: true });
+  vc.on("jsdomError", (e) => {
+    if (!/Not implemented/.test(String(e && e.message))) { console.error(e); }
+  });
+  const dom = new JSDOM(site, { runScripts: "dangerously", virtualConsole: vc });
+  // 練習サイトの Excel ダウンロードは、Blob の URL を作ってリンクを押す。
+  // jsdom には URL.createObjectURL が無く、TypeError が出て失敗したように見える
+  // （クリック自体は通っているので結果は OK）。真似だけしておく。ファイルは作らない。
+  dom.window.URL.createObjectURL = () => "blob:replay";
+  dom.window.URL.revokeObjectURL = () => {};
   const d = dom.window.document;
   // 生成物と同じ共通 JavaScript を、このページの中で使えるようにする
   const act = dom.window.eval("(function(){ return function(a,b,c){" +
