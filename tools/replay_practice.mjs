@@ -47,8 +47,12 @@ for (const rel of targets) {
     fs.readFileSync(path.join(ROOT, rel), "utf8"));
   const site = fs.readFileSync(path.join(ROOT, "test_site/edi2/index.html"), "utf8");
   // jsdom が持っていない機能の知らせは出さない。それ以外のエラーはそのまま出す。
+  // sendTo は新しい jsdom で名前が変わったので使わず、出来事を自分で受け取る
+  // （どの版でも同じように動く）。
   const vc = new VirtualConsole();
-  vc.sendTo(console, { omitJSDOMErrors: true });
+  for (const m of ["log", "info", "warn", "error"]) {
+    vc.on(m, (...args) => console[m](...args));
+  }
   vc.on("jsdomError", (e) => {
     if (!/Not implemented/.test(String(e && e.message))) { console.error(e); }
   });
