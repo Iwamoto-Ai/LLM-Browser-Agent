@@ -77,6 +77,10 @@
      例: <code>{{プロジェクト番号}}_XXPO_検収状況一覧_{{要求ID}}</code>。
      <strong>空にすると、下で決めたエビデンスのファイル名と同じ書式</strong>になります。
      拡張子はそのまま残るので付けません。</p>
+  <p class="hint"><strong>結果CSVに記録</strong>の「キー」に画面の文字（例: <code>要求IDは</code>）を
+     入れると、<strong>その直後を記録</strong>します。ポップアップの中も探します。
+     「数字だけ」なら直後の数字のまとまりだけを取ります。
+     キーは画面に 1 回しか出ない形にしてください（同じ文字が複数あると最初のものを取ります）。</p>
   <div class="hint" id="assignInfo"></div>
   <table id="assignTable"></table>
   <p class="hint">
@@ -242,6 +246,41 @@ var JS_ACT = [
 "    if (docs[j].defaultView) { docs[j].defaultView.scrollBy(0, 400); }",
 "  }",
 "  return { ok: true, used: null, moved: moved };",
+"}",
+"if (action === `after` || action === `afterDigits`) {",
+"  var docs = allDocs();",
+"  var src = ``;",
+"  for (var j = 0; j < docs.length; j++) {",
+"    var b = docs[j].body || docs[j].documentElement;",
+"    if (b) { src = src + (b.innerText || ``) + ` ` + (b.textContent || ``) + ` `; }",
+"  }",
+"  var at = value ? src.indexOf(value) : -1;",
+"  if (at < 0) { return { ok: false, used: null }; }",
+"  var rest = src.slice(at + value.length, at + value.length + 80);",
+"  var out = ``;",
+"  var p = 0;",
+"  if (action === `afterDigits`) {",
+"    var isNum = function (c) { return c >= `0` && c <= `9`; };",
+"    while (p < rest.length && p < 10 && !isNum(rest.charAt(p))) { p = p + 1; }",
+"    while (p < rest.length && isNum(rest.charAt(p))) {",
+"      out = out + rest.charAt(p);",
+"      p = p + 1;",
+"    }",
+"  } else {",
+"    var skip = `:：=　`;",
+"    var blank = function (c) { return c.charCodeAt(0) <= 32; };",
+"    while (p < rest.length && (blank(rest.charAt(p)) || skip.indexOf(rest.charAt(p)) >= 0)) {",
+"      p = p + 1;",
+"    }",
+"    var stop = `。、　`;",
+"    while (p < rest.length && out.length < 50 && !blank(rest.charAt(p)) &&",
+"           stop.indexOf(rest.charAt(p)) < 0) {",
+"      out = out + rest.charAt(p);",
+"      p = p + 1;",
+"    }",
+"  }",
+"  if (!out) { return { ok: false, used: null }; }",
+"  return { ok: true, used: null, text: out };",
 "}",
 "if (action === `exists`) {",
 "  var docs = allDocs();",
@@ -528,10 +567,22 @@ function robinScrollUntil(text, indent, stepNo, cols, tries) {
   ];
 }
 
-function robinCapture(cands, varName, indent, stepNo, note, cols, extract) {
+// key を渡すと、要素ではなく画面の文字で場所を決める。画面全体（iframe の中も）
+// から key を探し、その直後を取り出す。ポップアップのように要素の指定が
+// 分かりにくいものでも、見えている文字で指せる。
+//   extract="digits" … 直後の最初の数字の連続（他の数字が混ざらない）
+//   それ以外        … 直後から、空白・改行・「。」「、」まで（最大 50 字）
+function robinCapture(cands, varName, indent, stepNo, note, cols, extract, key) {
   cands = robinFilterCandidates(cands).map(function (c) { return toRobinVar(c, cols); });
   note = toRobinVar(note, cols).split("'").join("").split("[").join("").split("]").join("");
-  var bodyArgs = pyJson([cands, "text", ""]);
+  key = key || "";
+  var bodyArgs = key
+    ? pyJson([[], extract === "digits" ? "afterDigits" : "after", toRobinVar(key, cols)])
+    : pyJson([cands, "text", ""]);
+  var findErr = key
+    ? "ステップ" + stepNo + "（" + note + "）で「" +
+      toRobinVar(key, cols).split("'").join("") + "」の後に読み取る文字がありません"
+    : "ステップ" + stepNo + "（" + note + "）で読み取る場所が見つかりません";
   var out = [
     indent + "# [" + stepNo + "] " + note,
     indent + "SET ActBody TO $'''{\"script\": \"%JsAct%\", \"args\": " + bodyArgs + "}'''",
@@ -543,15 +594,14 @@ function robinCapture(cands, varName, indent, stepNo, note, cols, extract) {
     indent + "IF ActStatus = 200 THEN",
     indent + "    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj",
     indent + "    IF ActObj['value']['ok'] <> True THEN",
-    indent + "        SET RowError TO " + robinStr("ステップ" + stepNo + "（" + note +
-      "）で読み取る場所が見つかりません"),
+    indent + "        SET RowError TO " + robinStr(findErr),
     indent + "    END",
     indent + "    IF ActObj['value']['ok'] = True THEN",
     indent + "        SET " + varName + " TO ActObj['value']['text']",
     indent + "    END",
     indent + "END"
   ];
-  if (extract === "digits") {
+  if (extract === "digits" && !key) {
     // 文章の中から番号だけを取り出す。
     // 「要求IDは 131982564 です。」のように、読んだ文字がそのままでは
     // 次のバッチで使えないことがある。数字以外を落とせば番号だけ残る。
@@ -961,7 +1011,8 @@ function batchToSteps(batch) {
                dlName: st.type === "download" ? (st.name || "") : "",
                cap: st.type === "capture",
                capName: st.type === "capture" ? (st.name || "") : "",
-               capDigits: st.type === "capture" && st.extract === "digits" };
+               capDigits: st.type === "capture" && st.extract === "digits",
+               capKey: st.type === "capture" ? (st.key || "") : "" };
     if (sec === "loop" && recSigs[sig(st)]) { as.sec = "loop+recover"; }
     var v = String(st.value === undefined ? "" : st.value);
     var m = /\{\{([^}]+)\}\}/.exec(v);
@@ -1225,8 +1276,14 @@ function buildBatch(steps, assigns, title, options) {
         copy.type = "capture";
         if (as.capName) { copy.name = as.capName; }
         if (as.capDigits) { copy.extract = "digits"; }
+        // キー文字列があれば、要素ではなく画面の文字で場所を決める
+        if (as.capKey) { copy.key = as.capKey; }
       }
-      copy.selectors = st.selectors || [];
+      // キーで場所を決める記録は要素の指定が要らない。空の配列を付けると
+      // 読み込み直したときに元の定義と食い違うので、無ければ付けない。
+      if (!(copy.type === "capture" && copy.key && !(st.selectors && st.selectors.length))) {
+        copy.selectors = st.selectors || [];
+      }
       if (as.selLit && as.varCol && as.varCol !== "?") {
         // セレクタの中の実値を {{列名}} に差し替える。
         // 同時に、その値を含まない候補は捨てる。録画には
@@ -2131,7 +2188,7 @@ function buildRobin(batch, opt) {
       A(inner + "# 次のバッチはこの CSV をそのまま明細として読める。");
       L = L.concat(robinCapture(candidates(lst), "Cap" + (caps.indexOf(cnm) + 1),
                                 inner, m, "capture " + cnm, cols,
-                                String(lst.extract || "")));
+                                String(lst.extract || ""), String(lst.key || "")));
       L = L.concat(robinFail(inner, capVals));
       A("");
       continue;
@@ -2473,6 +2530,11 @@ root.PadConvert = {
               ' <input type="text" class="capTxt" data-i="' + i + '" placeholder="列名"' +
               ' value="' + (as.capName || "") + '"' + off +
               (as.cap ? "" : " hidden") + ">" +
+              ' <input type="text" class="capKey" data-i="' + i + '" size="14"' +
+              ' placeholder="キー（例: 要求IDは）"' +
+              ' title="画面でこの文字を探し、その直後を記録します。空なら、この行の場所の文字を読みます"' +
+              ' value="' + String(as.capKey || "").split("&").join("&amp;").split('"').join("&quot;") + '"' +
+              off + (as.cap ? "" : " hidden") + ">" +
               '<label class="capNum" data-i="' + i + '"' +
               (as.cap ? "" : " hidden") + ' style="font-weight:normal">' +
               '<input type="checkbox" class="capNumChk" data-i="' + i + '"' + off +
@@ -2577,12 +2639,20 @@ root.PadConvert = {
         if (txt) { txt.hidden = !el.checked; }
         var num = $("assignTable").querySelector('.capNum[data-i="' + i + '"]');
         if (num) { num.hidden = !el.checked; }
+        var key = $("assignTable").querySelector('.capKey[data-i="' + i + '"]');
+        if (key) { key.hidden = !el.checked; }
         batchReady = false;
       });
     });
     Array.prototype.forEach.call(q(".capTxt"), function (el) {
       el.addEventListener("input", function () {
         recAssign[+el.dataset.i].capName = el.value;
+        batchReady = false;
+      });
+    });
+    Array.prototype.forEach.call(q(".capKey"), function (el) {
+      el.addEventListener("input", function () {
+        recAssign[+el.dataset.i].capKey = el.value.trim();
         batchReady = false;
       });
     });
