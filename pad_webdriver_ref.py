@@ -69,6 +69,14 @@ from details_io import load_details
 # 戻り値: {"ok": true/false, "used": 実際に一致したセレクタ}
 # PAD へはこの文字列を 1 行にして貼り付ける（--trace の出力にそのまま含まれる）。
 # ---------------------------------------------------------------------------
+# aria/ は、名前で付いている印（aria-label / title / alt）を先に探し、
+# 見つからないときだけ要素の文字で探す。文字の一致より確かなので、同じ言葉が
+# ページの前のほうにあっても取り違えない。実 EDI では、ツリーの三角印
+# （title=拡張）より前に検索欄の選択肢（<option>拡張</option>）があり、
+# そちらを押していたためツリーが開かなかった。
+#
+# **この中に // のコメントは書けない。** 1 行に連結して渡すので、それ以降が
+# すべてコメントになってしまう。
 JS_ACT = r"""
 var cands = arguments[0], action = arguments[1], value = arguments[2];
 var Q = String.fromCharCode(39), DQ = String.fromCharCode(34);
@@ -87,6 +95,9 @@ function docsOf(root, out) {
 function allDocs() {
   try { return docsOf(document, []); } catch (e) { return [document]; }
 }
+function qs(doc, sel) {
+  try { return doc.querySelector(sel); } catch (e) { return null; }
+}
 function byXPath(doc, xp) {
   try { return doc.evaluate(xp, doc, null, 9, null).singleNodeValue; }
   catch (e) { return null; }
@@ -101,10 +112,15 @@ function findIn(doc, sel) {
     }
     if (sel.indexOf(`aria/`) === 0) {
       var n = sel.slice(5).split(`[`)[0].trim();
-      var el = doc.querySelector(`[aria-label=` + lit(n) + `]`);
+      var el = qs(doc, `[aria-label=` + lit(n) + `]`)
+            || qs(doc, `[title=` + lit(n) + `]`)
+            || qs(doc, `[alt=` + lit(n) + `]`);
       if (el) { return el; }
-      return byXPath(doc, `//*[not(self::script) and (@aria-label=` + lit(n)
-                     + ` or @title=` + lit(n) + ` or normalize-space(text())=` + lit(n) + `)]`);
+      el = byXPath(doc, `//*[not(self::script) and (@aria-label=` + lit(n)
+                   + ` or @title=` + lit(n) + ` or @alt=` + lit(n) + `)]`);
+      if (el) { return el; }
+      return byXPath(doc, `//*[not(self::script) and normalize-space(text())=`
+                     + lit(n) + `]`);
     }
     if (sel.indexOf(`row/`) === 0) {
       var key = sel.slice(4).trim();
