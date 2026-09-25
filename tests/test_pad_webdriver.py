@@ -890,3 +890,18 @@ def test_capture_key_in_shared_js():
     assert "afterDigits" in js
     assert "allDocs()" in js        # iframe の中も探す
     assert chr(92) not in js and chr(34) not in js and chr(39) not in js
+
+
+def test_aria_prefers_attributes_over_text():
+    """aria/ は、名前で付いている印を要素の文字より先に探すこと。
+
+    実 EDI のツリーの三角印は title="拡張"。ページの前のほうに
+    <option>拡張</option> があり、文字で探すとそちらが先に当たっていた。
+    押せてしまうので失敗にもならず、ツリーが開かないまま進んでいた。
+    """
+    js = pad.js_act_oneline()
+    i_attr = js.index("[title=")
+    i_text = js.index("normalize-space(text())=` + lit(n)")
+    assert i_attr < i_text
+    # 1 行に連結するので、// のコメントがあると以降が全部コメントになる
+    assert "//" not in js.replace("//*[", "")
