@@ -905,3 +905,16 @@ def test_aria_prefers_attributes_over_text():
     assert i_attr < i_text
     # 1 行に連結するので、// のコメントがあると以降が全部コメントになる
     assert "//" not in js.replace("//*[", "")
+
+
+def test_details_short_row_without_trailing_comma(tmp_path):
+    """末尾の空の skip をカンマごと省いた行も、空として読めること。"""
+    from details_io import load_details
+    p = tmp_path / "d.csv"
+    p.write_text("プロジェクト番号,発注番号,skip\nPM1,900000000001\nPM2,900000000002,1\n",
+                 encoding="utf-8")
+    headers, rows = load_details(str(p))
+    assert headers[-1] == "skip"
+    assert len(rows) == 2
+    assert str(rows[0].get("skip") or "") == ""
+    assert rows[1]["skip"] == "1"

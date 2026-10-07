@@ -101,7 +101,7 @@ def run_batch(batch: dict, rows: list[dict], common: dict, browser, out_dir: str
         vals = {**common, **row}
         rec = {"ID": item_id, "結果": "", "理由": "", "エビデンス": ""}
         # skip 列
-        if row.get("skip", "").strip():
+        if str(row.get("skip") or "").strip():
             log(f"[{idx}/{total}] {item_id} … スキップ（skip 列指定）")
             rec["結果"] = "スキップ"
             results.append(rec)
