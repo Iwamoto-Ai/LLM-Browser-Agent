@@ -412,7 +412,7 @@ def run(batch: dict, rows: list, common: dict, drv: WebDriverHTTP, out_dir: str,
     total = len(rows)
     for n, row in enumerate(rows, 1):
         rid = str(row.get(id_col, "")).strip()
-        if str(row.get("skip", "")).strip():
+        if str(row.get("skip") or "").strip():
             log(f"[{n}/{total}] {rid} … スキップ（skip 列指定）")
             results.append({"ID": rid, "結果": "スキップ", "理由": "", "エビデンス": ""})
             continue

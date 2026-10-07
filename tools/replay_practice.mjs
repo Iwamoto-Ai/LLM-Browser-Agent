@@ -27,7 +27,9 @@ const cols = csv[0].split(",");
 // 明細の 1 行目を使う。capture で書き換わるので、バッチごとに作り直す
 // （PAD では結果 CSV を経由して次のバッチへ渡る）。
 const baseRow = {};
-csv[1].split(",").forEach((v, i) => { baseRow[cols[i]] = v; });
+// 末尾の空欄はカンマごと省いてよいので、足りない列は空として扱う。
+const vals1 = csv[1].split(",");
+cols.forEach((c, i) => { baseRow[c] = vals1[i] === undefined ? "" : vals1[i]; });
 let row = {};
 // capture した値。次のバッチへ持ち越す（PAD では結果 CSV 経由）。
 let carried = {};
