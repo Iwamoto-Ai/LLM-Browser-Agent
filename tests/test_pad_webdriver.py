@@ -918,3 +918,31 @@ def test_details_short_row_without_trailing_comma(tmp_path):
     assert len(rows) == 2
     assert str(rows[0].get("skip") or "") == ""
     assert rows[1]["skip"] == "1"
+
+
+def test_proxy_auto_reads_windows_setting_before_driver_fetch(tmp_path):
+    """ProxyAuto は Windows のプロキシ設定に合わせて UseProxy / ProxyAddr を決める。
+
+    社内ではプロキシがオン、テレワークではオフに切り替わる PC で、手の設定のまま
+    社内プロキシへ取りに行くと時間切れ（curl 28）になった。判定はドライバーの
+    取得より前に済ませること。"""
+    import re as _re
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    batch = load_recording(os.path.join(here, "recordings", "edi2_practice_batch.json"))
+    out = pad.write_robin(batch, r"C:\PAD\d.csv", "プロジェクト番号",
+                          str(tmp_path / "flow.robin.txt"), auto_driver=True)
+    txt = open(out, encoding="utf-8").read()
+    lines = txt.splitlines()
+    assert "SET ProxyAuto TO True" in lines
+    # 分けて継ぎ足した PxCmd が元のコマンドに戻ること
+    parts = [ln.strip() for ln in lines if ln.strip().startswith("SET PxCmd TO")]
+    assert len(parts) == 3
+    vals = [_re.match(r"SET PxCmd TO \$'''(.*)'''$", p).group(1) for p in parts]
+    joined = vals[0] + vals[1].replace("%PxCmd%", "", 1) + vals[2].replace("%PxCmd%", "", 1)
+    assert joined.replace("\\\\", "\\") == pad._PROXY_AUTO_CMD
+    # 引用符を使わない（Robin と DOS コマンドの両方で崩れないように）
+    assert '"' not in pad._PROXY_AUTO_CMD and "'" not in pad._PROXY_AUTO_CMD
+    first_px = txt.index("IF ProxyAuto THEN")
+    assert first_px < txt.index("SET RelCmd TO")
+    assert first_px < txt.index("IF UseProxy THEN")
+    assert "[プロキシ] %PxNote%" in txt
