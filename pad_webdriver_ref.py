@@ -1208,6 +1208,16 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("#   失敗することがある。")
     A("# 対象サイトへの通信は localhost と file:// なら直結だが、それとは別に")
     A("# ドライバーの取得で外へ出る。練習サイトでも設定が要る点に注意。")
+    A("#")
+    A("# ProxyAuto = True（既定）… 実行のたびに Windows のプロキシ設定を読んで決める。")
+    A("#   設定がオンならそのプロキシ（ProxyServer）を使い、オフなら直結にする。")
+    A("#   社内ではプロキシ、テレワークでは直結、のように場所で切り替わる PC でも")
+    A("#   書き換えずに動く。このとき下の UseProxy / ProxyAddr は上書きされる。")
+    A("#   ただし Windows の設定が読めないときと、通信の種類ごとに分けた書き方")
+    A("#   （http=…;https=…）のときは自動をあきらめ、下の手の設定を使う。")
+    A("#   どちらになったかは pad_progress.log に 1 行残る。")
+    A("# ProxyAuto = False … 下の UseProxy / ProxyAddr をそのまま使う。")
+    A("SET ProxyAuto TO True")
     if proxy:
         A("# UseProxy を False にすると直結（練習サイト用）に戻る。")
         A("SET UseProxy TO True")
@@ -1344,6 +1354,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"File.WriteText File: LogFile TextToWrite: {_hdr} "
       f"AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
     A("")
+    _emit_proxy_auto(A)
     A("# ドライバーをどう用意したか。ログとダイアログに出す。")
     _fx = _robin_str("固定パス（AutoDriver=False のためブラウザー更新時は手動で入れ替え）")
     A(f"SET DriverSrc TO {_fx}")
@@ -2074,6 +2085,66 @@ _EDGE_VER_CMD = ("powershell -NoProfile -Command [Console]::Write("
 _CHROME_VER_CMD = ("powershell -NoProfile -Command [Console]::Write("
                    "(Get-ItemProperty HKCU:\\Software\\Google\\Chrome\\BLBeacon)"
                    ".version.Split([char]46)[0])")
+
+
+# Windows のプロキシ設定を 1 回で読む。引用符を使わずに書くため、
+# 「Internet Settings」の空白は * で、記号は [char] で表している。
+#   -          … 設定がオフ（直結）
+#   ?          … 読めない、または http=…;https=… の書き方（自動にしない）
+#   host:port  … 使うプロキシ
+_PROXY_AUTO_CMD = (
+    "powershell -NoProfile -Command $p=Get-ItemProperty "
+    "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet*Settings; "
+    "$s=[string]$p.ProxyServer; "
+    "if ($p.ProxyEnable -ne 1) {[Console]::Write([char]45)} "
+    "elseif ($s -match [char]61 -or $s -match [char]59 -or $s.Trim().Length -eq 0) "
+    "{[Console]::Write([char]63)} "
+    "else {[Console]::Write($s.Trim())}")
+
+
+def _emit_proxy_auto(A) -> None:
+    """ProxyAuto のとき、Windows のプロキシ設定に合わせて UseProxy / ProxyAddr を決める。
+
+    社内ではプロキシがオン、社外ではオフに切り替わる PC がある。手で決めた値の
+    ままだと、社外で社内プロキシへ取りに行って時間切れ（curl 28）になる。
+    ドライバーの取得より前に決める必要がある。"""
+    A("")
+    A("# --- プロキシの自動判定（ProxyAuto = True のとき）---")
+    A("# ドライバーの取得もブラウザーの通信も、ここで決めた UseProxy / ProxyAddr を使う。")
+    A("# PxOut: - は設定オフ、? は自動にしない、それ以外は使うプロキシの host:port")
+    A("IF ProxyAuto THEN")
+    # 1 行が長くなりすぎないよう、3 つに分けて継ぎ足す（中に % は無い）
+    # 区切りの空白は次の行の先頭に置く（行末の空白は見落としやすい）
+    _a1 = _PROXY_AUTO_CMD.index("; ") + 1
+    _a2 = _PROXY_AUTO_CMD.index("} elseif")
+    _px = [_PROXY_AUTO_CMD[:_a1], _PROXY_AUTO_CMD[_a1:_a2], _PROXY_AUTO_CMD[_a2:]]
+    A(f"    SET PxCmd TO {_robin_str(_px[0])}")
+    A("    SET PxCmd TO " + _robin_str("%PxCmd%" + _px[1]))
+    A("    SET PxCmd TO " + _robin_str("%PxCmd%" + _px[2]))
+    A(_dos("PxCmd", "PxOut", "PxErr", "PxExit", 60, "    "))
+    A("    SET PxNote TO " + _robin_str(
+        "自動判定できないため手の設定を使用 UseProxy=%UseProxy% ProxyAddr=%ProxyAddr%"))
+    A(f"    IF PxOut = {_robin_str('-')} THEN")
+    A("        SET UseProxy TO False")
+    A("        SET PxNote TO " + _robin_str("自動: Windows のプロキシ設定がオフ → 直結"))
+    A("    END")
+    A(f"    IF PxOut <> {_robin_str('-')} THEN")
+    A(f"        IF PxOut <> {_robin_str('?')} THEN")
+    A(f"            IF PxOut <> {_robin_str('')} THEN")
+    A("                SET UseProxy TO True")
+    A("                SET ProxyAddr TO PxOut")
+    A("                SET PxNote TO " + _robin_str(
+        "自動: Windows のプロキシ設定がオン → %ProxyAddr%"))
+    A("            END")
+    A("        END")
+    A("    END")
+    A("ELSE")
+    A("    SET PxNote TO " + _robin_str("手の設定 UseProxy=%UseProxy% ProxyAddr=%ProxyAddr%"))
+    A("END")
+    A("File.WriteText File: LogFile TextToWrite: " + _robin_str("[プロキシ] %PxNote%")
+      + " AppendNewLine: True IfFileExists: File.IfFileExists.Append"
+      " Encoding: File.FileEncoding.UTF8")
+    A("")
 
 
 def _dos(cmd_var: str, out_var: str, err_var: str, exit_var: str,
