@@ -9,7 +9,8 @@
 #           BaseDir: C:\temp
 #           エビデンス名: @ID@__@KEY@__@STAMP@
 #           ダウンロード保存先: C:\temp\download
-# 備考：2026/09/11 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
+# 備考：2026/11/10 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ自動=有効 ／ プロキシ=未使用
+#       MaxItems=1 ／ ウィンドウ=1366×900 ／ ドライバー置き場所=C:\temp
 # ============================================================
 # LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
 # Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).
@@ -31,6 +32,16 @@ SET TargetUrl TO $'''file:///C:/temp/sample.html'''
 #   失敗することがある。
 # 対象サイトへの通信は localhost と file:// なら直結だが、それとは別に
 # ドライバーの取得で外へ出る。練習サイトでも設定が要る点に注意。
+#
+# ProxyAuto = True（既定）… 実行のたびに Windows のプロキシ設定を読んで決める。
+#   設定がオンならそのプロキシ（ProxyServer）を使い、オフなら直結にする。
+#   社内ではプロキシ、テレワークでは直結、のように場所で切り替わる PC でも
+#   書き換えずに動く。このとき下の UseProxy / ProxyAddr は上書きされる。
+#   ただし Windows の設定が読めないときと、通信の種類ごとに分けた書き方
+#   （http=…;https=…）のときは自動をあきらめ、下の手の設定を使う。
+#   どちらになったかは pad_progress.log に 1 行残る。
+# ProxyAuto = False … 下の UseProxy / ProxyAddr をそのまま使う。
+SET ProxyAuto TO True
 # 使う場合: UseProxy を True にし、ProxyAddr にプロキシの host:port を書く。
 SET UseProxy TO False
 SET ProxyAddr TO $'''proxy.example.com:8080'''
@@ -75,6 +86,8 @@ SET ResultFile TO $'''%BaseDir%\\pad_result.csv'''
 SET LogFile TO $'''%BaseDir%\\pad_progress.log'''
 # ブラウザーのウィンドウサイズ。**エビデンスに写る範囲はここで決まる。**
 # 複数の PC に配布する場合は、一番小さい画面に収まる値にそろえること。
+# FullShot が True なら縦長のページも 1 枚に収まるので、縦を小さめに
+# そろえてもエビデンスは切れない。
 SET WinW TO 1366
 SET WinH TO 900
 # エビデンスをページ全体で撮るか。True なら、画面に入りきらない縦長・横長の
@@ -123,27 +136,41 @@ SET JsAct TO $'''%JsAct%rn DQ + s + DQ; } function docsOf(root, out) { out.push(
 SET JsAct TO $'''%JsAct%All(`iframe, frame`); } catch (e) { return out; } for (var k = 0; k < fs.length; k++) { var d = null'''
 SET JsAct TO $'''%JsAct%; try { d = fs[k].contentDocument; } catch (e) { d = null; } if (d && out.indexOf(d) < 0) { docsOf(d'''
 SET JsAct TO $'''%JsAct%, out); } } return out; } function allDocs() { try { return docsOf(document, []); } catch (e) { retu'''
-SET JsAct TO $'''%JsAct%rn [document]; } } function byXPath(doc, xp) { try { return doc.evaluate(xp, doc, null, 9, null).sin'''
-SET JsAct TO $'''%JsAct%gleNodeValue; } catch (e) { return null; } } function findIn(doc, sel) { try { if (sel.indexOf(`id/`'''
-SET JsAct TO $'''%JsAct%) === 0) { return doc.getElementById(sel.slice(3)); } if (sel.indexOf(`xpath/`) === 0) { return byXP'''
-SET JsAct TO $'''%JsAct%ath(doc, sel.slice(6)); } if (sel.indexOf(`text/`) === 0) { var t = sel.slice(5).trim(); return byXP'''
-SET JsAct TO $'''%JsAct%ath(doc, `//*[not(self::script) and normalize-space(text())=` + lit(t) + `]`); } if (sel.indexOf(`ar'''
-SET JsAct TO $'''%JsAct%ia/`) === 0) { var n = sel.slice(5).split(`[`)[0].trim(); var el = doc.querySelector(`[aria-label=` '''
-SET JsAct TO $'''%JsAct%+ lit(n) + `]`); if (el) { return el; } return byXPath(doc, `//*[not(self::script) and (@aria-label='''
-SET JsAct TO $'''%JsAct%` + lit(n) + ` or @title=` + lit(n) + ` or normalize-space(text())=` + lit(n) + `)]`); } if (sel.ind'''
-SET JsAct TO $'''%JsAct%exOf(`row/`) === 0) { var key = sel.slice(4).trim(); var rows = doc.querySelectorAll(`tr`); for (var'''
-SET JsAct TO $'''%JsAct% r = 0; r < rows.length; r++) { var txt = (rows[r].innerText || ``) + (rows[r].textContent || ``); i'''
-SET JsAct TO $'''%JsAct%f (txt.indexOf(key) < 0) { continue; } var hit = rows[r].querySelector(`a[href], button, input[type='''
-SET JsAct TO $'''%JsAct%image]`); if (!hit) { hit = rows[r].querySelector(`a, img`); } if (hit) { return hit; } } return nul'''
-SET JsAct TO $'''%JsAct%l; } if (sel.indexOf(`pierce/`) === 0) { sel = sel.slice(7); } return doc.querySelector(sel); } catc'''
-SET JsAct TO $'''%JsAct%h (e) { return null; } } function find(sel) { var docs = allDocs(); for (var j = 0; j < docs.length;'''
-SET JsAct TO $'''%JsAct% j++) { var hit = findIn(docs[j], sel); if (hit) { return hit; } } return null; } if (action === `sc'''
-SET JsAct TO $'''%JsAct%roll`) { var docs = allDocs(); var moved = 0; for (var j = 0; j < docs.length; j++) { var all = docs'''
-SET JsAct TO $'''%JsAct%[j].querySelectorAll(`div, table, tbody`); for (var k = 0; k < all.length; k++) { var el = all[k]; i'''
-SET JsAct TO $'''%JsAct%f (el.scrollHeight > el.clientHeight + 10 && el.clientHeight > 40) { var before = el.scrollTop; el.s'''
-SET JsAct TO $'''%JsAct%crollTop = before + el.clientHeight; if (el.scrollTop !== before) { moved = moved + 1; } } } if (doc'''
-SET JsAct TO $'''%JsAct%s[j].defaultView) { docs[j].defaultView.scrollBy(0, 400); } } return { ok: true, used: null, moved: '''
-SET JsAct TO $'''%JsAct%moved }; } if (action === `exists`) { var docs = allDocs(); var txt = ``; for (var j = 0; j < docs.l'''
+SET JsAct TO $'''%JsAct%rn [document]; } } function qs(doc, sel) { try { return doc.querySelector(sel); } catch (e) { return'''
+SET JsAct TO $'''%JsAct% null; } } function byXPath(doc, xp) { try { return doc.evaluate(xp, doc, null, 9, null).singleNodeV'''
+SET JsAct TO $'''%JsAct%alue; } catch (e) { return null; } } function findIn(doc, sel) { try { if (sel.indexOf(`id/`) === 0)'''
+SET JsAct TO $'''%JsAct% { return doc.getElementById(sel.slice(3)); } if (sel.indexOf(`xpath/`) === 0) { return byXPath(doc,'''
+SET JsAct TO $'''%JsAct% sel.slice(6)); } if (sel.indexOf(`text/`) === 0) { var t = sel.slice(5).trim(); return byXPath(doc,'''
+SET JsAct TO $'''%JsAct% `//*[not(self::script) and normalize-space(text())=` + lit(t) + `]`); } if (sel.indexOf(`aria/`) =='''
+SET JsAct TO $'''%JsAct%= 0) { var n = sel.slice(5).split(`[`)[0].trim(); var el = qs(doc, `[aria-label=` + lit(n) + `]`) ||'''
+SET JsAct TO $'''%JsAct% qs(doc, `[title=` + lit(n) + `]`) || qs(doc, `[alt=` + lit(n) + `]`); if (el) { return el; } el = b'''
+SET JsAct TO $'''%JsAct%yXPath(doc, `//*[not(self::script) and (@aria-label=` + lit(n) + ` or @title=` + lit(n) + ` or @alt='''
+SET JsAct TO $'''%JsAct%` + lit(n) + `)]`); if (el) { return el; } return byXPath(doc, `//*[not(self::script) and normalize-'''
+SET JsAct TO $'''%JsAct%space(text())=` + lit(n) + `]`); } if (sel.indexOf(`row/`) === 0) { var key = sel.slice(4).trim(); v'''
+SET JsAct TO $'''%JsAct%ar rows = doc.querySelectorAll(`tr`); for (var r = 0; r < rows.length; r++) { var txt = (rows[r].inn'''
+SET JsAct TO $'''%JsAct%erText || ``) + (rows[r].textContent || ``); if (txt.indexOf(key) < 0) { continue; } var hit = rows['''
+SET JsAct TO $'''%JsAct%r].querySelector(`a[href], button, input[type=image]`); if (!hit) { hit = rows[r].querySelector(`a, '''
+SET JsAct TO $'''%JsAct%img`); } if (hit) { return hit; } } return null; } if (sel.indexOf(`pierce/`) === 0) { sel = sel.sli'''
+SET JsAct TO $'''%JsAct%ce(7); } return doc.querySelector(sel); } catch (e) { return null; } } function find(sel) { var docs'''
+SET JsAct TO $'''%JsAct% = allDocs(); for (var j = 0; j < docs.length; j++) { var hit = findIn(docs[j], sel); if (hit) { ret'''
+SET JsAct TO $'''%JsAct%urn hit; } } return null; } if (action === `scroll`) { var docs = allDocs(); var moved = 0; for (var'''
+SET JsAct TO $'''%JsAct% j = 0; j < docs.length; j++) { var all = docs[j].querySelectorAll(`div, table, tbody`); for (var k '''
+SET JsAct TO $'''%JsAct%= 0; k < all.length; k++) { var el = all[k]; if (el.scrollHeight > el.clientHeight + 10 && el.client'''
+SET JsAct TO $'''%JsAct%Height > 40) { var before = el.scrollTop; el.scrollTop = before + el.clientHeight; if (el.scrollTop '''
+SET JsAct TO $'''%JsAct%!== before) { moved = moved + 1; } } } if (docs[j].defaultView) { docs[j].defaultView.scrollBy(0, 40'''
+SET JsAct TO $'''%JsAct%0); } } return { ok: true, used: null, moved: moved }; } if (action === `after` || action === `after'''
+SET JsAct TO $'''%JsAct%Digits`) { var docs = allDocs(); var src = ``; for (var j = 0; j < docs.length; j++) { var b = docs['''
+SET JsAct TO $'''%JsAct%j].body || docs[j].documentElement; if (b) { src = src + (b.innerText || ``) + ` ` + (b.textContent '''
+SET JsAct TO $'''%JsAct%|| ``) + ` `; } } var at = value ? src.indexOf(value) : -1; if (at < 0) { return { ok: false, used: '''
+SET JsAct TO $'''%JsAct%null }; } var rest = src.slice(at + value.length, at + value.length + 80); var out = ``; var p = 0; '''
+SET JsAct TO $'''%JsAct%if (action === `afterDigits`) { var isNum = function (c) { return c >= `0` && c <= `9`; }; while (p '''
+SET JsAct TO $'''%JsAct%< rest.length && p < 10 && !isNum(rest.charAt(p))) { p = p + 1; } while (p < rest.length && isNum(re'''
+SET JsAct TO $'''%JsAct%st.charAt(p))) { out = out + rest.charAt(p); p = p + 1; } } else { var skip = `:：=　`; var blank = fu'''
+SET JsAct TO $'''%JsAct%nction (c) { return c.charCodeAt(0) <= 32; }; while (p < rest.length && (blank(rest.charAt(p)) || sk'''
+SET JsAct TO $'''%JsAct%ip.indexOf(rest.charAt(p)) >= 0)) { p = p + 1; } var stop = `。、　`; while (p < rest.length && out.len'''
+SET JsAct TO $'''%JsAct%gth < 50 && !blank(rest.charAt(p)) && stop.indexOf(rest.charAt(p)) < 0) { out = out + rest.charAt(p)'''
+SET JsAct TO $'''%JsAct%; p = p + 1; } } if (!out) { return { ok: false, used: null }; } return { ok: true, used: null, text'''
+SET JsAct TO $'''%JsAct%: out }; } if (action === `exists`) { var docs = allDocs(); var txt = ``; for (var j = 0; j < docs.l'''
 SET JsAct TO $'''%JsAct%ength; j++) { var b = docs[j].body || docs[j].documentElement; if (b) { txt = txt + (b.innerText || '''
 SET JsAct TO $'''%JsAct%``) + (b.textContent || ``); } } return { ok: txt.indexOf(value) >= 0, used: null }; } for (var i = '''
 SET JsAct TO $'''%JsAct%0; i < cands.length; i++) { var el = find(cands[i]); if (!el) { continue; } if (action === `click`) '''
@@ -174,6 +201,34 @@ SET SessionOk TO False
 # ここは中止しても必ず通る。ループの中だけで書くと、起点に着けずに
 # 中止したとき「ログを確認してください」と案内しながらログが空になる。
 File.WriteText File: LogFile TextToWrite: $'''===== 実行開始 上限%MaxItems%件 RetryMode=%RetryMode% Browser=%Browser% =====''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+
+
+# --- プロキシの自動判定（ProxyAuto = True のとき）---
+# ドライバーの取得もブラウザーの通信も、ここで決めた UseProxy / ProxyAddr を使う。
+# PxOut: - は設定オフ、? は自動にしない、それ以外は使うプロキシの host:port
+IF ProxyAuto THEN
+    SET PxCmd TO $'''powershell -NoProfile -Command $p=Get-ItemProperty HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet*Settings;'''
+    SET PxCmd TO $'''%PxCmd% $s=[string]$p.ProxyServer; if ($p.ProxyEnable -ne 1) {[Console]::Write([char]45)'''
+    SET PxCmd TO $'''%PxCmd%} elseif ($s -match [char]61 -or $s -match [char]59 -or $s.Trim().Length -eq 0) {[Console]::Write([char]63)} else {[Console]::Write($s.Trim())}'''
+    Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: PxCmd WorkingDirectory: BaseDir Timeout: 60 StandardOutput=> PxOut StandardError=> PxErr ExitCode=> PxExit
+    SET PxNote TO $'''自動判定できないため手の設定を使用 UseProxy=%UseProxy% ProxyAddr=%ProxyAddr%'''
+    IF PxOut = $'''-''' THEN
+        SET UseProxy TO False
+        SET PxNote TO $'''自動: Windows のプロキシ設定がオフ → 直結'''
+    END
+    IF PxOut <> $'''-''' THEN
+        IF PxOut <> $'''?''' THEN
+            IF PxOut <> $'''''' THEN
+                SET UseProxy TO True
+                SET ProxyAddr TO PxOut
+                SET PxNote TO $'''自動: Windows のプロキシ設定がオン → %ProxyAddr%'''
+            END
+        END
+    END
+ELSE
+    SET PxNote TO $'''手の設定 UseProxy=%UseProxy% ProxyAddr=%ProxyAddr%'''
+END
+File.WriteText File: LogFile TextToWrite: $'''[プロキシ] %PxNote%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
 
 # ドライバーをどう用意したか。ログとダイアログに出す。
 SET DriverSrc TO $'''固定パス（AutoDriver=False のためブラウザー更新時は手動で入れ替え）'''

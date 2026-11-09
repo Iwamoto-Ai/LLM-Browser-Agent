@@ -32,6 +32,13 @@ const cases = [
     details: "C:\\temp\\sample_batch.csv", browser: "edge" },
   { batch: "recordings/edi2_practice_batch.json", idCol: "プロジェクト番号",
     details: "C:\\temp\\edi2_batch.csv", browser: "chrome" },
+  // 既定から外した設定でも一致すること（チェックを外す・件数・大きさ・置き場所）
+  { batch: "recordings/edi2_practice_batch.json", idCol: "プロジェクト番号",
+    details: "C:\\temp\\edi2_batch.csv", browser: "chrome", label: "既定外の設定",
+    py: ["--driver-dir", "D:\\drivers", "--no-auto-driver", "--no-proxy-auto",
+         "--max-items", "5", "--win-w", "1024", "--win-h", "768"],
+    js: { driverDir: "D:\\drivers", autoDriver: false, proxyAuto: false,
+          maxItems: "5", winW: "1024", winH: "768" } },
 ];
 
 let ng = 0;
@@ -40,7 +47,8 @@ for (const c of cases) {
   execFileSync(PY, ["pad_webdriver_ref.py",
     "--batch", c.batch, "--details", c.details, "--id-column", c.idCol,
     "--robin", py, "--driver-exe", "C:\\temp\\msedgedriver.exe",
-    "--pad-out-dir", "C:\\temp", "--pad-browser", c.browser, "--auto-driver"],
+    "--pad-out-dir", "C:\\temp", "--pad-browser", c.browser, "--auto-driver"]
+    .concat(c.py || []),
     { stdio: "pipe" });
 
   const t = new Date();
@@ -49,7 +57,8 @@ for (const c of cases) {
     { detailsPath: c.details, idCol: c.idCol,
       driverExe: "C:\\temp\\msedgedriver.exe", outDir: "C:\\temp",
       proxy: "", autoDriver: true, browser: c.browser,
-      today: { y: t.getFullYear(), m: t.getMonth() + 1, d: t.getDate() } });
+      today: { y: t.getFullYear(), m: t.getMonth() + 1, d: t.getDate() },
+      ...(c.js || {}) });
 
   // Windows の Python は書き出し時に \n を \r\n に変換する。改行コードの違いは
   // 内容の違いではないので、比較の前にそろえる（CI は Linux なので LF のまま）。
@@ -60,10 +69,10 @@ for (const c of cases) {
     .filter((ln) => !ln.startsWith("# 変換器：")).join("\n");
   const expected = strip(fs.readFileSync(py, "utf8"));
   if (strip(out.robin) === expected) {
-    console.log("OK  一致:", c.batch);
+    console.log("OK  一致:", c.batch + (c.label ? "（" + c.label + "）" : ""));
   } else {
     ng++;
-    console.log("NG  不一致:", c.batch);
+    console.log("NG  不一致:", c.batch + (c.label ? "（" + c.label + "）" : ""));
     const a = expected.split("\n"), b = strip(out.robin).split("\n");
     let shown = 0;
     for (let i = 0; i < Math.max(a.length, b.length) && shown < 8; i++) {

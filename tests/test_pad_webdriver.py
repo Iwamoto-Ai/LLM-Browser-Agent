@@ -946,3 +946,56 @@ def test_proxy_auto_reads_windows_setting_before_driver_fetch(tmp_path):
     assert first_px < txt.index("SET RelCmd TO")
     assert first_px < txt.index("IF UseProxy THEN")
     assert "[プロキシ] %PxNote%" in txt
+
+
+def test_driver_dir_names_follow_browser(tmp_path):
+    """ドライバーはフォルダで受け取り、ファイル名はブラウザーで決まる。
+
+    以前は --driver-exe の値が選んだブラウザーの側にだけ入り、chrome を選んで
+    msedgedriver.exe のまま変換すると Chrome 用のパスが msedgedriver.exe になった。"""
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    batch = load_recording(os.path.join(here, "recordings", "edi2_practice_batch.json"))
+    for kw in ({"driver_exe": r"C:\temp\msedgedriver.exe"},      # 互換：exe のパス
+               {"driver_dir": "C:\\temp\\"}):                     # 新：フォルダ（末尾 \ 付き）
+        out = pad.write_robin(batch, r"C:\temp\d.csv", "プロジェクト番号",
+                              str(tmp_path / "f.robin.txt"), out_dir=r"C:\temp",
+                              browser="chrome", **kw)
+        txt = open(out, encoding="utf-8").read()
+        assert "SET EdgeDriverExe TO $'''%BaseDir%\\\\msedgedriver.exe'''" in txt
+        assert "SET ChromeDriverExe TO $'''%BaseDir%\\\\chromedriver.exe'''" in txt
+    out = pad.write_robin(batch, r"C:\temp\d.csv", "プロジェクト番号",
+                          str(tmp_path / "g.robin.txt"), out_dir=r"C:\temp",
+                          driver_dir=r"D:\drivers")
+    txt = open(out, encoding="utf-8").read()
+    assert "SET ChromeDriverExe TO $'''D:\\\\drivers\\\\chromedriver.exe'''" in txt
+
+
+def test_operation_switches_and_memo(tmp_path):
+    """ProxyAuto / MaxItems / ウィンドウサイズが反映され、備考欄にも残ること。"""
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    batch = load_recording(os.path.join(here, "recordings", "edi2_practice_batch.json"))
+    out = pad.write_robin(batch, r"C:\temp\d.csv", "プロジェクト番号",
+                          str(tmp_path / "f.robin.txt"), out_dir=r"C:\temp",
+                          proxy_auto=False, max_items=5, win_w=1024, win_h=768,
+                          driver_dir=r"D:\drivers")
+    lines = open(out, encoding="utf-8").read().splitlines()
+    assert "SET ProxyAuto TO False" in lines
+    assert "SET MaxItems TO 5" in lines
+    assert "SET WinW TO 1024" in lines and "SET WinH TO 768" in lines
+    memo = "\n".join(ln for ln in lines[:20] if ln.startswith("#"))
+    assert "プロキシ自動=無効" in memo
+    assert "MaxItems=5 ／ ウィンドウ=1024×768 ／ ドライバー置き場所=D:\\drivers" in memo
+
+
+def test_operation_switch_defaults():
+    """MaxItems は 1 以上、ウィンドウは 指定 → 録画 → 1250×900 の順。"""
+    assert pad._clamp_max_items(0) == 1
+    assert pad._clamp_max_items("abc") == 1
+    assert pad._clamp_max_items(" 7 ") == 7
+    assert pad._window_size([]) == (1250, 900)
+    rec = [{"type": "setViewport", "width": 1366, "height": 1134}]
+    assert pad._window_size(rec) == (1366, 1134)
+    assert pad._window_size(rec, 1250, "900") == (1250, 900)
+    assert pad._window_size(rec, 0, "x") == (1366, 1134)
+    assert pad._driver_dir("", r"C:\temp\msedgedriver.exe") == r"C:\temp"
+    assert pad._driver_dir("D:\\drv\\", "") == r"D:\drv"

@@ -625,8 +625,8 @@ Python も実行ファイルも要らない。ファイルを 1 つ持ってい�
   ① ブラウザの DevTools Recorder で業務操作を録画 → JSONファイルでエクスポート
   ② setup / loop / recover / teardown に分割、値を {{列名}} / {{SECRET:…}} へ
   ③ tools/pad_converter.html をブラウザーで開いて変換 →「Robin をコピー」
-  ④ C:\temp に置く: msedgedriver.exe / 明細CSV
-     （--auto-driver を使うなら selenium-manager-windows.exe も）
+  ④ C:\temp に置く: 明細CSV
+     （ドライバーは既定で自動取得。自動取得をオフにするときだけ msedgedriver.exe / chromedriver.exe も）
   ⑤ PAD で新規フロー（Power Fx は無効のまま）→ キャンバスに Ctrl+V
   ⑥ MaxItems = 1 で試走 → 目で確認 → 正常動作が確認できたらデータ数に増やして本番実行
   ⑦ C:\temp に出力: エビデンスPNG / pad_result.csv / pad_progress.log
@@ -644,16 +644,18 @@ Python が使える環境ならコマンドライン（CLI）でも変換生成�
 python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
     --details "C:\temp\edi2_batch.csv" --id-column "プロジェクト番号" `
     --robin output/pad_flow.robin.txt `
-    --driver-exe "C:\temp\msedgedriver.exe" --pad-out-dir "C:\temp" `
+    --driver-dir "C:\temp" --pad-out-dir "C:\temp" `
     --proxy "proxy.example.com:8080"
 ```
 
-`--proxy` は**プロキシサーバー経由でインターネットへ出る環境の場合に**指定する。省略しても生成物に切り替えスイッチは入るので、
-あとから `ProxyAddr` を書いて `UseProxy` を `True` にしてもよい。
+プロキシは既定で **Windows のプロキシ設定に合わせて自動で切り替わる**（`--proxy-auto`）。
+`--proxy` は、Windows の設定が読めないときなどに使う手の設定。自動をやめるときは `--no-proxy-auto`。
+件数の上限は `--max-items`（既定 1）、ウィンドウサイズは `--win-w` / `--win-h`
+（既定は録画の大きさ、無ければ 1250 × 900）。
 
 
 **引数のパスは 2 種類あるので混ぜないこと。** `--batch` / `--robin` は**変換環境**のパスで
-リポジトリ相対でよい。`--details` / `--driver-exe` / `--pad-out-dir` は**実行環境**（PAD を動かす PC）の
+リポジトリ相対でよい。`--details` / `--driver-dir` / `--pad-out-dir` は**実行環境**（PAD を動かす PC）の
 パスで、生成された PADコード(Robin) に文字列として埋め込まれる。後者が同じフォルダ配下なら `%BaseDir%` 相対で
 出力されるので、**配布時に直すのは 1 行だけ**になる。
 
@@ -664,7 +666,7 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 | 生成される機能 | 内容 |
 | --- | --- |
 | 冒頭にまとまった設定 | **接続先 → プロキシ → フォルダ → 運用スイッチ**の順に並ぶ。環境の切り替えは `TargetUrl` の 1 行 |
-| ドライバーの自動取得 | `--auto-driver` で Selenium Manager から取得。**ブラウザーが更新されても入れ替え不要**（Python も Node.js も要らない） |
+| ドライバーの自動取得 | 既定でオン（`--no-auto-driver` で切る）。**ブラウザーが更新されても入れ替え不要**（Python も Node.js も要らない） |
 | ドライバーの確認表示 | 起動した**ブラウザーとドライバーの種類・バージョン・メジャー一致判定・取得方法**を 1 行で表示し、ログにも残す |
 | ブラウザーの切り替え | 生成物の `Browser` を `edge` / `chrome` で切り替え。ブラウザー名・プロセス名・取得するドライバーが同時に追従 |
 | 手動ログイン（既定） | 人が手でログインし、**繰り返しの起点画面まで進んでから**[OK]。PAD はパスワードを一度も受け取らない |

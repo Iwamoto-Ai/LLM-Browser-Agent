@@ -645,6 +645,46 @@ def _json_path(base: str) -> str:
     return base.rstrip(sep).replace(sep, sep * 2) + sep * 2 + "download"
 
 
+DEFAULT_WIN_W = 1250
+DEFAULT_WIN_H = 900
+
+
+def _driver_dir(driver_dir: str, driver_exe: str) -> str:
+    """ドライバーの置き場所（フォルダ）。指定が無ければ driver_exe のフォルダ。"""
+    d = (driver_dir or "").strip()
+    if not d:
+        exe = (driver_exe or "").strip()
+        cut = max(exe.rfind("\\"), exe.rfind("/"))
+        d = exe[:cut] if cut >= 0 else ""
+    return d.rstrip("\\/") or "C:\\temp"
+
+
+def _clamp_max_items(n) -> int:
+    """MaxItems は 1 以上の整数。数字でない・0 以下なら 1（まず 1 件で試す）。"""
+    try:
+        v = int(str(n).strip())
+    except (TypeError, ValueError):
+        return 1
+    return v if v >= 1 else 1
+
+
+def _window_size(setup: list, win_w=0, win_h=0) -> tuple:
+    """ウィンドウサイズ。指定 → 録画の setViewport → 既定 1250×900 の順。"""
+    vw = next((s for s in setup if s.get("type") == "setViewport"), {})
+
+    def pick(given, rec, default):
+        for v in (given, rec):
+            try:
+                n = int(str(v).strip())
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                return n
+        return default
+    return (pick(win_w, vw.get("width"), DEFAULT_WIN_W),
+            pick(win_h, vw.get("height"), DEFAULT_WIN_H))
+
+
 def _robin_under_base(path_str: str, out_dir: str) -> str:
     """out_dir 配下のパスは %BaseDir% 相対のリテラルにする。
 
@@ -1117,7 +1157,12 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
                 driver_exe: str = r"C:\temp\msedgedriver.exe",
                 out_dir: str = r"C:\temp", proxy: str = "",
                 auto_driver: bool = False,
-                browser: str = "edge") -> str:
+                browser: str = "edge",
+                proxy_auto: bool = True,
+                max_items: int = 1,
+                win_w: int = 0,
+                win_h: int = 0,
+                driver_dir: str = "") -> str:
     """PAD に貼り付けられる Robin コードを生成する。
 
     PAD のフローデザイナーはアクションのコピー＆ペーストにテキスト（Robin）を使うため、
@@ -1125,10 +1170,18 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
 
     生成されるフローの構造（docs/PAD_WebDriver.md と対応）:
       setup   … ドライバ起動 → セッション → ログイン → 起点へ移動 → 失敗検知(Halt)
+
+    driver_dir はドライバーの置き場所（フォルダ）。ファイル名はブラウザーごとに
+    msedgedriver.exe / chromedriver.exe と決まっているので、フォルダだけ受け取る。
+    空なら driver_exe のフォルダを使う（--driver-exe との互換のため）。
+    win_w / win_h が 0 なら、録画の setViewport、無ければ 1250×900 を使う。
       loop    … skip 判定 / 再実行絞り込み / 件数上限 / 復帰 / 1 件分の操作 / エビデンス
       recover … 失敗した件のあと、次の件の前に起点へ戻す（batch の recover を使う）
     """
     js_one = js_act_oneline()
+    drv_dir = _driver_dir(driver_dir, driver_exe)
+    max_items = _clamp_max_items(max_items)
+    win_w, win_h = _window_size(batch.get("setup", []), win_w, win_h)
     # ID 列を必ず Col1 にそろえる（明細 CSV の先頭列 = ID という運用に合わせる）
     cols: list = [id_col]
     L: list = []
@@ -1186,7 +1239,10 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"#           ダウンロード保存先: {_dl_dir}")
     A(f"# 備考：{datetime.now():%Y/%m/%d} 生成 ／ ブラウザー={browser}"
       f" ／ ドライバー自動取得={'有効' if auto_driver else '無効'}"
+      f" ／ プロキシ自動={'有効' if proxy_auto else '無効'}"
       f" ／ プロキシ={proxy or '未使用'}")
+    A(f"#       MaxItems={max_items} ／ ウィンドウ={win_w}×{win_h}"
+      f" ／ ドライバー置き場所={drv_dir}")
     A("# ============================================================")
     A("# LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai")
     A("# Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).")
@@ -1217,7 +1273,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("#   （http=…;https=…）のときは自動をあきらめ、下の手の設定を使う。")
     A("#   どちらになったかは pad_progress.log に 1 行残る。")
     A("# ProxyAuto = False … 下の UseProxy / ProxyAddr をそのまま使う。")
-    A("SET ProxyAuto TO True")
+    A(f"SET ProxyAuto TO {'True' if proxy_auto else 'False'}")
     if proxy:
         A("# UseProxy を False にすると直結（練習サイト用）に戻る。")
         A("SET UseProxy TO True")
@@ -1244,7 +1300,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("")
     A("# --- 運用スイッチ ---")
     A("# まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす")
-    A("SET MaxItems TO 1")
+    A(f"SET MaxItems TO {max_items}")
     A("# 起動したブラウザーとドライバーの種類・バージョンをダイアログで出す")
     A("# False にしてもログ（pad_progress.log）には必ず 1 行残る")
     A("SET ShowDriverInfo TO True")
@@ -1255,9 +1311,9 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("    SET ResultFile TO $'''%BaseDir%\\\\pad_result_retry.csv'''")
     A("END")
     A("")
-    _arg = _robin_under_base(driver_exe, out_dir)
-    _edge = _arg if browser == "edge" else "$" + Q_ + "%BaseDir%\\\\msedgedriver.exe" + Q_
-    _chrome = _arg if browser == "chrome" else "$" + Q_ + "%BaseDir%\\\\chromedriver.exe" + Q_
+    # ファイル名はブラウザーで決まる。置き場所（フォルダ）は両方で共通。
+    _edge = _robin_under_base(drv_dir + "\\msedgedriver.exe", out_dir)
+    _chrome = _robin_under_base(drv_dir + "\\chromedriver.exe", out_dir)
     A(f"SET EdgeDriverExe TO {_edge}")
     A(f"SET ChromeDriverExe TO {_chrome}")
     A("SET DriverExe TO EdgeDriverExe")
@@ -1278,11 +1334,12 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
         A(f"SET DetailsFile TO {_robin_under_base(details_path, out_dir)}")
         A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''")
     A("SET LogFile TO $'''%BaseDir%\\\\pad_progress.log'''")
-    _vw = next((s for s in setup if s.get("type") == "setViewport"), {})
     A("# ブラウザーのウィンドウサイズ。**エビデンスに写る範囲はここで決まる。**")
     A("# 複数の PC に配布する場合は、一番小さい画面に収まる値にそろえること。")
-    A(f"SET WinW TO {int(_vw.get('width', 1366) or 1366)}")
-    A(f"SET WinH TO {int(_vw.get('height', 900) or 900)}")
+    A("# FullShot が True なら縦長のページも 1 枚に収まるので、縦を小さめに")
+    A("# そろえてもエビデンスは切れない。")
+    A(f"SET WinW TO {win_w}")
+    A(f"SET WinH TO {win_h}")
     A("# エビデンスをページ全体で撮るか。True なら、画面に入りきらない縦長・横長の")
     A("# ページも 1 枚に収める。False なら見えている範囲だけ。")
     A("SET FullShot TO True")
@@ -2209,8 +2266,16 @@ def _warn_exec_paths(args) -> None:
         return len(s) > 2 and s[1] == ":" and s[2] in "\\/" or s.startswith("\\\\")
 
     checks = [("--details", args.details),
-              ("--driver-exe", args.driver_exe),
+              ("--driver-dir", args.driver_dir) if getattr(args, "driver_dir", "")
+              else ("--driver-exe", args.driver_exe),
               ("--pad-out-dir", args.pad_out_dir)]
+    # --driver-exe は互換用で、フォルダだけを使う。独自のファイル名は効かない。
+    if not getattr(args, "driver_dir", "") and args.driver_exe:
+        name = args.driver_exe.replace("/", "\\").rsplit("\\", 1)[-1].lower()
+        if name not in ("msedgedriver.exe", "chromedriver.exe"):
+            print(f"  ⚠ --driver-exe のファイル名（{name}）は使われません。"
+                  "フォルダだけを取り、ファイル名はブラウザーに合わせて"
+                  " msedgedriver.exe / chromedriver.exe になります。")
     bad = [(name, val) for name, val in checks if val and not looks_windows_abs(val)]
     if not bad:
         return
@@ -2285,8 +2350,12 @@ def main() -> None:
     p.add_argument("--out-dir", default="output")
     p.add_argument("--trace", help="PAD 用手順書（Markdown）の出力先")
     p.add_argument("--robin", help="PAD に貼り付ける Robin コードの出力先（ブラウザ操作は不要）")
+    p.add_argument("--driver-dir", default="",
+                   help="ドライバーの置き場所（フォルダ）。ファイル名はブラウザーに合わせて "
+                        "msedgedriver.exe / chromedriver.exe になる。自動取得オフのときだけ使う")
     p.add_argument("--driver-exe", default=r"C:\WebDriver\msedgedriver.exe",
-                   help="Robin 生成時に埋め込む msedgedriver のパス")
+                   help="（互換用）ドライバーのパス。フォルダだけが使われる。"
+                        "--driver-dir があればそちらを優先")
     p.add_argument("--pad-out-dir", default=r"C:\PAD\output",
                    help="Robin 生成時に埋め込む出力フォルダ")
     p.add_argument("--pad-browser", choices=["edge", "chrome"], default="edge",
@@ -2305,13 +2374,21 @@ def main() -> None:
                         "実行環境のパスを渡すこと。"
                         "ログや結果CSVと同じフォルダにすると、待機中に更新された"
                         "ログを拾って付け替えてしまうので、専用のフォルダにする")
-    p.add_argument("--auto-driver", action="store_true",
-                   help="Selenium Manager でドライバーを自動取得する行を入れる"
-                        "（selenium-manager-windows.exe を実行環境の BaseDir に置くこと）")
+    p.add_argument("--auto-driver", action=argparse.BooleanOptionalAction, default=True,
+                   help="ドライバーを自動取得する（既定オン。外すときは --no-auto-driver）")
+    p.add_argument("--proxy-auto", action=argparse.BooleanOptionalAction, default=True,
+                   help="Windows のプロキシ設定に合わせて直結／プロキシを切り替える"
+                        "（既定オン。外すときは --no-proxy-auto）")
+    p.add_argument("--win-w", type=int, default=0,
+                   help="ブラウザーの幅（既定: 録画の setViewport、無ければ 1250）")
+    p.add_argument("--win-h", type=int, default=0,
+                   help="ブラウザーの高さ（既定: 録画の setViewport、無ければ 900）")
     p.add_argument("--proxy", default="",
                    help="外部サイト用プロキシ host:port（例 proxy.example.com:8080）。"
-                        "localhost/file:// は通さない。省略時はプロキシなし")
-    p.add_argument("--max-items", type=int, default=0)
+                        "localhost/file:// は通さない。省略時はプロキシなし。"
+                        "--proxy-auto のときは、自動で決められない場合にだけ使う")
+    p.add_argument("--max-items", type=int, default=0,
+                   help="処理する件数の上限。Robin では MaxItems になる（既定 1）")
     p.add_argument("--stop-on-error", action="store_true")
     args = p.parse_args()
 
@@ -2335,7 +2412,11 @@ def main() -> None:
                           args.shot_name, args.download_dir,
                           args.details_from_result,
                           args.driver_exe, args.pad_out_dir, args.proxy,
-                          args.auto_driver, args.pad_browser)
+                          args.auto_driver, args.pad_browser,
+                          proxy_auto=args.proxy_auto,
+                          max_items=args.max_items or 1,
+                          win_w=args.win_w, win_h=args.win_h,
+                          driver_dir=args.driver_dir)
         js_out = out[:-len(".robin.txt")] + ".jsact.js" if out.endswith(".robin.txt") \
             else os.path.splitext(out)[0] + ".jsact.js"
         print(f"📄 PAD 用 Robin コード: {out}")
