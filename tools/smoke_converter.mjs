@@ -19,6 +19,41 @@ for (const id of ["run", "copy", "save", "copyJs", "batchFile", "drop", "ver",
                   "idcol", "idcolHint", "detailsFile"]) {
   if (!d.getElementById(id)) { errors.push("要素が無い: #" + id); }
 }
+// 3. オプションの欄（ドライバーはフォルダで受け取る。exe のパス欄は残さない）
+for (const id of ["driverDir", "proxyAuto", "autodrv", "maxItems", "winW", "winH"]) {
+  if (!d.getElementById(id)) { errors.push("要素が無い: #" + id); }
+}
+{
+  const W = dom.window.PadConvert;
+  const ws = W.windowSize([], "abc", "0");
+  if (ws.w !== 1250 || ws.h !== 900) { errors.push("ウィンドウの既定が 1250×900 でない: " + JSON.stringify(ws)); }
+  const wr = W.windowSize([{ type: "setViewport", width: 1366, height: 1134 }]);
+  if (wr.w !== 1366 || wr.h !== 1134) { errors.push("録画の setViewport を使っていない"); }
+  if (W.driverDirOf("", "C:\\temp\\msedgedriver.exe") !== "C:\\temp") {
+    errors.push("exe のパスからフォルダを取り出せていない");
+  }
+}
+if (d.getElementById("driver")) { errors.push("ドライバーの exe パス欄が残っている: #driver"); }
+for (const id of ["proxyAuto", "autodrv"]) {
+  if (d.getElementById(id) && !d.getElementById(id).checked) {
+    errors.push("既定でオンになっていない: #" + id);
+  }
+}
+if (d.getElementById("maxItems") && d.getElementById("maxItems").value !== "1") {
+  errors.push("MaxItems の既定が 1 でない");
+}
+// 自動取得オンのあいだはドライバーの置き場所を使わないので、灰色にする
+{
+  const ad = d.getElementById("autodrv"), dd = d.getElementById("driverDir");
+  if (ad && dd) {
+    if (!dd.disabled) { errors.push("自動取得オンなのに置き場所の欄が使える"); }
+    ad.checked = false;
+    ad.dispatchEvent(new dom.window.Event("change"));
+    if (dd.disabled) { errors.push("自動取得をオフにしても置き場所の欄が灰色のまま"); }
+    ad.checked = true;
+    ad.dispatchEvent(new dom.window.Event("change"));
+  }
+}
 // 共通 JavaScript の保存はウイルス対策にブロックされるため、あってはいけない
 if (d.getElementById("saveJs")) { errors.push("保存ボタンが残っている: #saveJs"); }
 
@@ -106,7 +141,8 @@ if (robinOn.indexOf("pad_result_2.csv") < 0) {
 // 画面の入力欄と、設定を書き戻す先の id がそろっていること。
 // idCol / idcol のように大文字小文字を取り違えると、読み込んでも入らない。
 const uiHtml = fs.readFileSync("tools/pad_converter.html", "utf8");
-["idcol", "browser", "shotName", "detailsFromResult"].forEach((id) => {
+["idcol", "browser", "shotName", "detailsFromResult",
+ "driverDir", "proxyAuto", "maxItems", "winW", "winH"].forEach((id) => {
   if (uiHtml.indexOf('id="' + id + '"') < 0) {
     errors.push("入力欄が見つからない: " + id);
   }

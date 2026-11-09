@@ -675,16 +675,39 @@ PM9000000002,900000000002,1     ← skip 列に何か書くとこの行は飛ば
 明細ファイル (--details)：   C:\temp\edi2_batch.csv
 ID 列 (--id-column)： 　プロジェクト番号
 　　　　下の「明細ファイル」を選べば先頭列が自動で入ります
-ドライバー (--driver-exe)：　C:\temp\msedgedriver.exe
+ドライバーの置き場所 (--driver-dir)：　C:\temp
+　　　　フォルダだけを書く。ファイル名はブラウザーに合わせて msedgedriver.exe / chromedriver.exe になる
+　　　　（ドライバー自動取得がオンのあいだは灰色になり、使われない）
 BaseDir (--pad-out-dir)：  C:\temp
 
 3. オプション
 ブラウザー (--pad-browser)：  edge
-プロキシ (--proxy) ： 　proxy.example.com:8080
-ドライバー自動取得：   --auto-driver
+プロキシ自動切り替え：　☑ Windows のプロキシ設定に合わせる（--proxy-auto）
+ドライバー自動取得：　☑ ブラウザーに合わせて自動で取ってくる（--auto-driver）
+　　　　どちらも既定はオン
+プロキシ（自動で決められないとき）(--proxy) ： 　proxy.example.com:8080
 明細ファイル（列名の確認用・任意） ファイルが選択されていません
 上の「明細ファイル (--details)」は実行環境のパスを書くだけで、中身は読めません。 
 列名を確かめたい場合は、変換するこの PC にある同じ CSV をここで選びます。
+
+運用スイッチ
+件数リミッター MaxItems：　1 件　※ まず 1 件で試し、正常に動くのを確かめてから増やす
+ウィンドウサイズ：　横 1250 × 縦 900（既定。録画 JSON を読むと録画時の大きさが入る）
+　　　　※ 複数の PC に配布する場合は、一番小さい画面に収まる値にそろえる
+
+- **ドライバーの置き場所**は、ドライバー自動取得をオフにしたときだけ使う。Edge と Chrome の
+  どちらを選んでも、同じフォルダの中のそれぞれのドライバー（`msedgedriver.exe` /
+  `chromedriver.exe`）を使う。
+- **ウィンドウサイズ**は、録画 JSON やバッチ定義を読み込むと、録画時の `setViewport` の値が
+  自動で入る。書き換えた値が優先される。エビデンスはページ全体を撮るので、縦を小さめに
+  そろえても写る範囲は切れない。
+- 変換した条件は、生成物の冒頭の備考欄に残る。配布した Robin を開けば、どの条件で
+  作ったかが分かる。
+
+```
+# 備考：2026/11/10 生成 ／ ブラウザー=chrome ／ ドライバー自動取得=有効 ／ プロキシ自動=有効 ／ プロキシ=未使用
+#       MaxItems=1 ／ ウィンドウ=1250×900 ／ ドライバー置き場所=C:\temp
+```
 
 
 
@@ -1333,8 +1356,8 @@ XXPO:検収状況一覧 への要求は予定されました。 要求IDは 1319
 | `pad_sample.jsact.js` | 共通 JavaScript（`%JsAct%` の継ぎ足しが失敗したとき手で貼る用） |
 
 `sample.html` / `sample_batch.csv` / `pad_sample.jsact.js` を `C:\temp\` に置き、
-`msedgedriver.exe`（と `--auto-driver` を使うなら `selenium-manager-windows.exe`）を
-同じ場所に用意してから、`pad_sample.robin.txt` を PAD のキャンバスに貼り付けて実行する。
+ドライバーは既定で自動取得されるので、用意しなくてよい（自動取得を使わない場合だけ
+`msedgedriver.exe` を同じ場所に置く）。そのうえで、`pad_sample.robin.txt` を PAD のキャンバスに貼り付けて実行する。
 
 `pad_sample.robin.txt` は手で保守せず、生成器から作り直す。
 
@@ -1343,8 +1366,8 @@ python pad_webdriver_ref.py \
   --batch examples/pad/pad_sample_batch.json \
   --details "C:\temp\sample_batch.csv" --id-column ID \
   --robin examples/pad/pad_sample.robin.txt \
-  --driver-exe "C:\temp\msedgedriver.exe" \
-  --pad-out-dir "C:\temp" --pad-browser edge --auto-driver
+  --driver-dir "C:\temp" \
+  --pad-out-dir "C:\temp" --pad-browser edge
 ```
 
 付属の `sample_batch.csv` は、**1 回の実行で成功・失敗・復帰・スキップの 4 経路すべてを通る**
@@ -1629,7 +1652,7 @@ PM9000000002,900000000002
 python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
     --details "C:\temp\edi2_batch.csv" --id-column "プロジェクト番号" `
     --robin output/pad_flow.robin.txt `
-    --driver-exe "C:\temp\msedgedriver.exe" --pad-out-dir "C:\temp"
+    --driver-dir "C:\temp" --pad-out-dir "C:\temp"
 ```
 
 **引数のパスは 2 種類あるので混ぜないこと。**
@@ -1637,7 +1660,7 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 | 引数 | どのマシンのパスか |
 | --- | --- |
 | `--batch` / `--robin` | **変換環境**（Python が使える PC）のパス。リポジトリ相対でよい |
-| `--details` / `--driver-exe` / `--pad-out-dir` | **実行環境**（PAD を動かす PC）のパス。生成された Robin に文字列として埋め込まれる |
+| `--details` / `--driver-dir` / `--pad-out-dir` | **実行環境**（PAD を動かす PC）のパス。生成された Robin に文字列として埋め込まれる |
 
 | 引数 | 役割 |
 | --- | --- |
@@ -1645,16 +1668,23 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 | `--details` | 明細 CSV のパス。`SET DetailsFile` になる |
 | `--id-column` | ID 列の名前。この列が `Col1` になり、進捗・結果・再実行のキーになる |
 | `--robin` | 出力先。同名で `.jsact.js` も一緒に出る（ブラウザ版はコピーのみ） |
-| `--driver-exe` | `msedgedriver.exe` のパス。`SET DriverExe` になる |
+| `--driver-dir` | ドライバーの置き場所（フォルダ）。`SET EdgeDriverExe` / `SET ChromeDriverExe` になる（ファイル名はブラウザーで決まる）。自動取得オフのときだけ使う |
+| `--driver-exe` | （互換用）ドライバーのパス。フォルダだけが使われ、ファイル名は無視される |
 | `--pad-out-dir` | 出力フォルダ。`SET BaseDir` になる |
+| `--auto-driver` / `--no-auto-driver` | ドライバーの自動取得（既定オン） |
+| `--proxy-auto` / `--no-proxy-auto` | Windows のプロキシ設定に合わせる（既定オン） |
+| `--proxy` | 手の設定のプロキシ `host:port`。`--proxy-auto` のときは、自動で決められない場合にだけ使う |
+| `--max-items` | `SET MaxItems`（既定 1） |
+| `--win-w` / `--win-h` | ウィンドウサイズ（既定: 録画の `setViewport`、無ければ 1250 × 900） |
 
-`--details` と `--driver-exe` が `--pad-out-dir` の配下にある場合、生成される Robin は
+`--details` と `--driver-dir` が `--pad-out-dir` の配下にある場合、生成される Robin は
 それらを `%BaseDir%` 相対で出力する。上の例なら次のようになり、**配布時に直すのは
 `BaseDir` の 1 行だけ**で済む。
 
 ```
 SET BaseDir TO $'''C:\\temp'''
-SET DriverExe TO $'''%BaseDir%\\msedgedriver.exe'''
+SET EdgeDriverExe TO $'''%BaseDir%\\msedgedriver.exe'''
+SET ChromeDriverExe TO $'''%BaseDir%\\chromedriver.exe'''
 SET DetailsFile TO $'''%BaseDir%\\edi2_batch.csv'''
 SET ResultFile TO $'''%BaseDir%\\pad_result.csv'''
 SET LogFile TO $'''%BaseDir%\\pad_progress.log'''
