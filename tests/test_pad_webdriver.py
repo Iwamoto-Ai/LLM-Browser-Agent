@@ -1013,7 +1013,7 @@ def test_element_steps_retry_until_found(tmp_path):
                           str(tmp_path / "f.robin.txt"), out_dir=r"C:\temp")
     txt = open(out, encoding="utf-8").read()
     lines = txt.splitlines()
-    assert f"SET StepWait TO {pad.STEP_WAIT}" in lines and pad.STEP_WAIT == 15
+    assert "SET StepWait TO 15" in lines and pad.STEP_WAIT == 15
     loops = [ln.strip() for ln in lines
              if ln.strip() == "LOOP WHILE ActFound = False AND ActWaited < StepWait"]
     clicks_and_fills = [ln for ln in lines
@@ -1027,3 +1027,42 @@ def test_element_steps_retry_until_found(tmp_path):
     i = lines.index(next(ln for ln in lines if ln.strip() == loops[0]))
     body = "\n".join(lines[i:i + 16])
     assert "SET ActFound TO True" in body and "WAIT 1" in body
+
+
+def test_site_settings_precedence():
+    """サイトの設定は 指定 → バッチ定義の options → 既定 の順で決まる。"""
+    assert pad.site_settings({}) == {"stepWait": 15, "preferClickable": True,
+                                     "blurAfterFill": True}
+    b = {"options": {"stepWait": 25, "preferClickable": False, "blurAfterFill": False}}
+    assert pad.site_settings(b) == {"stepWait": 25, "preferClickable": False,
+                                    "blurAfterFill": False}
+    assert pad.site_settings(b, 9, True, None) == {"stepWait": 9, "preferClickable": True,
+                                                   "blurAfterFill": False}
+    # 数字でない・0 以下の待ち時間は既定に戻す
+    assert pad.site_settings({"options": {"stepWait": "x"}})["stepWait"] == 15
+    assert pad.site_settings({"options": {"stepWait": 0}})["stepWait"] == 15
+
+
+def test_js_act_flags():
+    """共通 JS の先頭行でサイトの設定を切り替える。既定はどちらもオン。"""
+    on = pad.js_act_oneline()
+    assert on.startswith("var PREFER = true, BLUR = true;")
+    off = pad.js_act_oneline(False, False)
+    assert off.startswith("var PREFER = false, BLUR = false;")
+    assert on[len(pad.JS_ACT_FLAGS):] == off[len("var PREFER = false, BLUR = false;"):]
+    # Robin と JSON に安全に埋め込める書き方を守る
+    for bad in ('"', "'", "\\"):
+        assert bad not in on
+
+
+def test_site_settings_from_batch_options(tmp_path):
+    """バッチ定義の options に保存したサイトの設定が、生成物に反映される。"""
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    batch = load_recording(os.path.join(here, "recordings", "edi2_practice_batch.json"))
+    batch["options"] = {"stepWait": 25, "preferClickable": False, "blurAfterFill": False}
+    out = pad.write_robin(batch, r"C:\temp\d.csv", "プロジェクト番号",
+                          str(tmp_path / "f.robin.txt"), out_dir=r"C:\temp")
+    txt = open(out, encoding="utf-8").read()
+    assert "SET StepWait TO 25" in txt.splitlines()
+    assert "var PREFER = false, BLUR = false;" in txt
+    assert "サイトの設定: 待つ上限=25 秒 ／ 押せる要素を優先=無効 ／ 入力後にフォーカスを外す=無効" in txt

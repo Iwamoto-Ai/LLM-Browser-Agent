@@ -1,0 +1,545 @@
+{
+    "title": "納入登録の録画（Oracle iSupplier Portal 型・番号はダミー）",
+    "steps": [
+        {
+            "type": "setViewport",
+            "width": 1097,
+            "height": 868,
+            "deviceScaleFactor": 1,
+            "isMobile": false,
+            "hasTouch": false,
+            "isLandscape": false
+        },
+        {
+            "type": "navigate",
+            "url": "https://edi.example.com/OA_HTML/OA.jsp?OAFunc=OANEWHOMEPAGE",
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "https://edi.example.com/OA_HTML/OA.jsp?OAFunc=OANEWHOMEPAGE",
+                    "title": "ホーム"
+                }
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "div.textdivresp"
+                ],
+                [
+                    "xpath///*[@id=\"51002:177:-1:0:mainMenuRESTEcAofmmC\"]/a/div[2]"
+                ],
+                [
+                    "pierce/div.textdivresp"
+                ],
+                [
+                    "text/仕入先"
+                ]
+            ],
+            "offsetY": 14.511566162109375,
+            "offsetX": 54.173606872558594
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "#\\35 1002\\:177\\:75557\\:0\\:mainMenuRESTYldxQvN- > a > div.textdivresp"
+                ],
+                [
+                    "xpath///*[@id=\"51002:177:75557:0:mainMenuRESTYldxQvN-\"]/a/div[2]"
+                ],
+                [
+                    "pierce/#\\35 1002\\:177\\:75557\\:0\\:mainMenuRESTYldxQvN- > a > div.textdivresp"
+                ],
+                [
+                    "text/取引情報入力・照会"
+                ]
+            ],
+            "offsetY": 14.817108154296875,
+            "offsetX": 91.18286895751953
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "#取引情報入力・照会 div.textdivresp"
+                ],
+                [
+                    "xpath///*[@id=\"51002:177:94028:0:mainMenuREST_v676TBE\"]/a/div[2]"
+                ],
+                [
+                    "pierce/#取引情報入力・照会 div.textdivresp"
+                ],
+                [
+                    "text/帳票出力"
+                ]
+            ],
+            "offsetY": 16.539337158203125,
+            "offsetX": 50.19212341308594
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/ホーム[role=\"image\"]"
+                ],
+                [
+                    "td:nth-of-type(4) td:nth-of-type(2) img"
+                ],
+                [
+                    "xpath///*[@id=\"globalHeaderID\"]/tbody/tr/td[2]/a/div/img"
+                ],
+                [
+                    "pierce/td:nth-of-type(4) td:nth-of-type(2) img"
+                ]
+            ],
+            "offsetY": 11.86111068725586,
+            "offsetX": 19.13885498046875,
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "https://edi.example.com/OA_HTML/OA.jsp?OAFunc=OANEWHOMEPAGE&oas=XXXX",
+                    "title": ""
+                }
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "#LI取引情報入力・照会 div.textdiv"
+                ],
+                [
+                    "xpath///*[@id=\"LI取引情報入力・照会\"]/a/div[2]"
+                ],
+                [
+                    "pierce/#LI取引情報入力・照会 div.textdiv"
+                ]
+            ],
+            "offsetY": 13.67822265625,
+            "offsetX": 58.19212341308594,
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "https://edi.example.com/OA_HTML/RF.jsp?function_id=0&resp_id=0&resp_appl_id=0&security_group_id=0&lang_code=JA&oas=XXXX&params=XXXX",
+                    "title": ""
+                }
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "#PosHpgGenericUrl3c"
+                ],
+                [
+                    "xpath///*[@id=\"PosHpgGenericUrl3c\"]"
+                ],
+                [
+                    "pierce/#PosHpgGenericUrl3c"
+                ]
+            ],
+            "offsetY": 4.944427490234375,
+            "offsetX": 16.3587646484375,
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "https://edi.example.com/OA_HTML/OA.jsp?_rc=POSASNSELECTTASK&_ri=177&addBreadCrumb=Y&_ti=0&oapc=5&oas=XXXX",
+                    "title": ""
+                }
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/納入登録"
+                ],
+                [
+                    "#oafcontent tr:nth-of-type(2) a"
+                ],
+                [
+                    "xpath///*[@id=\"PosCreateAsnLink\"]"
+                ],
+                [
+                    "pierce/#oafcontent tr:nth-of-type(2) a"
+                ]
+            ],
+            "offsetY": 5.870361328125,
+            "offsetX": 27.664348602294922,
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "https://edi.example.com/OA_HTML/OA.jsp?_rc=POSASNMAINPAGE&_ri=177&AsnType=ASN&addBreadCrumb=Y&_ti=0&oapc=6&oas=XXXX",
+                    "title": ""
+                }
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/拡張検索"
+                ],
+                [
+                    "#AdvSearchBtn"
+                ],
+                [
+                    "xpath///*[@id=\"AdvSearchBtn\"]"
+                ],
+                [
+                    "pierce/#AdvSearchBtn"
+                ],
+                [
+                    "text/拡張検索"
+                ]
+            ],
+            "offsetY": 5.49072265625,
+            "offsetX": 30.564788818359375,
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "https://edi.example.com/OA_HTML/OA.jsp?_rc=POSASNMAINPAGE&_ri=177&AsnType=ASN&addBreadCrumb=Y&_ti=0&oapc=7&oas=XXXX",
+                    "title": ""
+                }
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/発注番号[role=\"textbox\"]"
+                ],
+                [
+                    "#Value_0"
+                ],
+                [
+                    "xpath///*[@id=\"Value_0\"]"
+                ],
+                [
+                    "pierce/#Value_0"
+                ]
+            ],
+            "offsetY": 6.83563232421875,
+            "offsetX": 42.6805419921875
+        },
+        {
+            "type": "change",
+            "value": "900000000001",
+            "selectors": [
+                [
+                    "aria/発注番号[role=\"textbox\"]"
+                ],
+                [
+                    "#Value_0"
+                ],
+                [
+                    "xpath///*[@id=\"Value_0\"]"
+                ],
+                [
+                    "pierce/#Value_0"
+                ]
+            ],
+            "target": "main"
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/進む"
+                ],
+                [
+                    "td:nth-of-type(4) > button:nth-of-type(1)"
+                ],
+                [
+                    "xpath///*[@id=\"AdvSearch\"]/table[3]/tbody/tr[9]/td[4]/button[1]"
+                ],
+                [
+                    "pierce/td:nth-of-type(4) > button:nth-of-type(1)"
+                ],
+                [
+                    "text/進む"
+                ]
+            ],
+            "offsetY": 7.38885498046875,
+            "offsetX": 20.020828247070312,
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "https://edi.example.com/OA_HTML/OA.jsp?page=/oracle/apps/pos/asn/webui/PosAsnMainAdvSrchPG&searchType=advancedSearch&fwkQBSearchTypeSource=/oracle/apps/pos/asn/webui/PosAsnMainAdvSrchPG__AsnQueryRN__177&_ti=0&retainAM=Y&addBreadCrumb=Y&oapc=10&oas=XXXX",
+                    "title": ""
+                }
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "#M__Idb"
+                ],
+                [
+                    "xpath///*[@id=\"M__Idb\"]"
+                ],
+                [
+                    "pierce/#M__Idb"
+                ]
+            ],
+            "offsetY": 1.88885498046875,
+            "offsetX": 2.4236106872558594
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/納入に追加"
+                ],
+                [
+                    "#PosAsnAddToCart"
+                ],
+                [
+                    "xpath///*[@id=\"PosAsnAddToCart\"]"
+                ],
+                [
+                    "pierce/#PosAsnAddToCart"
+                ],
+                [
+                    "text/納入に追加"
+                ]
+            ],
+            "offsetY": 4.26385498046875,
+            "offsetX": 15.599533081054688,
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "https://edi.example.com/OA_HTML/OA.jsp?page=/oracle/apps/pos/asn/webui/PosAsnMainAdvSrchPG&searchType=advancedSearch&fwkQBSearchTypeSource=/oracle/apps/pos/asn/webui/PosAsnMainAdvSrchPG__AsnQueryRN__177&_ti=0&retainAM=Y&addBreadCrumb=Y&oapc=11&oas=XXXX",
+                    "title": ""
+                }
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "td.x7v label"
+                ],
+                [
+                    "xpath///*[@id=\"N350\"]/tbody/tr/td[1]/a/label"
+                ],
+                [
+                    "pierce/td.x7v label"
+                ],
+                [
+                    "text/納入ヘッダー"
+                ]
+            ],
+            "offsetY": 6.381927490234375,
+            "offsetX": 27.289348602294922,
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "https://edi.example.com/OA_HTML/OA.jsp?page=/oracle/apps/pos/asn/webui/PosAsnCreatePG&OA_SubTabIdx=1&_ti=0&retainAM=Y&addBreadCrumb=Y&oapc=13&oas=XXXX",
+                    "title": ""
+                }
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/納入番号"
+                ],
+                [
+                    "#ShipNumEntry"
+                ],
+                [
+                    "xpath///*[@id=\"ShipNumEntry\"]"
+                ],
+                [
+                    "pierce/#ShipNumEntry"
+                ]
+            ],
+            "offsetY": 5.111083984375,
+            "offsetX": 42.10185241699219
+        },
+        {
+            "type": "change",
+            "value": "PM9000000001",
+            "selectors": [
+                [
+                    "aria/納入番号"
+                ],
+                [
+                    "#ShipNumEntry"
+                ],
+                [
+                    "xpath///*[@id=\"ShipNumEntry\"]"
+                ],
+                [
+                    "pierce/#ShipNumEntry"
+                ]
+            ],
+            "target": "main"
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/納入日"
+                ],
+                [
+                    "#ExpRcptDateEntry"
+                ],
+                [
+                    "xpath///*[@id=\"ExpRcptDateEntry\"]"
+                ],
+                [
+                    "pierce/#ExpRcptDateEntry"
+                ]
+            ],
+            "offsetY": 1.874969482421875,
+            "offsetX": 20.361099243164062
+        },
+        {
+            "type": "change",
+            "value": "2026/09/01",
+            "selectors": [
+                [
+                    "aria/納入日"
+                ],
+                [
+                    "#ExpRcptDateEntry"
+                ],
+                [
+                    "xpath///*[@id=\"ExpRcptDateEntry\"]"
+                ],
+                [
+                    "pierce/#ExpRcptDateEntry"
+                ]
+            ],
+            "target": "main"
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/発行確認"
+                ],
+                [
+                    "#PreviewBtn"
+                ],
+                [
+                    "xpath///*[@id=\"PreviewBtn\"]"
+                ],
+                [
+                    "pierce/#PreviewBtn"
+                ]
+            ],
+            "offsetY": 6.1226806640625,
+            "offsetX": 37.11572265625,
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "https://edi.example.com/OA_HTML/OA.jsp?page=/oracle/apps/pos/asn/webui/PosAsnCreatePG&OA_SubTabIdx=0&_ti=0&retainAM=Y&addBreadCrumb=S&oapc=15&oas=XXXX",
+                    "title": ""
+                }
+            ]
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/発行(M)",
+                    "aria/[role=\"generic\"]"
+                ],
+                [
+                    "div.x6d td:nth-of-type(4) span"
+                ],
+                [
+                    "xpath///*[@id=\"SubmitBtn\"]/span"
+                ],
+                [
+                    "pierce/div.x6d td:nth-of-type(4) span"
+                ]
+            ],
+            "offsetY": 4.1782379150390625,
+            "offsetX": 2.40966796875,
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "https://edi.example.com/OA_HTML/OA.jsp?page=/oracle/apps/pos/asn/webui/PosAsnPreviewPG&AsnType=ASN&_ti=0&retainAM=Y&addBreadCrumb=N&oapc=17&oas=XXXX",
+                    "title": ""
+                }
+            ]
+        },
+        {
+            "type": "keyDown",
+            "target": "main",
+            "key": "Shift"
+        },
+        {
+            "type": "keyDown",
+            "target": "main",
+            "key": "Meta"
+        },
+        {
+            "type": "keyUp",
+            "key": "S",
+            "target": "main"
+        },
+        {
+            "type": "keyUp",
+            "key": "Shift",
+            "target": "main"
+        },
+        {
+            "type": "keyUp",
+            "key": "Meta",
+            "target": "main"
+        },
+        {
+            "type": "click",
+            "target": "main",
+            "selectors": [
+                [
+                    "aria/ホーム[role=\"image\"]"
+                ],
+                [
+                    "td:nth-of-type(4) td:nth-of-type(2) img"
+                ],
+                [
+                    "xpath///*[@id=\"globalHeaderID\"]/tbody/tr/td[2]/a/div/img"
+                ],
+                [
+                    "pierce/td:nth-of-type(4) td:nth-of-type(2) img"
+                ]
+            ],
+            "offsetY": 5.861110687255859,
+            "offsetX": 15.12957763671875,
+            "assertedEvents": [
+                {
+                    "type": "navigation",
+                    "url": "https://edi.example.com/OA_HTML/OA.jsp?OAFunc=OANEWHOMEPAGE&oas=XXXX",
+                    "title": ""
+                }
+            ]
+        }
+    ]
+}
