@@ -9,8 +9,9 @@
 #           BaseDir: C:\temp
 #           エビデンス名: @ID@__@KEY@__@STAMP@
 #           ダウンロード保存先: C:\temp\download
-# 備考：2026/11/10 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ自動=有効 ／ プロキシ=未使用
+# 備考：2026/11/12 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ自動=有効 ／ プロキシ=未使用
 #       MaxItems=1 ／ ウィンドウ=1366×900 ／ ドライバー置き場所=C:\temp
+#       サイトの設定: 待つ上限=15 秒 ／ 押せる要素を優先=有効 ／ 入力後にフォーカスを外す=有効
 # ============================================================
 # LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
 # Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).
@@ -64,6 +65,10 @@ SET BaseDir TO $'''C:\\temp'''
 # --- 運用スイッチ ---
 # まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす
 SET MaxItems TO 1
+# 要素が見つかるまで待つ上限（秒）。クリックで画面が切り替わる途中は次の
+# 要素がまだ無いので、1 秒おきに探し直す。見つかればすぐ次へ進む。
+# 遅いサイトで「要素が見つかりません」が続くときは増やす。
+SET StepWait TO 15
 # 起動したブラウザーとドライバーの種類・バージョンをダイアログで出す
 # False にしてもログ（pad_progress.log）には必ず 1 行残る
 SET ShowDriverInfo TO True
@@ -130,55 +135,69 @@ SET SmExe TO $'''selenium-manager-windows.exe'''
 # --- 要素操作の共通 JavaScript ---
 # PAD は長すぎる 1 行を貼り付けても黙って無視するため、短い行に分けて継ぎ足す。
 # （%JsAct% は直前までの内容。順番どおりに貼ること）
-SET JsAct TO $'''var cands = arguments[0], action = arguments[1], value = arguments[2]; var Q = String.fromCharCode(3'''
-SET JsAct TO $'''%JsAct%9), DQ = String.fromCharCode(34); function lit(s) { if (s.indexOf(Q) < 0) { return Q + s + Q; } retu'''
-SET JsAct TO $'''%JsAct%rn DQ + s + DQ; } function docsOf(root, out) { out.push(root); var fs; try { fs = root.querySelector'''
-SET JsAct TO $'''%JsAct%All(`iframe, frame`); } catch (e) { return out; } for (var k = 0; k < fs.length; k++) { var d = null'''
-SET JsAct TO $'''%JsAct%; try { d = fs[k].contentDocument; } catch (e) { d = null; } if (d && out.indexOf(d) < 0) { docsOf(d'''
-SET JsAct TO $'''%JsAct%, out); } } return out; } function allDocs() { try { return docsOf(document, []); } catch (e) { retu'''
-SET JsAct TO $'''%JsAct%rn [document]; } } function qs(doc, sel) { try { return doc.querySelector(sel); } catch (e) { return'''
-SET JsAct TO $'''%JsAct% null; } } function byXPath(doc, xp) { try { return doc.evaluate(xp, doc, null, 9, null).singleNodeV'''
-SET JsAct TO $'''%JsAct%alue; } catch (e) { return null; } } function findIn(doc, sel) { try { if (sel.indexOf(`id/`) === 0)'''
-SET JsAct TO $'''%JsAct% { return doc.getElementById(sel.slice(3)); } if (sel.indexOf(`xpath/`) === 0) { return byXPath(doc,'''
-SET JsAct TO $'''%JsAct% sel.slice(6)); } if (sel.indexOf(`text/`) === 0) { var t = sel.slice(5).trim(); return byXPath(doc,'''
-SET JsAct TO $'''%JsAct% `//*[not(self::script) and normalize-space(text())=` + lit(t) + `]`); } if (sel.indexOf(`aria/`) =='''
-SET JsAct TO $'''%JsAct%= 0) { var n = sel.slice(5).split(`[`)[0].trim(); var el = qs(doc, `[aria-label=` + lit(n) + `]`) ||'''
-SET JsAct TO $'''%JsAct% qs(doc, `[title=` + lit(n) + `]`) || qs(doc, `[alt=` + lit(n) + `]`); if (el) { return el; } el = b'''
-SET JsAct TO $'''%JsAct%yXPath(doc, `//*[not(self::script) and (@aria-label=` + lit(n) + ` or @title=` + lit(n) + ` or @alt='''
-SET JsAct TO $'''%JsAct%` + lit(n) + `)]`); if (el) { return el; } return byXPath(doc, `//*[not(self::script) and normalize-'''
-SET JsAct TO $'''%JsAct%space(text())=` + lit(n) + `]`); } if (sel.indexOf(`row/`) === 0) { var key = sel.slice(4).trim(); v'''
-SET JsAct TO $'''%JsAct%ar rows = doc.querySelectorAll(`tr`); for (var r = 0; r < rows.length; r++) { var txt = (rows[r].inn'''
-SET JsAct TO $'''%JsAct%erText || ``) + (rows[r].textContent || ``); if (txt.indexOf(key) < 0) { continue; } var hit = rows['''
-SET JsAct TO $'''%JsAct%r].querySelector(`a[href], button, input[type=image]`); if (!hit) { hit = rows[r].querySelector(`a, '''
-SET JsAct TO $'''%JsAct%img`); } if (hit) { return hit; } } return null; } if (sel.indexOf(`pierce/`) === 0) { sel = sel.sli'''
-SET JsAct TO $'''%JsAct%ce(7); } return doc.querySelector(sel); } catch (e) { return null; } } function find(sel) { var docs'''
-SET JsAct TO $'''%JsAct% = allDocs(); for (var j = 0; j < docs.length; j++) { var hit = findIn(docs[j], sel); if (hit) { ret'''
-SET JsAct TO $'''%JsAct%urn hit; } } return null; } if (action === `scroll`) { var docs = allDocs(); var moved = 0; for (var'''
-SET JsAct TO $'''%JsAct% j = 0; j < docs.length; j++) { var all = docs[j].querySelectorAll(`div, table, tbody`); for (var k '''
-SET JsAct TO $'''%JsAct%= 0; k < all.length; k++) { var el = all[k]; if (el.scrollHeight > el.clientHeight + 10 && el.client'''
-SET JsAct TO $'''%JsAct%Height > 40) { var before = el.scrollTop; el.scrollTop = before + el.clientHeight; if (el.scrollTop '''
-SET JsAct TO $'''%JsAct%!== before) { moved = moved + 1; } } } if (docs[j].defaultView) { docs[j].defaultView.scrollBy(0, 40'''
-SET JsAct TO $'''%JsAct%0); } } return { ok: true, used: null, moved: moved }; } if (action === `after` || action === `after'''
-SET JsAct TO $'''%JsAct%Digits`) { var docs = allDocs(); var src = ``; for (var j = 0; j < docs.length; j++) { var b = docs['''
-SET JsAct TO $'''%JsAct%j].body || docs[j].documentElement; if (b) { src = src + (b.innerText || ``) + ` ` + (b.textContent '''
-SET JsAct TO $'''%JsAct%|| ``) + ` `; } } var at = value ? src.indexOf(value) : -1; if (at < 0) { return { ok: false, used: '''
-SET JsAct TO $'''%JsAct%null }; } var rest = src.slice(at + value.length, at + value.length + 80); var out = ``; var p = 0; '''
-SET JsAct TO $'''%JsAct%if (action === `afterDigits`) { var isNum = function (c) { return c >= `0` && c <= `9`; }; while (p '''
-SET JsAct TO $'''%JsAct%< rest.length && p < 10 && !isNum(rest.charAt(p))) { p = p + 1; } while (p < rest.length && isNum(re'''
-SET JsAct TO $'''%JsAct%st.charAt(p))) { out = out + rest.charAt(p); p = p + 1; } } else { var skip = `:：=　`; var blank = fu'''
-SET JsAct TO $'''%JsAct%nction (c) { return c.charCodeAt(0) <= 32; }; while (p < rest.length && (blank(rest.charAt(p)) || sk'''
-SET JsAct TO $'''%JsAct%ip.indexOf(rest.charAt(p)) >= 0)) { p = p + 1; } var stop = `。、　`; while (p < rest.length && out.len'''
-SET JsAct TO $'''%JsAct%gth < 50 && !blank(rest.charAt(p)) && stop.indexOf(rest.charAt(p)) < 0) { out = out + rest.charAt(p)'''
-SET JsAct TO $'''%JsAct%; p = p + 1; } } if (!out) { return { ok: false, used: null }; } return { ok: true, used: null, text'''
-SET JsAct TO $'''%JsAct%: out }; } if (action === `exists`) { var docs = allDocs(); var txt = ``; for (var j = 0; j < docs.l'''
-SET JsAct TO $'''%JsAct%ength; j++) { var b = docs[j].body || docs[j].documentElement; if (b) { txt = txt + (b.innerText || '''
-SET JsAct TO $'''%JsAct%``) + (b.textContent || ``); } } return { ok: txt.indexOf(value) >= 0, used: null }; } for (var i = '''
-SET JsAct TO $'''%JsAct%0; i < cands.length; i++) { var el = find(cands[i]); if (!el) { continue; } if (action === `click`) '''
-SET JsAct TO $'''%JsAct%{ try { el.scrollIntoView({ block: `center` }); } catch (e) {} el.click(); } else if (action === `fi'''
-SET JsAct TO $'''%JsAct%ll`) { el.focus(); el.value = value; el.dispatchEvent(new Event(`input`, { bubbles: true })); el.dis'''
-SET JsAct TO $'''%JsAct%patchEvent(new Event(`change`, { bubbles: true })); } else if (action === `text`) { var s = el.inner'''
-SET JsAct TO $'''%JsAct%Text || el.textContent || ``; return { ok: true, used: cands[i], text: s.trim() }; } return { ok: tr'''
-SET JsAct TO $'''%JsAct%ue, used: cands[i] }; } return { ok: false, used: null };'''
+SET JsAct TO $'''var PREFER = true, BLUR = true; var cands = arguments[0], action = arguments[1], value = arguments[2'''
+SET JsAct TO $'''%JsAct%]; var Q = String.fromCharCode(39), DQ = String.fromCharCode(34); function lit(s) { if (s.indexOf(Q)'''
+SET JsAct TO $'''%JsAct% < 0) { return Q + s + Q; } return DQ + s + DQ; } function docsOf(root, out) { out.push(root); var f'''
+SET JsAct TO $'''%JsAct%s; try { fs = root.querySelectorAll(`iframe, frame`); } catch (e) { return out; } for (var k = 0; k '''
+SET JsAct TO $'''%JsAct%< fs.length; k++) { var d = null; try { d = fs[k].contentDocument; } catch (e) { d = null; } if (d &'''
+SET JsAct TO $'''%JsAct%& out.indexOf(d) < 0) { docsOf(d, out); } } return out; } function allDocs() { try { return docsOf(d'''
+SET JsAct TO $'''%JsAct%ocument, []); } catch (e) { return [document]; } } function qs(doc, sel) { try { return doc.querySel'''
+SET JsAct TO $'''%JsAct%ector(sel); } catch (e) { return null; } } function qsa(doc, sel) { try { return doc.querySelectorAl'''
+SET JsAct TO $'''%JsAct%l(sel); } catch (e) { return []; } } function byXPath(doc, xp) { try { return doc.evaluate(xp, doc, '''
+SET JsAct TO $'''%JsAct%null, 9, null).singleNodeValue; } catch (e) { return null; } } function byXPathAll(doc, xp) { var ou'''
+SET JsAct TO $'''%JsAct%t = []; try { var r = doc.evaluate(xp, doc, null, 7, null); for (var k = 0; k < r.snapshotLength; k+'''
+SET JsAct TO $'''%JsAct%+) { out.push(r.snapshotItem(k)); } } catch (e) { return out; } return out; } function clickable(el)'''
+SET JsAct TO $'''%JsAct% { var t = String(el.tagName || ``).toLowerCase(); var role = String((el.getAttribute && el.getAttri'''
+SET JsAct TO $'''%JsAct%bute(`role`)) || ``); if (t === `a`) { return el.hasAttribute(`href`) || el.hasAttribute(`onclick`);'''
+SET JsAct TO $'''%JsAct% } if (t === `button` || t === `select` || t === `textarea` || t === `label`) { return true; } if (t'''
+SET JsAct TO $'''%JsAct% === `input`) { return String(el.type || ``).toLowerCase() !== `hidden`; } if (role === `button` || '''
+SET JsAct TO $'''%JsAct%role === `link`) { return true; } return !!(el.hasAttribute && el.hasAttribute(`onclick`)); } functi'''
+SET JsAct TO $'''%JsAct%on shown(el) { try { return el.getClientRects().length > 0; } catch (e) { return true; } } function '''
+SET JsAct TO $'''%JsAct%pickEl(list) { if (!list || !list.length) { return null; } if (list.length === 1 || !PREFER || actio'''
+SET JsAct TO $'''%JsAct%n !== `click`) { return list[0]; } for (var a = 0; a < list.length; a++) { if (clickable(list[a]) &&'''
+SET JsAct TO $'''%JsAct% shown(list[a])) { return list[a]; } } for (var b = 0; b < list.length; b++) { if (clickable(list[b]'''
+SET JsAct TO $'''%JsAct%)) { return list[b]; } } return list[0]; } function findIn(doc, sel) { try { if (sel.indexOf(`id/`) '''
+SET JsAct TO $'''%JsAct%=== 0) { return pickEl(qsa(doc, `[id=` + lit(sel.slice(3)) + `]`)); } if (sel.indexOf(`xpath/`) === '''
+SET JsAct TO $'''%JsAct%0) { return pickEl(byXPathAll(doc, sel.slice(6))); } if (sel.indexOf(`text/`) === 0) { var t = sel.s'''
+SET JsAct TO $'''%JsAct%lice(5).trim(); return byXPath(doc, `//*[not(self::script) and normalize-space(text())=` + lit(t) + '''
+SET JsAct TO $'''%JsAct%`]`); } if (sel.indexOf(`aria/`) === 0) { var n = sel.slice(5).split(`[`)[0].trim(); var el = qs(doc'''
+SET JsAct TO $'''%JsAct%, `[aria-label=` + lit(n) + `]`) || qs(doc, `[title=` + lit(n) + `]`) || qs(doc, `[alt=` + lit(n) + '''
+SET JsAct TO $'''%JsAct%`]`); if (el) { return el; } el = byXPath(doc, `//*[not(self::script) and (@aria-label=` + lit(n) + '''
+SET JsAct TO $'''%JsAct%` or @title=` + lit(n) + ` or @alt=` + lit(n) + `)]`); if (el) { return el; } return byXPath(doc, `/'''
+SET JsAct TO $'''%JsAct%/*[not(self::script) and normalize-space(text())=` + lit(n) + `]`); } if (sel.indexOf(`row/`) === 0)'''
+SET JsAct TO $'''%JsAct% { var key = sel.slice(4).trim(); var rows = doc.querySelectorAll(`tr`); for (var r = 0; r < rows.le'''
+SET JsAct TO $'''%JsAct%ngth; r++) { var txt = (rows[r].innerText || ``) + (rows[r].textContent || ``); if (txt.indexOf(key)'''
+SET JsAct TO $'''%JsAct% < 0) { continue; } var hit = rows[r].querySelector(`a[href], button, input[type=image]`); if (!hit)'''
+SET JsAct TO $'''%JsAct% { hit = rows[r].querySelector(`a, img`); } if (hit) { return hit; } } return null; } if (sel.indexO'''
+SET JsAct TO $'''%JsAct%f(`pierce/`) === 0) { sel = sel.slice(7); } return pickEl(qsa(doc, sel)); } catch (e) { return null;'''
+SET JsAct TO $'''%JsAct% } } function find(sel) { var docs = allDocs(); for (var j = 0; j < docs.length; j++) { var hit = fi'''
+SET JsAct TO $'''%JsAct%ndIn(docs[j], sel); if (hit) { return hit; } } return null; } if (action === `scroll`) { var docs = '''
+SET JsAct TO $'''%JsAct%allDocs(); var moved = 0; for (var j = 0; j < docs.length; j++) { var all = docs[j].querySelectorAll'''
+SET JsAct TO $'''%JsAct%(`div, table, tbody`); for (var k = 0; k < all.length; k++) { var el = all[k]; if (el.scrollHeight >'''
+SET JsAct TO $'''%JsAct% el.clientHeight + 10 && el.clientHeight > 40) { var before = el.scrollTop; el.scrollTop = before + '''
+SET JsAct TO $'''%JsAct%el.clientHeight; if (el.scrollTop !== before) { moved = moved + 1; } } } if (docs[j].defaultView) { '''
+SET JsAct TO $'''%JsAct%docs[j].defaultView.scrollBy(0, 400); } } return { ok: true, used: null, moved: moved }; } if (actio'''
+SET JsAct TO $'''%JsAct%n === `after` || action === `afterDigits`) { var docs = allDocs(); var src = ``; for (var j = 0; j <'''
+SET JsAct TO $'''%JsAct% docs.length; j++) { var b = docs[j].body || docs[j].documentElement; if (b) { src = src + (b.innerT'''
+SET JsAct TO $'''%JsAct%ext || ``) + ` ` + (b.textContent || ``) + ` `; } } var at = value ? src.indexOf(value) : -1; if (at'''
+SET JsAct TO $'''%JsAct% < 0) { return { ok: false, used: null }; } var rest = src.slice(at + value.length, at + value.lengt'''
+SET JsAct TO $'''%JsAct%h + 80); var out = ``; var p = 0; if (action === `afterDigits`) { var isNum = function (c) { return '''
+SET JsAct TO $'''%JsAct%c >= `0` && c <= `9`; }; while (p < rest.length && p < 10 && !isNum(rest.charAt(p))) { p = p + 1; } '''
+SET JsAct TO $'''%JsAct%while (p < rest.length && isNum(rest.charAt(p))) { out = out + rest.charAt(p); p = p + 1; } } else {'''
+SET JsAct TO $'''%JsAct% var skip = `:：=　`; var blank = function (c) { return c.charCodeAt(0) <= 32; }; while (p < rest.leng'''
+SET JsAct TO $'''%JsAct%th && (blank(rest.charAt(p)) || skip.indexOf(rest.charAt(p)) >= 0)) { p = p + 1; } var stop = `。、　`;'''
+SET JsAct TO $'''%JsAct% while (p < rest.length && out.length < 50 && !blank(rest.charAt(p)) && stop.indexOf(rest.charAt(p))'''
+SET JsAct TO $'''%JsAct% < 0) { out = out + rest.charAt(p); p = p + 1; } } if (!out) { return { ok: false, used: null }; } r'''
+SET JsAct TO $'''%JsAct%eturn { ok: true, used: null, text: out }; } if (action === `exists`) { var docs = allDocs(); var tx'''
+SET JsAct TO $'''%JsAct%t = ``; for (var j = 0; j < docs.length; j++) { var b = docs[j].body || docs[j].documentElement; if '''
+SET JsAct TO $'''%JsAct%(b) { txt = txt + (b.innerText || ``) + (b.textContent || ``); } } return { ok: txt.indexOf(value) >'''
+SET JsAct TO $'''%JsAct%= 0, used: null }; } for (var i = 0; i < cands.length; i++) { var el = find(cands[i]); if (!el) { co'''
+SET JsAct TO $'''%JsAct%ntinue; } if (action === `click`) { try { el.scrollIntoView({ block: `center` }); } catch (e) {} el.'''
+SET JsAct TO $'''%JsAct%click(); } else if (action === `fill`) { el.focus(); el.value = value; el.dispatchEvent(new Event(`i'''
+SET JsAct TO $'''%JsAct%nput`, { bubbles: true })); el.dispatchEvent(new Event(`change`, { bubbles: true })); if (BLUR) { tr'''
+SET JsAct TO $'''%JsAct%y { el.blur(); } catch (e) {} } } else if (action === `text`) { var s = el.innerText || el.textConte'''
+SET JsAct TO $'''%JsAct%nt || ``; return { ok: true, used: cands[i], text: s.trim() }; } return { ok: true, used: cands[i] }'''
+SET JsAct TO $'''%JsAct%; } return { ok: false, used: null };'''
 # ※ 継ぎ足しがうまくいかない場合は、共通 JavaScript（変換器のコピー機能、または
 #   Python 版が同時に出力する .jsact ファイル）の中身を「変数の設定」アクション
 #   （変数名 JsAct）の値の欄に手で貼り付けてもよい。
@@ -646,7 +665,21 @@ IF Halt = False THEN
         # 💬 注文 %Col2%（%Col1%）の確認を開始
         # [1] fill #search-key
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#search-key", "aria/Order key"], "fill", "%Col2%"]}'''
-        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        SET ActFound TO False
+        SET ActWaited TO 0
+        LOOP WHILE ActFound = False AND ActWaited < StepWait
+            Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+            IF ActStatus = 200 THEN
+                Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+                IF ActObj['value']['ok'] = True THEN
+                    SET ActFound TO True
+                END
+            END
+            IF ActFound = False THEN
+                WAIT 1
+                SET ActWaited TO ActWaited + 1
+            END
+        END
         IF ActStatus <> 200 THEN
             SET RowError TO $'''ステップ1（fill #search-key）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
         END
@@ -685,7 +718,21 @@ IF Halt = False THEN
 
         # [2] click #btn-search
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#btn-search", "aria/Search"], "click", ""]}'''
-        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        SET ActFound TO False
+        SET ActWaited TO 0
+        LOOP WHILE ActFound = False AND ActWaited < StepWait
+            Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+            IF ActStatus = 200 THEN
+                Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+                IF ActObj['value']['ok'] = True THEN
+                    SET ActFound TO True
+                END
+            END
+            IF ActFound = False THEN
+                WAIT 1
+                SET ActWaited TO ActWaited + 1
+            END
+        END
         IF ActStatus <> 200 THEN
             SET RowError TO $'''ステップ2（click #btn-search）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
         END
@@ -724,7 +771,21 @@ IF Halt = False THEN
 
         # [3] click aria/%Col2%
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#result-link", "aria/%Col2%"], "click", ""]}'''
-        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        SET ActFound TO False
+        SET ActWaited TO 0
+        LOOP WHILE ActFound = False AND ActWaited < StepWait
+            Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+            IF ActStatus = 200 THEN
+                Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+                IF ActObj['value']['ok'] = True THEN
+                    SET ActFound TO True
+                END
+            END
+            IF ActFound = False THEN
+                WAIT 1
+                SET ActWaited TO ActWaited + 1
+            END
+        END
         IF ActStatus <> 200 THEN
             SET RowError TO $'''ステップ3（click aria/%Col2%）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
         END
@@ -763,7 +824,21 @@ IF Halt = False THEN
 
         # [4] click #btn-confirm
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#btn-confirm", "aria/Confirm", "text/Confirm"], "click", ""]}'''
-        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        SET ActFound TO False
+        SET ActWaited TO 0
+        LOOP WHILE ActFound = False AND ActWaited < StepWait
+            Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+            IF ActStatus = 200 THEN
+                Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+                IF ActObj['value']['ok'] = True THEN
+                    SET ActFound TO True
+                END
+            END
+            IF ActFound = False THEN
+                WAIT 1
+                SET ActWaited TO ActWaited + 1
+            END
+        END
         IF ActStatus <> 200 THEN
             SET RowError TO $'''ステップ4（click #btn-confirm）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
         END
@@ -803,7 +878,21 @@ IF Halt = False THEN
         # 💬 確認済み画面をエビデンス保存
         # [5] click #home-link
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#home-link", "aria/Home"], "click", ""]}'''
-        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        SET ActFound TO False
+        SET ActWaited TO 0
+        LOOP WHILE ActFound = False AND ActWaited < StepWait
+            Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+            IF ActStatus = 200 THEN
+                Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+                IF ActObj['value']['ok'] = True THEN
+                    SET ActFound TO True
+                END
+            END
+            IF ActFound = False THEN
+                WAIT 1
+                SET ActWaited TO ActWaited + 1
+            END
+        END
         IF ActStatus <> 200 THEN
             SET RowError TO $'''ステップ5（click #home-link）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
         END
@@ -842,7 +931,21 @@ IF Halt = False THEN
 
         # [6] click #menu-orders
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#menu-orders", "aria/Orders"], "click", ""]}'''
-        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        SET ActFound TO False
+        SET ActWaited TO 0
+        LOOP WHILE ActFound = False AND ActWaited < StepWait
+            Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+            IF ActStatus = 200 THEN
+                Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+                IF ActObj['value']['ok'] = True THEN
+                    SET ActFound TO True
+                END
+            END
+            IF ActFound = False THEN
+                WAIT 1
+                SET ActWaited TO ActWaited + 1
+            END
+        END
         IF ActStatus <> 200 THEN
             SET RowError TO $'''ステップ6（click #menu-orders）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
         END

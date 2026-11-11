@@ -78,6 +78,7 @@ from details_io import load_details
 # **この中に // のコメントは書けない。** 1 行に連結して渡すので、それ以降が
 # すべてコメントになってしまう。
 JS_ACT = r"""
+var PREFER = true, BLUR = true;
 var cands = arguments[0], action = arguments[1], value = arguments[2];
 var Q = String.fromCharCode(39), DQ = String.fromCharCode(34);
 function lit(s) { if (s.indexOf(Q) < 0) { return Q + s + Q; } return DQ + s + DQ; }
@@ -98,14 +99,48 @@ function allDocs() {
 function qs(doc, sel) {
   try { return doc.querySelector(sel); } catch (e) { return null; }
 }
+function qsa(doc, sel) {
+  try { return doc.querySelectorAll(sel); } catch (e) { return []; }
+}
 function byXPath(doc, xp) {
   try { return doc.evaluate(xp, doc, null, 9, null).singleNodeValue; }
   catch (e) { return null; }
 }
+function byXPathAll(doc, xp) {
+  var out = [];
+  try {
+    var r = doc.evaluate(xp, doc, null, 7, null);
+    for (var k = 0; k < r.snapshotLength; k++) { out.push(r.snapshotItem(k)); }
+  } catch (e) { return out; }
+  return out;
+}
+function clickable(el) {
+  var t = String(el.tagName || ``).toLowerCase();
+  var role = String((el.getAttribute && el.getAttribute(`role`)) || ``);
+  if (t === `a`) { return el.hasAttribute(`href`) || el.hasAttribute(`onclick`); }
+  if (t === `button` || t === `select` || t === `textarea` || t === `label`) { return true; }
+  if (t === `input`) { return String(el.type || ``).toLowerCase() !== `hidden`; }
+  if (role === `button` || role === `link`) { return true; }
+  return !!(el.hasAttribute && el.hasAttribute(`onclick`));
+}
+function shown(el) {
+  try { return el.getClientRects().length > 0; } catch (e) { return true; }
+}
+function pickEl(list) {
+  if (!list || !list.length) { return null; }
+  if (list.length === 1 || !PREFER || action !== `click`) { return list[0]; }
+  for (var a = 0; a < list.length; a++) {
+    if (clickable(list[a]) && shown(list[a])) { return list[a]; }
+  }
+  for (var b = 0; b < list.length; b++) {
+    if (clickable(list[b])) { return list[b]; }
+  }
+  return list[0];
+}
 function findIn(doc, sel) {
   try {
-    if (sel.indexOf(`id/`) === 0) { return doc.getElementById(sel.slice(3)); }
-    if (sel.indexOf(`xpath/`) === 0) { return byXPath(doc, sel.slice(6)); }
+    if (sel.indexOf(`id/`) === 0) { return pickEl(qsa(doc, `[id=` + lit(sel.slice(3)) + `]`)); }
+    if (sel.indexOf(`xpath/`) === 0) { return pickEl(byXPathAll(doc, sel.slice(6))); }
     if (sel.indexOf(`text/`) === 0) {
       var t = sel.slice(5).trim();
       return byXPath(doc, `//*[not(self::script) and normalize-space(text())=` + lit(t) + `]`);
@@ -135,7 +170,7 @@ function findIn(doc, sel) {
       return null;
     }
     if (sel.indexOf(`pierce/`) === 0) { sel = sel.slice(7); }
-    return doc.querySelector(sel);
+    return pickEl(qsa(doc, sel));
   } catch (e) { return null; }
 }
 function find(sel) {
@@ -218,6 +253,7 @@ for (var i = 0; i < cands.length; i++) {
     el.value = value;
     el.dispatchEvent(new Event(`input`, { bubbles: true }));
     el.dispatchEvent(new Event(`change`, { bubbles: true }));
+    if (BLUR) { try { el.blur(); } catch (e) {} }
   } else if (action === `text`) {
     var s = el.innerText || el.textContent || ``;
     return { ok: true, used: cands[i], text: s.trim() };
@@ -228,11 +264,22 @@ return { ok: false, used: null };
 """
 
 
-def js_act_oneline() -> str:
+JS_ACT_FLAGS = "var PREFER = true, BLUR = true;"
+
+
+def js_act_oneline(prefer_clickable: bool = True, blur_after_fill: bool = True) -> str:
     """JS_ACT を 1 行にする（Robin の文字列リテラルや JSON へ安全に埋め込むため）。
     JS_ACT は二重引用符とバックスラッシュを含まない書き方に統一してあるので、
-    JSON へ入れてもエスケープが発生せず、PAD 側でも壊れない。"""
-    return " ".join(line.strip() for line in JS_ACT.strip().splitlines() if line.strip())
+    JSON へ入れてもエスケープが発生せず、PAD 側でも壊れない。
+
+    先頭行の PREFER / BLUR はサイトの設定。
+      PREFER … クリックで目印に合う要素が複数あるとき、押して動く要素を優先する
+               （Oracle は区画の div とリンクの a に同じ id を付けることがある）
+      BLUR   … 入力のあとフォーカスを外す（外したときに確定するサイト向け）"""
+    one = " ".join(line.strip() for line in JS_ACT.strip().splitlines() if line.strip())
+    flags = (f"var PREFER = {'true' if prefer_clickable else 'false'}, "
+             f"BLUR = {'true' if blur_after_fill else 'false'};")
+    return one.replace(JS_ACT_FLAGS, flags, 1)
 
 
 class WebDriverHTTP:
@@ -645,6 +692,34 @@ def _json_path(base: str) -> str:
     return base.rstrip(sep).replace(sep, sep * 2) + sep * 2 + "download"
 
 
+# 要素が見つかるまで待つ上限（秒）。生成物の StepWait になる。
+STEP_WAIT = 15
+
+# サイトの設定（バッチ定義の options に保存する。PC ではなくサイトに紐づく）
+SITE_DEFAULTS = {"stepWait": STEP_WAIT, "preferClickable": True, "blurAfterFill": True}
+
+
+def site_settings(batch: dict, step_wait=None, prefer_clickable=None,
+                  blur_after_fill=None) -> dict:
+    """サイトの設定を決める。指定 → バッチ定義の options → 既定 の順。"""
+    opts = (batch or {}).get("options") or {}
+    out = dict(SITE_DEFAULTS)
+    for key, given in (("stepWait", step_wait), ("preferClickable", prefer_clickable),
+                       ("blurAfterFill", blur_after_fill)):
+        v = given if given is not None else opts.get(key)
+        if v is None or v == "":
+            continue
+        if key == "stepWait":
+            try:
+                n = int(str(v).strip())
+            except (TypeError, ValueError):
+                continue
+            if n >= 1:
+                out[key] = n
+        else:
+            out[key] = bool(v)
+    return out
+
 DEFAULT_WIN_W = 1250
 DEFAULT_WIN_H = 900
 
@@ -1030,10 +1105,16 @@ def _robin_act(cands: list, action: str, value: str, indent: str, note: str,
     why = "画面に文字列がありません" if action == "exists" else "で要素が見つかりません"
     reason = (f"ステップ{step_no}（{note}）{why}" if action == "exists"
               else f"ステップ{step_no}（{note}）{why}")
-    return [
+    head = [
         f"{indent}# [{step_no}] {note}",
         f"{indent}SET ActBody TO $'''{{\"script\": \"%JsAct%\", \"args\": {body_args}}}'''",
-        _web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent),
+    ]
+    if action == "exists":
+        # 完了確認は「今この画面に出ているか」を 1 回だけ見る（待つときは timeout を使う）
+        call = [_web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent)]
+    else:
+        call = _robin_act_retry(indent)
+    return head + call + [
         # 応答コードを先に見る。WebDriver がエラーを返すと value の中身が
         # error/message に入れ替わり、ok が無くなる。そのまま読みに行くと
         #「プロパティがありません」という、原因の分からないエラーになる。
@@ -1046,6 +1127,33 @@ def _robin_act(cands: list, action: str, value: str, indent: str, note: str,
         f"{indent}    IF ActObj['value']['ok'] <> True THEN",
         f"{indent}        SET RowError TO $'''{reason}'''",
         f"{indent}    END",
+        f"{indent}END",
+    ]
+
+
+def _robin_act_retry(indent: str) -> list:
+    """要素が見つかるまで 1 秒おきに探し直す（最大 StepWait 秒）。
+
+    クリックで画面が切り替わる途中は、次の要素がまだ無い。1 回だけ探すと、
+    読み込みに 2〜3 秒かかるサイトで「要素が見つかりません」になる。
+    見つかったときに 1 回だけ操作するので、二重に押すことはない。
+    切り替わり中は WebDriver がエラー応答を返すこともあるので、それも探し直す。"""
+    i2 = indent + "    "
+    return [
+        f"{indent}SET ActFound TO False",
+        f"{indent}SET ActWaited TO 0",
+        f"{indent}LOOP WHILE ActFound = False AND ActWaited < StepWait",
+        _web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", i2),
+        f"{i2}IF ActStatus = 200 THEN",
+        f"{i2}    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj",
+        f"{i2}    IF ActObj['value']['ok'] = True THEN",
+        f"{i2}        SET ActFound TO True",
+        f"{i2}    END",
+        f"{i2}END",
+        f"{i2}IF ActFound = False THEN",
+        f"{i2}    WAIT 1",
+        f"{i2}    SET ActWaited TO ActWaited + 1",
+        f"{i2}END",
         f"{indent}END",
     ]
 
@@ -1162,7 +1270,10 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
                 max_items: int = 1,
                 win_w: int = 0,
                 win_h: int = 0,
-                driver_dir: str = "") -> str:
+                driver_dir: str = "",
+                step_wait=None,
+                prefer_clickable=None,
+                blur_after_fill=None) -> str:
     """PAD に貼り付けられる Robin コードを生成する。
 
     PAD のフローデザイナーはアクションのコピー＆ペーストにテキスト（Robin）を使うため、
@@ -1178,7 +1289,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
       loop    … skip 判定 / 再実行絞り込み / 件数上限 / 復帰 / 1 件分の操作 / エビデンス
       recover … 失敗した件のあと、次の件の前に起点へ戻す（batch の recover を使う）
     """
-    js_one = js_act_oneline()
+    site = site_settings(batch, step_wait, prefer_clickable, blur_after_fill)
+    js_one = js_act_oneline(site["preferClickable"], site["blurAfterFill"])
     drv_dir = _driver_dir(driver_dir, driver_exe)
     max_items = _clamp_max_items(max_items)
     win_w, win_h = _window_size(batch.get("setup", []), win_w, win_h)
@@ -1243,6 +1355,9 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
       f" ／ プロキシ={proxy or '未使用'}")
     A(f"#       MaxItems={max_items} ／ ウィンドウ={win_w}×{win_h}"
       f" ／ ドライバー置き場所={drv_dir}")
+    A(f"#       サイトの設定: 待つ上限={site['stepWait']} 秒"
+      f" ／ 押せる要素を優先={'有効' if site['preferClickable'] else '無効'}"
+      f" ／ 入力後にフォーカスを外す={'有効' if site['blurAfterFill'] else '無効'}")
     A("# ============================================================")
     A("# LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai")
     A("# Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).")
@@ -1301,6 +1416,10 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# --- 運用スイッチ ---")
     A("# まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす")
     A(f"SET MaxItems TO {max_items}")
+    A("# 要素が見つかるまで待つ上限（秒）。クリックで画面が切り替わる途中は次の")
+    A("# 要素がまだ無いので、1 秒おきに探し直す。見つかればすぐ次へ進む。")
+    A("# 遅いサイトで「要素が見つかりません」が続くときは増やす。")
+    A(f"SET StepWait TO {site['stepWait']}")
     A("# 起動したブラウザーとドライバーの種類・バージョンをダイアログで出す")
     A("# False にしてもログ（pad_progress.log）には必ず 1 行残る")
     A("SET ShowDriverInfo TO True")
@@ -2379,6 +2498,14 @@ def main() -> None:
     p.add_argument("--proxy-auto", action=argparse.BooleanOptionalAction, default=True,
                    help="Windows のプロキシ設定に合わせて直結／プロキシを切り替える"
                         "（既定オン。外すときは --no-proxy-auto）")
+    p.add_argument("--step-wait", type=int, default=None,
+                   help="要素が見つかるまで待つ上限（秒）。既定はバッチ定義の options.stepWait、"
+                        "無ければ 15")
+    p.add_argument("--prefer-clickable", action=argparse.BooleanOptionalAction, default=None,
+                   help="目印に合う要素が複数あるとき、押して動く要素を優先する"
+                        "（既定はバッチ定義の options、無ければオン）")
+    p.add_argument("--blur-after-fill", action=argparse.BooleanOptionalAction, default=None,
+                   help="入力のあとフォーカスを外す（既定はバッチ定義の options、無ければオン）")
     p.add_argument("--win-w", type=int, default=0,
                    help="ブラウザーの幅（既定: 録画の setViewport、無ければ 1250）")
     p.add_argument("--win-h", type=int, default=0,
@@ -2416,7 +2543,10 @@ def main() -> None:
                           proxy_auto=args.proxy_auto,
                           max_items=args.max_items or 1,
                           win_w=args.win_w, win_h=args.win_h,
-                          driver_dir=args.driver_dir)
+                          driver_dir=args.driver_dir,
+                          step_wait=args.step_wait,
+                          prefer_clickable=args.prefer_clickable,
+                          blur_after_fill=args.blur_after_fill)
         js_out = out[:-len(".robin.txt")] + ".jsact.js" if out.endswith(".robin.txt") \
             else os.path.splitext(out)[0] + ".jsact.js"
         print(f"📄 PAD 用 Robin コード: {out}")

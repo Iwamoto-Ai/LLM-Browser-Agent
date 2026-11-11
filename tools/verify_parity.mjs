@@ -27,6 +27,16 @@ vm.createContext(ctx);
 vm.runInContext(m[1], ctx);
 const PadConvert = ctx.PadConvert;
 
+// options にサイトの設定を入れたバッチ定義（Python 版・ブラウザ版の両方が読むこと）
+const SITE_BATCH = path.join(os.tmpdir(), "parity_site_batch.json");
+{
+  const b = JSON.parse(fs.readFileSync("recordings/edi2_practice_batch.json", "utf8")
+    .split(/\r?\n/).filter((ln) => !/^\s*(\/\/|#)/.test(ln)).join("\n"));
+  b.options = Object.assign({}, b.options || {},
+    { stepWait: 25, preferClickable: false, blurAfterFill: false });
+  fs.writeFileSync(SITE_BATCH, JSON.stringify(b, null, 2), "utf8");
+}
+
 const cases = [
   { batch: "examples/pad/pad_sample_batch.json", idCol: "ID",
     details: "C:\\temp\\sample_batch.csv", browser: "edge" },
@@ -39,6 +49,14 @@ const cases = [
          "--max-items", "5", "--win-w", "1024", "--win-h", "768"],
     js: { driverDir: "D:\\drivers", autoDriver: false, proxyAuto: false,
           maxItems: "5", winW: "1024", winH: "768" } },
+  // サイトの設定を画面（CLI）で指定したとき
+  { batch: "recordings/edi2_practice_batch.json", idCol: "プロジェクト番号",
+    details: "C:\\temp\\edi2_batch.csv", browser: "edge", label: "サイトの設定を指定",
+    py: ["--step-wait", "9", "--no-prefer-clickable", "--no-blur-after-fill"],
+    js: { stepWait: "9", preferClickable: false, blurAfterFill: false } },
+  // サイトの設定がバッチ定義の options に保存されているとき（どちらも指定しない）
+  { batch: SITE_BATCH, idCol: "プロジェクト番号",
+    details: "C:\\temp\\edi2_batch.csv", browser: "edge", label: "options のサイトの設定" },
 ];
 
 let ng = 0;
