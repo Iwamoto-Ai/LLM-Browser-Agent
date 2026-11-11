@@ -645,6 +645,9 @@ def _json_path(base: str) -> str:
     return base.rstrip(sep).replace(sep, sep * 2) + sep * 2 + "download"
 
 
+# 要素が見つかるまで待つ上限（秒）。生成物の StepWait になる。
+STEP_WAIT = 15
+
 DEFAULT_WIN_W = 1250
 DEFAULT_WIN_H = 900
 
@@ -1030,10 +1033,16 @@ def _robin_act(cands: list, action: str, value: str, indent: str, note: str,
     why = "画面に文字列がありません" if action == "exists" else "で要素が見つかりません"
     reason = (f"ステップ{step_no}（{note}）{why}" if action == "exists"
               else f"ステップ{step_no}（{note}）{why}")
-    return [
+    head = [
         f"{indent}# [{step_no}] {note}",
         f"{indent}SET ActBody TO $'''{{\"script\": \"%JsAct%\", \"args\": {body_args}}}'''",
-        _web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent),
+    ]
+    if action == "exists":
+        # 完了確認は「今この画面に出ているか」を 1 回だけ見る（待つときは timeout を使う）
+        call = [_web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent)]
+    else:
+        call = _robin_act_retry(indent)
+    return head + call + [
         # 応答コードを先に見る。WebDriver がエラーを返すと value の中身が
         # error/message に入れ替わり、ok が無くなる。そのまま読みに行くと
         #「プロパティがありません」という、原因の分からないエラーになる。
@@ -1046,6 +1055,33 @@ def _robin_act(cands: list, action: str, value: str, indent: str, note: str,
         f"{indent}    IF ActObj['value']['ok'] <> True THEN",
         f"{indent}        SET RowError TO $'''{reason}'''",
         f"{indent}    END",
+        f"{indent}END",
+    ]
+
+
+def _robin_act_retry(indent: str) -> list:
+    """要素が見つかるまで 1 秒おきに探し直す（最大 StepWait 秒）。
+
+    クリックで画面が切り替わる途中は、次の要素がまだ無い。1 回だけ探すと、
+    読み込みに 2〜3 秒かかるサイトで「要素が見つかりません」になる。
+    見つかったときに 1 回だけ操作するので、二重に押すことはない。
+    切り替わり中は WebDriver がエラー応答を返すこともあるので、それも探し直す。"""
+    i2 = indent + "    "
+    return [
+        f"{indent}SET ActFound TO False",
+        f"{indent}SET ActWaited TO 0",
+        f"{indent}LOOP WHILE ActFound = False AND ActWaited < StepWait",
+        _web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", i2),
+        f"{i2}IF ActStatus = 200 THEN",
+        f"{i2}    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj",
+        f"{i2}    IF ActObj['value']['ok'] = True THEN",
+        f"{i2}        SET ActFound TO True",
+        f"{i2}    END",
+        f"{i2}END",
+        f"{i2}IF ActFound = False THEN",
+        f"{i2}    WAIT 1",
+        f"{i2}    SET ActWaited TO ActWaited + 1",
+        f"{i2}END",
         f"{indent}END",
     ]
 
@@ -1301,6 +1337,10 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# --- 運用スイッチ ---")
     A("# まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす")
     A(f"SET MaxItems TO {max_items}")
+    A("# 要素が見つかるまで待つ上限（秒）。クリックで画面が切り替わる途中は次の")
+    A("# 要素がまだ無いので、1 秒おきに探し直す。見つかればすぐ次へ進む。")
+    A("# 遅いサイトで「要素が見つかりません」が続くときは増やす。")
+    A(f"SET StepWait TO {STEP_WAIT}")
     A("# 起動したブラウザーとドライバーの種類・バージョンをダイアログで出す")
     A("# False にしてもログ（pad_progress.log）には必ず 1 行残る")
     A("SET ShowDriverInfo TO True")

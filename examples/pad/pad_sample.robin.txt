@@ -9,7 +9,7 @@
 #           BaseDir: C:\temp
 #           エビデンス名: @ID@__@KEY@__@STAMP@
 #           ダウンロード保存先: C:\temp\download
-# 備考：2026/11/10 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ自動=有効 ／ プロキシ=未使用
+# 備考：2026/11/11 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ自動=有効 ／ プロキシ=未使用
 #       MaxItems=1 ／ ウィンドウ=1366×900 ／ ドライバー置き場所=C:\temp
 # ============================================================
 # LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
@@ -64,6 +64,10 @@ SET BaseDir TO $'''C:\\temp'''
 # --- 運用スイッチ ---
 # まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす
 SET MaxItems TO 1
+# 要素が見つかるまで待つ上限（秒）。クリックで画面が切り替わる途中は次の
+# 要素がまだ無いので、1 秒おきに探し直す。見つかればすぐ次へ進む。
+# 遅いサイトで「要素が見つかりません」が続くときは増やす。
+SET StepWait TO 15
 # 起動したブラウザーとドライバーの種類・バージョンをダイアログで出す
 # False にしてもログ（pad_progress.log）には必ず 1 行残る
 SET ShowDriverInfo TO True
@@ -646,7 +650,21 @@ IF Halt = False THEN
         # 💬 注文 %Col2%（%Col1%）の確認を開始
         # [1] fill #search-key
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#search-key", "aria/Order key"], "fill", "%Col2%"]}'''
-        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        SET ActFound TO False
+        SET ActWaited TO 0
+        LOOP WHILE ActFound = False AND ActWaited < StepWait
+            Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+            IF ActStatus = 200 THEN
+                Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+                IF ActObj['value']['ok'] = True THEN
+                    SET ActFound TO True
+                END
+            END
+            IF ActFound = False THEN
+                WAIT 1
+                SET ActWaited TO ActWaited + 1
+            END
+        END
         IF ActStatus <> 200 THEN
             SET RowError TO $'''ステップ1（fill #search-key）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
         END
@@ -685,7 +703,21 @@ IF Halt = False THEN
 
         # [2] click #btn-search
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#btn-search", "aria/Search"], "click", ""]}'''
-        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        SET ActFound TO False
+        SET ActWaited TO 0
+        LOOP WHILE ActFound = False AND ActWaited < StepWait
+            Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+            IF ActStatus = 200 THEN
+                Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+                IF ActObj['value']['ok'] = True THEN
+                    SET ActFound TO True
+                END
+            END
+            IF ActFound = False THEN
+                WAIT 1
+                SET ActWaited TO ActWaited + 1
+            END
+        END
         IF ActStatus <> 200 THEN
             SET RowError TO $'''ステップ2（click #btn-search）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
         END
@@ -724,7 +756,21 @@ IF Halt = False THEN
 
         # [3] click aria/%Col2%
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#result-link", "aria/%Col2%"], "click", ""]}'''
-        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        SET ActFound TO False
+        SET ActWaited TO 0
+        LOOP WHILE ActFound = False AND ActWaited < StepWait
+            Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+            IF ActStatus = 200 THEN
+                Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+                IF ActObj['value']['ok'] = True THEN
+                    SET ActFound TO True
+                END
+            END
+            IF ActFound = False THEN
+                WAIT 1
+                SET ActWaited TO ActWaited + 1
+            END
+        END
         IF ActStatus <> 200 THEN
             SET RowError TO $'''ステップ3（click aria/%Col2%）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
         END
@@ -763,7 +809,21 @@ IF Halt = False THEN
 
         # [4] click #btn-confirm
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#btn-confirm", "aria/Confirm", "text/Confirm"], "click", ""]}'''
-        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        SET ActFound TO False
+        SET ActWaited TO 0
+        LOOP WHILE ActFound = False AND ActWaited < StepWait
+            Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+            IF ActStatus = 200 THEN
+                Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+                IF ActObj['value']['ok'] = True THEN
+                    SET ActFound TO True
+                END
+            END
+            IF ActFound = False THEN
+                WAIT 1
+                SET ActWaited TO ActWaited + 1
+            END
+        END
         IF ActStatus <> 200 THEN
             SET RowError TO $'''ステップ4（click #btn-confirm）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
         END
@@ -803,7 +863,21 @@ IF Halt = False THEN
         # 💬 確認済み画面をエビデンス保存
         # [5] click #home-link
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#home-link", "aria/Home"], "click", ""]}'''
-        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        SET ActFound TO False
+        SET ActWaited TO 0
+        LOOP WHILE ActFound = False AND ActWaited < StepWait
+            Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+            IF ActStatus = 200 THEN
+                Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+                IF ActObj['value']['ok'] = True THEN
+                    SET ActFound TO True
+                END
+            END
+            IF ActFound = False THEN
+                WAIT 1
+                SET ActWaited TO ActWaited + 1
+            END
+        END
         IF ActStatus <> 200 THEN
             SET RowError TO $'''ステップ5（click #home-link）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
         END
@@ -842,7 +916,21 @@ IF Halt = False THEN
 
         # [6] click #menu-orders
         SET ActBody TO $'''{"script": "%JsAct%", "args": [["#menu-orders", "aria/Orders"], "click", ""]}'''
-        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        SET ActFound TO False
+        SET ActWaited TO 0
+        LOOP WHILE ActFound = False AND ActWaited < StepWait
+            Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+            IF ActStatus = 200 THEN
+                Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+                IF ActObj['value']['ok'] = True THEN
+                    SET ActFound TO True
+                END
+            END
+            IF ActFound = False THEN
+                WAIT 1
+                SET ActWaited TO ActWaited + 1
+            END
+        END
         IF ActStatus <> 200 THEN
             SET RowError TO $'''ステップ6（click #menu-orders）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
         END

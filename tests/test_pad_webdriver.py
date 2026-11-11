@@ -999,3 +999,31 @@ def test_operation_switch_defaults():
     assert pad._window_size(rec, 0, "x") == (1366, 1134)
     assert pad._driver_dir("", r"C:\temp\msedgedriver.exe") == r"C:\temp"
     assert pad._driver_dir("D:\\drv\\", "") == r"D:\drv"
+
+
+def test_element_steps_retry_until_found(tmp_path):
+    """クリック・入力は、要素が見つかるまで 1 秒おきに探し直す（最大 StepWait 秒）。
+
+    実 EDI（iSupplier Portal）は画面の切り替わりに 2〜3 秒かかり、1 回だけ探すと
+    次の要素が無くて「要素が見つかりません」になった。完了確認（exists）は
+    今の画面を 1 回だけ見る挙動のまま。"""
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    batch = load_recording(os.path.join(here, "recordings", "edi2_practice_batch.json"))
+    out = pad.write_robin(batch, r"C:\temp\d.csv", "プロジェクト番号",
+                          str(tmp_path / "f.robin.txt"), out_dir=r"C:\temp")
+    txt = open(out, encoding="utf-8").read()
+    lines = txt.splitlines()
+    assert f"SET StepWait TO {pad.STEP_WAIT}" in lines and pad.STEP_WAIT == 15
+    loops = [ln.strip() for ln in lines
+             if ln.strip() == "LOOP WHILE ActFound = False AND ActWaited < StepWait"]
+    clicks_and_fills = [ln for ln in lines
+                        if '"click", ""]}' in ln or '"fill", ' in ln]
+    clicks_and_fills = [ln for ln in clicks_and_fills if ln.strip().startswith("SET ActBody")]
+    # 復帰処理（best effort）は除き、成否を判定するステップはすべて探し直す
+    judged = txt.count("で要素が見つかりません'''")
+    assert len(loops) == judged and judged > 0
+    assert len(clicks_and_fills) >= judged
+    # 探し直しの中で二重に押さない: 見つかったら抜ける
+    i = lines.index(next(ln for ln in lines if ln.strip() == loops[0]))
+    body = "\n".join(lines[i:i + 16])
+    assert "SET ActFound TO True" in body and "WAIT 1" in body

@@ -453,6 +453,9 @@ function toRobinVar(text, cols) {
   return String(text).replace(re, function (_m, name) { return robinColVar(name, cols); });
 }
 
+// 要素が見つかるまで待つ上限（秒）。生成物の StepWait になる。
+var STEP_WAIT = 15;
+
 var DEFAULT_WIN_W = 1250;
 var DEFAULT_WIN_H = 900;
 
@@ -995,10 +998,15 @@ function robinAct(cands, action, value, indent, note, stepNo, cols) {
   var bodyArgs = pyJson([cs, action, v]);
   var why = action === "exists" ? "画面に文字列がありません" : "で要素が見つかりません";
   var reason = "ステップ" + stepNo + "（" + nt + "）" + why;
-  return [
+  var head = [
     indent + "# [" + stepNo + "] " + nt,
-    indent + "SET ActBody TO $'''{\"script\": \"%JsAct%\", \"args\": " + bodyArgs + "}'''",
-    web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent),
+    indent + "SET ActBody TO $'''{\"script\": \"%JsAct%\", \"args\": " + bodyArgs + "}'''"
+  ];
+  // 完了確認は「今この画面に出ているか」を 1 回だけ見る（待つときは timeout を使う）
+  var call = action === "exists"
+    ? [web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent)]
+    : robinActRetry(indent);
+  return head.concat(call).concat([
     // 応答コードを先に見る。WebDriver がエラーを返すと value の中身が
     // error/message に入れ替わり、ok が無くなる。そのまま読みに行くと
     //「プロパティがありません」という、原因の分からないエラーになる。
@@ -1011,6 +1019,32 @@ function robinAct(cands, action, value, indent, note, stepNo, cols) {
     indent + "    IF ActObj['value']['ok'] <> True THEN",
     indent + "        SET RowError TO $'''" + reason + "'''",
     indent + "    END",
+    indent + "END"
+  ]);
+}
+
+// 要素が見つかるまで 1 秒おきに探し直す（最大 StepWait 秒）。
+// クリックで画面が切り替わる途中は、次の要素がまだ無い。1 回だけ探すと、
+// 読み込みに 2〜3 秒かかるサイトで「要素が見つかりません」になる。
+// 見つかったときに 1 回だけ操作するので、二重に押すことはない。
+// 切り替わり中は WebDriver がエラー応答を返すこともあるので、それも探し直す。
+function robinActRetry(indent) {
+  var i2 = indent + "    ";
+  return [
+    indent + "SET ActFound TO False",
+    indent + "SET ActWaited TO 0",
+    indent + "LOOP WHILE ActFound = False AND ActWaited < StepWait",
+    web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", i2),
+    i2 + "IF ActStatus = 200 THEN",
+    i2 + "    Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj",
+    i2 + "    IF ActObj['value']['ok'] = True THEN",
+    i2 + "        SET ActFound TO True",
+    i2 + "    END",
+    i2 + "END",
+    i2 + "IF ActFound = False THEN",
+    i2 + "    WAIT 1",
+    i2 + "    SET ActWaited TO ActWaited + 1",
+    i2 + "END",
     indent + "END"
   ];
 }
@@ -1650,6 +1684,10 @@ function buildRobin(batch, opt) {
   A("# --- 運用スイッチ ---");
   A("# まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす");
   A("SET MaxItems TO " + maxItems);
+  A("# 要素が見つかるまで待つ上限（秒）。クリックで画面が切り替わる途中は次の");
+  A("# 要素がまだ無いので、1 秒おきに探し直す。見つかればすぐ次へ進む。");
+  A("# 遅いサイトで「要素が見つかりません」が続くときは増やす。");
+  A("SET StepWait TO " + STEP_WAIT);
   A("# 起動したブラウザーとドライバーの種類・バージョンをダイアログで出す");
   A("# False にしてもログ（pad_progress.log）には必ず 1 行残る");
   A("SET ShowDriverInfo TO True");
