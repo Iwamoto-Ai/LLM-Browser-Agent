@@ -26,13 +26,16 @@ function runAct(bodyHtml, cands, action, value, prefer = true, blur = true) {
   const dom = new JSDOM("<!doctype html><body>" + bodyHtml + "</body>", { runScripts: "outside-only" });
   const w = dom.window;
   w.__clicked = [];
+  w.__ids = [];
   w.document.querySelectorAll("*").forEach((el) => {
-    el.addEventListener("click", (e) => { if (e.currentTarget === e.target) { w.__clicked.push(el.tagName); } });
+    el.addEventListener("click", (e) => {
+      if (e.currentTarget === e.target) { w.__clicked.push(el.tagName); w.__ids.push(el.id); }
+    });
   });
   const src = P.jsActOneline(prefer, blur);
   const fn = w.eval("(function () { return function () { " + src + " }; })()");
   const res = fn(cands, action, value);
-  return { res, clicked: w.__clicked, w };
+  return { res, clicked: w.__clicked, ids: w.__ids, w };
 }
 
 // Oracle の「納入登録」と同じ形: 区画の div とリンクの a に同じ id
@@ -60,6 +63,20 @@ const dup = '<div id="PosCreateAsnLink"><table><tr><td>' +
   // 1 つしか無ければ、押せない要素でもそれを押す（今と同じ）
   const r = runAct('<div id="only">x</div>', ["#only"], "click", "");
   check(r.clicked[0] === "DIV", "1 つだけのとき、その要素を押していない");
+}
+{
+  // 先頭がリンクの中の画像なら、今までどおり先頭を押す（Oracle のツリーの三角）。
+  // 後ろに onclick 付きの画像があっても、そちらへ乗り換えない。
+  const tree = '<div id="MenuRow"><a href="#t"><img id="tri" class="m"></a> 仕入先 ' +
+               '<img id="other" class="m" onclick="void 0"></div>';
+  const r = runAct(tree, ["#MenuRow img.m"], "click", "");
+  check(r.ids[0] === "tri", "リンクの中の先頭の画像ではなく " + r.ids[0] + " を押した");
+}
+{
+  // 先頭がボタンなら先頭（後ろのリンクへ乗り換えない）
+  const r = runAct('<button class="k" id="b1">x</button><a class="k" id="a1" href="#">y</a>',
+                   [".k"], "click", "");
+  check(r.ids[0] === "b1", "先頭のボタンではなく " + r.ids[0] + " を押した");
 }
 {
   // 入力のあとフォーカスを外す

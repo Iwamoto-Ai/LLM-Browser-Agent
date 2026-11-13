@@ -260,9 +260,16 @@ var JS_ACT = [
 "function shown(el) {",
 "  try { return el.getClientRects().length > 0; } catch (e) { return true; }",
 "}",
+"function inClickable(el) {",
+"  for (var p = el; p && p.nodeType === 1; p = p.parentElement) {",
+"    if (clickable(p)) { return true; }",
+"  }",
+"  return false;",
+"}",
 "function pickEl(list) {",
 "  if (!list || !list.length) { return null; }",
 "  if (list.length === 1 || !PREFER || action !== `click`) { return list[0]; }",
+"  if (inClickable(list[0])) { return list[0]; }",
 "  for (var a = 0; a < list.length; a++) {",
 "    if (clickable(list[a]) && shown(list[a])) { return list[a]; }",
 "  }",
@@ -400,7 +407,8 @@ var JS_ACT = [
 var JS_ACT_FLAGS = "var PREFER = true, BLUR = true;";
 
 // 先頭行の PREFER / BLUR はサイトの設定（Python 版の js_act_oneline と同じ）。
-//   PREFER … クリックで目印に合う要素が複数あるとき、押して動く要素を優先する
+//   PREFER … クリックで目印に合う要素が複数あり、先頭もその外側も押して動くもので
+//            ないときだけ、押して動く要素を探す（リンクの中の画像なら先頭のまま）
 //   BLUR   … 入力のあとフォーカスを外す
 function jsActOneline(preferClickable, blurAfterFill) {
   // Python 版と同じ: 空行を除き、各行を strip して空白 1 つで連結する
