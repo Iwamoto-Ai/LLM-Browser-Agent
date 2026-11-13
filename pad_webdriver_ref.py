@@ -126,9 +126,16 @@ function clickable(el) {
 function shown(el) {
   try { return el.getClientRects().length > 0; } catch (e) { return true; }
 }
+function inClickable(el) {
+  for (var p = el; p && p.nodeType === 1; p = p.parentElement) {
+    if (clickable(p)) { return true; }
+  }
+  return false;
+}
 function pickEl(list) {
   if (!list || !list.length) { return null; }
   if (list.length === 1 || !PREFER || action !== `click`) { return list[0]; }
+  if (inClickable(list[0])) { return list[0]; }
   for (var a = 0; a < list.length; a++) {
     if (clickable(list[a]) && shown(list[a])) { return list[a]; }
   }
@@ -273,8 +280,10 @@ def js_act_oneline(prefer_clickable: bool = True, blur_after_fill: bool = True) 
     JSON へ入れてもエスケープが発生せず、PAD 側でも壊れない。
 
     先頭行の PREFER / BLUR はサイトの設定。
-      PREFER … クリックで目印に合う要素が複数あるとき、押して動く要素を優先する
-               （Oracle は区画の div とリンクの a に同じ id を付けることがある）
+      PREFER … クリックで目印に合う要素が複数あり、先頭の要素もその外側も
+               押して動くものでないときだけ、押して動く要素を探す
+               （Oracle は区画の div とリンクの a に同じ id を付けることがある）。
+               先頭が押せるもの・リンクの中の画像などなら、今までどおり先頭を押す
       BLUR   … 入力のあとフォーカスを外す（外したときに確定するサイト向け）"""
     one = " ".join(line.strip() for line in JS_ACT.strip().splitlines() if line.strip())
     flags = (f"var PREFER = {'true' if prefer_clickable else 'false'}, "
