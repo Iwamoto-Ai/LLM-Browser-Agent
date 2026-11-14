@@ -1066,3 +1066,64 @@ def test_site_settings_from_batch_options(tmp_path):
     assert "SET StepWait TO 25" in txt.splitlines()
     assert "var PREFER = false, BLUR = false;" in txt
     assert "サイトの設定: 待つ上限=25 秒 ／ 押せる要素を優先=無効 ／ 入力後にフォーカスを外す=無効" in txt
+
+
+def _all_batches():
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    paths = [os.path.join(here, "examples", "pad", "pad_sample_batch.json")]
+    rec = os.path.join(here, "recordings")
+    paths += [os.path.join(rec, n) for n in sorted(os.listdir(rec))
+              if n.startswith("edi2_") and n.endswith("_batch.json")]
+    return paths
+
+
+def test_robin_embeds_batch_and_extracts_exactly(tmp_path):
+    """生成した Robin の末尾にバッチ定義が埋め込まれ、欠けなく取り出せる。"""
+    for p in _all_batches():
+        batch = load_recording(p)
+        out = pad.write_robin(batch, r"C:\temp\d.csv", "ID",
+                              str(tmp_path / "f.robin.txt"), out_dir=r"C:\temp")
+        txt = open(out, encoding="utf-8").read()
+        lines = txt.splitlines()
+        # 複数行コメント 1 個にまとまり、1 行は 100 文字以内
+        i = lines.index("/#", len(lines) - 400)
+        assert lines[i + 1].startswith("PADBATCH v1 lines=")
+        assert lines[-2:] == ["PADBATCH END", "#/"]
+        assert all(len(ln) <= 100 for ln in lines[i + 2:-2])
+        got, why = pad.extract_batch_from_robin(txt)
+        assert why == "" and got == load_recording(p), p
+
+
+def test_extract_survives_pad_copy_and_detects_damage():
+    """PAD でコピーし直した形（/# の後ろの空白・CRLF・字下げ）でも読める。壊れていれば理由を返す。"""
+    batch = {"title": "t", "setup": [], "loop": [{"type": "click", "selectors": [["#a"]]}],
+             "options": {"stepWait": 15.0}}
+    lines = ["SET X TO 1"] + pad.batch_embed_lines(batch)
+    pad_copy = "\r\n".join(("/# " if ln == "/#" else "    " + ln) for ln in lines)
+    got, why = pad.extract_batch_from_robin(pad_copy)
+    assert why == "" and got["loop"] == batch["loop"]
+    assert got["options"]["stepWait"] == 15 and isinstance(got["options"]["stepWait"], int)
+
+    body = [ln for ln in lines if ln and not ln.startswith(("#", "/#", "PADBATCH", "SET"))]
+    broken = "\n".join(lines).replace(body[0], body[0][:-2] + ("AA" if body[0][-2:] != "AA" else "BB"))
+    got, why = pad.extract_batch_from_robin(broken)
+    assert got is None and "壊れています" in why
+
+    got, why = pad.extract_batch_from_robin("SET X TO 1\n")
+    assert got is None and "埋め込まれていません" in why
+
+
+def test_cli_from_robin_writes_batch(tmp_path):
+    """--from-robin で Robin からバッチ定義ファイルを取り出せる。"""
+    import subprocess
+    import sys as _sys
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = os.path.join(here, "recordings", "edi2_practice_batch.json")
+    robin = tmp_path / "x.robin.txt"
+    pad.write_robin(load_recording(src), r"C:\temp\d.csv", "プロジェクト番号", str(robin))
+    r = subprocess.run([_sys.executable, os.path.join(here, "pad_webdriver_ref.py"),
+                        "--from-robin", str(robin)], capture_output=True, text=True,
+                       encoding="utf-8", cwd=here)
+    assert r.returncode == 0, r.stderr
+    out = tmp_path / "x.batch.json"
+    assert json.load(open(out, encoding="utf-8")) == load_recording(src)

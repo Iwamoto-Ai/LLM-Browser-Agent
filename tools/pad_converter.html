@@ -67,6 +67,8 @@
   <legend>1. 録画 JSON</legend>
   <div class="drop" id="drop">ここにドラッグ＆ドロップ、またはファイルを選択</div>
   <input type="file" id="batchFile" accept=".json,.txt">
+  <div class="hint">録画 JSON・バッチ定義 JSON のほか、この変換器で作った Robin（.txt）も読める。
+     Robin の末尾に埋め込まれた元のバッチ定義を取り出す。</div>
   <div class="hint" id="batchInfo"></div>
 </fieldset>
 
@@ -1719,6 +1721,145 @@ function lintRobin(lines) {
 }
 
 // ---------------------------------------------------------------- 本体
+// ------------------------------------------------------------
+// バッチ定義の埋め込み（Python 版の batch_embed_lines / extract_batch_from_robin と同じ）
+//
+// Robin の末尾に、複数行コメント /# … #/ として入れる。PAD ではコメント 1 個に
+// まとまり、PAD でコピーして戻しても中身は変わらない（2026/11/15 実機で確認）。
+// 中身は JSON を UTF-8 → Base64 にしたもの。圧縮はしない（Python 版と必ず一致させるため）。
+// どこでも動くよう、UTF-8・Base64・CRC32 は自前で持つ（btoa や TextEncoder に頼らない）。
+// ------------------------------------------------------------
+var PADBATCH_TAG = "PADBATCH v1";
+var PADBATCH_END = "PADBATCH END";
+var PADBATCH_WIDTH = 100;
+var B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+function utf8Bytes(str) {
+  var out = [];
+  for (var i = 0; i < str.length; i++) {
+    var c = str.charCodeAt(i);
+    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < str.length) {
+      var d = str.charCodeAt(i + 1);
+      if (d >= 0xDC00 && d <= 0xDFFF) { c = 0x10000 + ((c - 0xD800) << 10) + (d - 0xDC00); i++; }
+    }
+    if (c < 0x80) { out.push(c); }
+    else if (c < 0x800) { out.push(0xC0 | (c >> 6), 0x80 | (c & 63)); }
+    else if (c < 0x10000) { out.push(0xE0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63)); }
+    else {
+      out.push(0xF0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    }
+  }
+  return out;
+}
+
+function utf8String(bytes) {
+  var s = "", i = 0;
+  while (i < bytes.length) {
+    var b = bytes[i++], c;
+    if (b < 0x80) { c = b; }
+    else if (b < 0xE0) { c = ((b & 31) << 6) | (bytes[i++] & 63); }
+    else if (b < 0xF0) { c = ((b & 15) << 12) | ((bytes[i++] & 63) << 6) | (bytes[i++] & 63); }
+    else {
+      c = ((b & 7) << 18) | ((bytes[i++] & 63) << 12) | ((bytes[i++] & 63) << 6) | (bytes[i++] & 63);
+    }
+    if (c >= 0x10000) {
+      c -= 0x10000;
+      s += String.fromCharCode(0xD800 + (c >> 10), 0xDC00 + (c & 1023));
+    } else { s += String.fromCharCode(c); }
+  }
+  return s;
+}
+
+function base64Encode(bytes) {
+  var out = "";
+  for (var i = 0; i < bytes.length; i += 3) {
+    var n = (bytes[i] << 16) | ((bytes[i + 1] || 0) << 8) | (bytes[i + 2] || 0);
+    out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] +
+      (i + 1 < bytes.length ? B64[(n >> 6) & 63] : "=") +
+      (i + 2 < bytes.length ? B64[n & 63] : "=");
+  }
+  return out;
+}
+
+// 読めない文字があれば null（Python 版の validate=True と同じ扱い）
+function base64Decode(str) {
+  if (str.length % 4 !== 0 || /[^A-Za-z0-9+\/=]/.test(str)) { return null; }
+  var out = [];
+  for (var i = 0; i < str.length; i += 4) {
+    var a = B64.indexOf(str[i]), b = B64.indexOf(str[i + 1]);
+    var c = str[i + 2] === "=" ? 0 : B64.indexOf(str[i + 2]);
+    var d = str[i + 3] === "=" ? 0 : B64.indexOf(str[i + 3]);
+    if (a < 0 || b < 0 || c < 0 || d < 0) { return null; }
+    var n = (a << 18) | (b << 12) | (c << 6) | d;
+    out.push((n >> 16) & 255);
+    if (str[i + 2] !== "=") { out.push((n >> 8) & 255); }
+    if (str[i + 3] !== "=") { out.push(n & 255); }
+  }
+  return out;
+}
+
+var CRC_TABLE = null;
+function crc32Hex(bytes) {
+  if (!CRC_TABLE) {
+    CRC_TABLE = [];
+    for (var n = 0; n < 256; n++) {
+      var c = n;
+      for (var k = 0; k < 8; k++) { c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); }
+      CRC_TABLE.push(c >>> 0);
+    }
+  }
+  var crc = 0xFFFFFFFF;
+  for (var i = 0; i < bytes.length; i++) { crc = CRC_TABLE[(crc ^ bytes[i]) & 255] ^ (crc >>> 8); }
+  return ("00000000" + ((crc ^ 0xFFFFFFFF) >>> 0).toString(16)).slice(-8);
+}
+
+// Robin の末尾に付ける、バッチ定義の埋め込み（複数行コメント）
+function batchEmbedLines(batch) {
+  var data = utf8Bytes(JSON.stringify(batch));
+  var b64 = base64Encode(data);
+  var chunks = [];
+  for (var i = 0; i < b64.length; i += PADBATCH_WIDTH) { chunks.push(b64.slice(i, i + PADBATCH_WIDTH)); }
+  return [
+    "",
+    "# ---------- 元のバッチ定義（変換器にこの Robin を読み込ませると取り出せる）----------",
+    "# PAD はコメントとして読み飛ばす。中身は書き換えないこと。",
+    "/#",
+    PADBATCH_TAG + " lines=" + chunks.length + " bytes=" + data.length + " crc32=" + crc32Hex(data)
+  ].concat(chunks).concat([PADBATCH_END, "#/"]);
+}
+
+// Robin に埋め込んだバッチ定義を取り出す。{ batch, reason }。
+// 埋め込みが無いとき・壊れているときは batch が null で、reason に説明が入る。
+function extractBatchFromRobin(text) {
+  var lines = String(text).replace(/\r\n/g, "\n").split("\n").map(function (l) { return l.trim(); });
+  var start = -1;
+  for (var i = 0; i < lines.length; i++) {
+    if (lines[i].indexOf(PADBATCH_TAG) === 0) { start = i; break; }
+  }
+  if (start < 0) { return { batch: null, reason: "バッチ定義が埋め込まれていません" }; }
+  var head = {};
+  lines[start].slice(PADBATCH_TAG.length).split(/\s+/).forEach(function (kv) {
+    var at = kv.indexOf("=");
+    if (at > 0) { head[kv.slice(0, at)] = kv.slice(at + 1); }
+  });
+  var body = [], ended = false;
+  for (var j = start + 1; j < lines.length; j++) {
+    if (lines[j] === PADBATCH_END) { ended = true; break; }
+    body.push(lines[j]);
+  }
+  if (!ended) { return { batch: null, reason: "埋め込みの終わり（PADBATCH END）が見つかりません" }; }
+  if (head.lines && String(body.length) !== head.lines) {
+    return { batch: null, reason: "埋め込みの行数が合いません（" + body.length + " / " + head.lines + " 行）" };
+  }
+  var data = base64Decode(body.join(""));
+  if (!data) { return { batch: null, reason: "埋め込みの中身が壊れています（Base64 として読めません）" }; }
+  if (head.crc32 && crc32Hex(data) !== head.crc32) {
+    return { batch: null, reason: "埋め込みの中身が壊れています（検査値が合いません）" };
+  }
+  try { return { batch: JSON.parse(utf8String(data)), reason: "" }; }
+  catch (e) { return { batch: null, reason: "埋め込みの中身が壊れています（JSON として読めません）" }; }
+}
+
 function buildRobin(batch, opt) {
   var detailsPath = opt.detailsPath;
   var idCol = opt.idCol;
@@ -1733,6 +1874,8 @@ function buildRobin(batch, opt) {
   var today = opt.today;
   var shotName = opt.shotName || "@ID@__@KEY@__@STAMP@";   // {y,m,d}（テスト用に固定できるようにする）
 
+  // 埋め込みは、生成の途中で batch に手が入る前の形で作っておく
+  var embed = batchEmbedLines(batch);
   var site = siteSettings(batch, opt.stepWait, opt.preferClickable, opt.blurAfterFill);
   var jsOne = jsActOneline(site.preferClickable, site.blurAfterFill);
   var cols = [idCol];
@@ -2650,7 +2793,7 @@ function buildRobin(batch, opt) {
   var colvars = cols.map(function (c, i) {
     return "        SET Col" + (i + 1) + " TO Row['" + c + "']";
   }).join("\n");
-  var body = L.join("\n").replace("@@COLVARS@@", colvars);
+  var body = L.join("\n").replace("@@COLVARS@@", colvars) + "\n" + embed.join("\n");
   var warns = warnUnsupportedSteps(batch).concat(lintRobin(body.split("\n")));
   return { robin: body + "\n", jsact: jsOne + "\n", warns: warns };
 }
@@ -2729,6 +2872,8 @@ root.PadConvert = {
   csvHeaders: csvHeaders,
   driverDirOf: driverDirOf,
   siteSettings: siteSettings,
+  batchEmbedLines: batchEmbedLines,
+  extractBatchFromRobin: extractBatchFromRobin,
   keyShotAfter: keyShotAfter,
   autoColumnAssign: autoColumnAssign,
   csvFirstRow: csvFirstRow,
@@ -2892,15 +3037,27 @@ root.PadConvert = {
     readFile(file, function (txt) {
       batchText = txt;
       $("batchInfo").textContent = "読み込み: " + batchName + "（" + txt.length + " 文字）";
-      var obj = null, err = "";
-      try { obj = PadConvert.loadRecording(txt); }
-      catch (e) { obj = null; err = e.message; }
+      var obj = null, err = "", fromRobin = false;
+      // この変換器で作った Robin なら、埋め込まれたバッチ定義を取り出して使う
+      if (/\.txt$/i.test(batchName) || txt.indexOf("PADBATCH v1") >= 0) {
+        var got = PadConvert.extractBatchFromRobin(txt);
+        if (got.batch) {
+          obj = got.batch;
+          fromRobin = true;
+          batchText = JSON.stringify(got.batch, null, 2);
+        } else {
+          err = got.reason + "（埋め込みは 2026/11 以降の変換器で作った Robin にだけ入っています）";
+        }
+      } else {
+        try { obj = PadConvert.loadRecording(txt); }
+        catch (e) { obj = null; err = e.message; }
+      }
       recSteps = null;
       batchReady = false;
       $("assignBox").hidden = true;
       if (!obj) {
-        show("err", "JSON として読めませんでした: " + err +
-             "<br>録画 JSON か、バッチ定義 JSON を選んでください。");
+        show("err", "読み込めませんでした: " + err +
+             "<br>録画 JSON、バッチ定義 JSON、この変換器で作った Robin のどれかを選んでください。");
       } else if (PadConvert.isRecording(obj)) {
         applyViewport(obj.steps);
         recTitle = obj.title || batchName.replace(/\.json$/i, "");
@@ -2932,7 +3089,8 @@ root.PadConvert = {
         batchReady = true;          // 読み込んだ時点で変換できる
         renderAssign(recSteps.length);
         var applied = applyBatchOptions(obj);
-        show("ok", "バッチ定義 JSON として読み込みました（loop " + n + " 手順）。" +
+        show("ok", (fromRobin ? "Robin に埋め込まれたバッチ定義を取り出しました" :
+                                "バッチ定義 JSON として読み込みました") + "（loop " + n + " 手順）。" +
              (applied ? "<br><strong>保存されていた設定を反映しました。</strong>" : "") +
              "そのまま「変換する」を押せます。<br>" +
              "振り分けを直す場合は、下の表を変えてから" +

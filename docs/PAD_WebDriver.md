@@ -796,6 +796,37 @@ BaseDir (--pad-out-dir)：  C:\temp
 
 ---
 
+### 動いた Robin からバッチ定義を取り出す
+
+変換器で作った Robin の末尾には、**元になったバッチ定義がそのまま埋め込まれている**。
+バッチ定義のファイルを無くしても、動いた Robin があれば元に戻せる。
+
+```
+# ---------- 元のバッチ定義（変換器にこの Robin を読み込ませると取り出せる）----------
+# PAD はコメントとして読み飛ばす。中身は書き換えないこと。
+/#
+PADBATCH v1 lines=17 bytes=1224 crc32=1a2b3c4d
+eyJ0aXRsZSI6IlBBRCBXZWJEcml2ZXIg44K144Oz44OX44OrIOKAlCDmpJzntKLihpLnorroqo3ihpLjg5vjg7zjg6DjgbjmiLvj
+……
+PADBATCH END
+#/
+```
+
+- **取り出し方（ブラウザ版）** … 「1. 録画 JSON」の欄に、Robin のファイル（`.txt`）を
+  そのまま落とす。取り出したバッチ定義が読み込まれ、振り分けの表に出る。
+  「バッチ定義を保存」で JSON に書き出せる。
+- **取り出し方（Python 版）** … `python pad_webdriver_ref.py --from-robin flow.robin.txt`
+  （`--save-batch` で保存先を指定。既定は `flow.batch.json`）。
+- **PAD に貼り付けたあとでも取り出せる。** `/# … #/` は PAD ではコメント 1 個にまとまり、
+  PAD でアクションをすべて選んでコピーしたものからでも、元のバッチ定義に戻る（実機で確認済み）。
+- 中身は Base64（英数字）なので読めないが、検査値（`crc32`）で欠けや書き換えを見つける。
+  1 文字でも変わっていれば、取り出しは失敗として理由を表示する。
+- 埋め込むのはバッチ定義だけ。明細の場所・BaseDir などの PC のパスや、資格情報は入らない
+  （もともとバッチ定義に入れない決まり）。
+- 2026/11 より前の変換器で作った Robin には埋め込みが無い。そのような Robin から
+  組み立て直す機能は、今後追加する予定。
+- PAD の画面で Robin を手直しした場合、埋め込みは **手直しの前** の内容のまま。
+
 ### 手順 ⑤：実行環境にファイルを置く
 
 `C:\temp`（= `--pad-out-dir` に指定した場所）に次を置く。
@@ -1725,6 +1756,8 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 | `--prefer-clickable` / `--no-prefer-clickable` | 目印に合う要素が複数あるとき押せる要素を優先（既定はバッチ定義の `options`、無ければオン） |
 | `--blur-after-fill` / `--no-blur-after-fill` | 入力のあとフォーカスを外す（既定はバッチ定義の `options`、無ければオン） |
 | `--win-w` / `--win-h` | ウィンドウサイズ（既定: 録画の `setViewport`、無ければ 1250 × 900） |
+| `--from-robin` | この変換器で作った Robin から、埋め込まれたバッチ定義を取り出す（`--batch` `--details` は不要） |
+| `--save-batch` | `--from-robin` で取り出したバッチ定義の保存先（既定: Robin と同じ名前の `.batch.json`） |
 
 `--details` と `--driver-dir` が `--pad-out-dir` の配下にある場合、生成される Robin は
 それらを `%BaseDir%` 相対で出力する。上の例なら次のようになり、**配布時に直すのは
