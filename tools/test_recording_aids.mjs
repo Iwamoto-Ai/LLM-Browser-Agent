@@ -123,8 +123,35 @@ const out = P.buildRobin(batch, { detailsPath: "C:\\temp\\edi2_batch.csv", idCol
 check(out.robin.indexOf("var PREFER = true, BLUR = true;") >= 0, "共通 JS にサイトの設定が入っていない");
 check(out.robin.indexOf("SET StepWait TO 15") >= 0, "StepWait が入っていない");
 
+// ---------------------------------------------------------------- 5. バッチ定義の埋め込み
+{
+  for (const f of ["examples/pad/pad_sample_batch.json", "recordings/edi2_practice_batch.json",
+                   "recordings/edi2_fetch_batch.json"]) {
+    const b = P.loadRecording(fs.readFileSync(f, "utf8"));
+    const r = P.buildRobin(b, { detailsPath: "C:\\temp\\d.csv", idCol: "ID", outDir: "C:\\temp",
+                                browser: "edge", today: { y: 2026, m: 9, d: 1 } });
+    const got = P.extractBatchFromRobin(r.robin);
+    check(got.reason === "" && JSON.stringify(got.batch) === JSON.stringify(b),
+          "埋め込みから元のバッチ定義に戻らない: " + f + " " + got.reason);
+    // PAD でコピーし直した形（/# の後ろの空白・CRLF・字下げ）
+    const copied = r.robin.split("\n").map((l) => (l === "/#" ? "/# " : "  " + l)).join("\r\n");
+    const got2 = P.extractBatchFromRobin(copied);
+    check(got2.batch && JSON.stringify(got2.batch) === JSON.stringify(b), "PAD のコピーから戻らない: " + f);
+  }
+  // 日本語・絵文字（4 バイト文字）も崩れない
+  const odd = { title: "納入登録 📦 テスト", setup: [], loop: [{ type: "comment", text: "{{発注番号}} 100%" }] };
+  const back = P.extractBatchFromRobin(P.batchEmbedLines(odd).join("\n"));
+  check(back.batch && JSON.stringify(back.batch) === JSON.stringify(odd), "4 バイト文字が戻らない");
+  // 1 文字壊すと検査値で気づく
+  const emb = P.batchEmbedLines(odd);
+  const k = emb.findIndex((l) => l.indexOf("PADBATCH v1") === 0) + 1;
+  emb[k] = (emb[k][0] === "A" ? "B" : "A") + emb[k].slice(1);
+  check(!P.extractBatchFromRobin(emb.join("\n")).batch, "壊れた埋め込みを読んでしまった");
+  check(/埋め込まれていません/.test(P.extractBatchFromRobin("SET X TO 1").reason), "埋め込み無しの理由が出ない");
+}
+
 if (errors.length) {
   console.log("NG  録画の下ごしらえ\n  " + errors.join("\n  "));
   process.exit(1);
 }
-console.log("OK  録画の下ごしらえ: 押せる要素の優先 / フォーカス外し / Win+Shift+S / 列の自動割り当て");
+console.log("OK  録画の下ごしらえ: 押せる要素の優先 / フォーカス外し / Win+Shift+S / 列の自動割り当て / バッチ定義の埋め込み");

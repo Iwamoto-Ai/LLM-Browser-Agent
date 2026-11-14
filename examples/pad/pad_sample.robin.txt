@@ -9,7 +9,7 @@
 #           BaseDir: C:\temp
 #           エビデンス名: @ID@__@KEY@__@STAMP@
 #           ダウンロード保存先: C:\temp\download
-# 備考：2026/11/13 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ自動=有効 ／ プロキシ=未使用
+# 備考：2026/11/15 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ自動=有効 ／ プロキシ=未使用
 #       MaxItems=1 ／ ウィンドウ=1366×900 ／ ドライバー置き場所=C:\temp
 #       サイトの設定: 待つ上限=15 秒 ／ 押せる要素を優先=有効 ／ 入力後にフォーカスを外す=有効
 # ============================================================
@@ -1007,3 +1007,27 @@ IF Halt THEN
     File.WriteText File: LogFile TextToWrite: $'''[%HaltStamp%] 中止 %HaltReason%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
     Display.ShowMessageDialog.ShowMessage Title: $'''中止''' Message: $'''%HaltReason%のため、明細を1件も処理せず中止しました。詳細は pad_progress.log を確認してください。''' Icon: Display.Icon.Warning Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn
 END
+
+# ---------- 元のバッチ定義（変換器にこの Robin を読み込ませると取り出せる）----------
+# PAD はコメントとして読み飛ばす。中身は書き換えないこと。
+/#
+PADBATCH v1 lines=17 bytes=1224 crc32=ced46966
+eyJ0aXRsZSI6IlBBRCBXZWJEcml2ZXIg44K144Oz44OX44OrIOKAlCDmpJzntKLihpLnorroqo3ihpLjg5vjg7zjg6DjgbjmiLvj
+gosiLCJzZXR1cCI6W3sidHlwZSI6InNldFZpZXdwb3J0Iiwid2lkdGgiOjEzNjYsImhlaWdodCI6OTAwfSx7InR5cGUiOiJuYXZp
+Z2F0ZSIsInVybCI6ImZpbGU6Ly8vQzovdGVtcC9zYW1wbGUuaHRtbCJ9LHsidHlwZSI6ImNoYW5nZSIsInZhbHVlIjoie3tTRUNS
+RVQ6TVlfVVNFUk5BTUV9fSIsInNlbGVjdG9ycyI6W1siI2xvZ2luLXVzZXIiXSxbImFyaWEvVXNlciJdXX0seyJ0eXBlIjoiY2hh
+bmdlIiwidmFsdWUiOiJ7e1NFQ1JFVDpNWV9QQVNTV09SRH19Iiwic2VsZWN0b3JzIjpbWyIjbG9naW4tcGFzcyJdLFsiYXJpYS9Q
+YXNzd29yZCJdXX0seyJ0eXBlIjoiY2xpY2siLCJzZWxlY3RvcnMiOltbIiNidG4tc2lnbmluIl0sWyJhcmlhL1NpZ24gaW4iXV19
+LHsidHlwZSI6ImNsaWNrIiwic2VsZWN0b3JzIjpbWyIjbWVudS1vcmRlcnMiXSxbImFyaWEvT3JkZXJzIl1dfV0sImxvb3AiOlt7
+InR5cGUiOiJjb21tZW50IiwidGV4dCI6IuazqOaWhyB7e0tFWX1977yIe3tJRH1977yJ44Gu56K66KqN44KS6ZaL5aeLIn0seyJ0
+eXBlIjoiY2hhbmdlIiwidmFsdWUiOiJ7e0tFWX19Iiwic2VsZWN0b3JzIjpbWyIjc2VhcmNoLWtleSJdLFsiYXJpYS9PcmRlciBr
+ZXkiXV19LHsidHlwZSI6ImNsaWNrIiwic2VsZWN0b3JzIjpbWyIjYnRuLXNlYXJjaCJdLFsiYXJpYS9TZWFyY2giXV19LHsidHlw
+ZSI6ImNsaWNrIiwic2VsZWN0b3JzIjpbWyJhcmlhL3t7S0VZfX0iXSxbIiNyZXN1bHQtbGluayJdXX0seyJ0eXBlIjoiY2xpY2si
+LCJzZWxlY3RvcnMiOltbIiNidG4tY29uZmlybSJdLFsiYXJpYS9Db25maXJtIl0sWyJ0ZXh0L0NvbmZpcm0iXV19LHsidHlwZSI6
+ImNvbW1lbnQiLCJ0ZXh0Ijoi56K66KqN5riI44G/55S76Z2i44KS44Ko44OT44OH44Oz44K55L+d5a2YIn0seyJ0eXBlIjoiY2xp
+Y2siLCJzZWxlY3RvcnMiOltbIiNob21lLWxpbmsiXSxbImFyaWEvSG9tZSJdXX0seyJ0eXBlIjoiY2xpY2siLCJzZWxlY3RvcnMi
+OltbIiNtZW51LW9yZGVycyJdLFsiYXJpYS9PcmRlcnMiXV19XSwicmVjb3ZlciI6W3sidHlwZSI6ImNsaWNrIiwic2VsZWN0b3Jz
+IjpbWyIjaG9tZS1saW5rIl0sWyJhcmlhL0hvbWUiXV19LHsidHlwZSI6ImNsaWNrIiwic2VsZWN0b3JzIjpbWyIjbWVudS1vcmRl
+cnMiXSxbImFyaWEvT3JkZXJzIl1dfV19
+PADBATCH END
+#/

@@ -49,6 +49,7 @@ import os
 import re
 import sys
 import urllib.error
+import zlib
 import urllib.request
 from datetime import datetime
 
@@ -1267,6 +1268,82 @@ def _lint_robin(lines: list, log=print) -> list:
 
 Q_ = "'''"   # Robin のリテラル区切り
 
+# ------------------------------------------------------------
+# バッチ定義の埋め込み（Robin から元のバッチ定義を取り出せるようにする）
+#
+# Robin の末尾に、複数行コメント /# … #/ として入れる。PAD ではコメント 1 個に
+# まとまり、PAD でコピーして戻しても中身は変わらない（2026/11/15 実機で確認）。
+# 中身は JSON を UTF-8 → Base64 にしたもの。PAD はコメント内の \ を \\ に
+# 書き換えるが、Base64 は英数字と + / = だけなので影響を受けない。
+# 圧縮しないのは、Python 版とブラウザ版で出力を必ず一致させるため。
+# ------------------------------------------------------------
+PADBATCH_TAG = "PADBATCH v1"
+PADBATCH_END = "PADBATCH END"
+PADBATCH_WIDTH = 100
+
+
+def _canon_json(o):
+    """ブラウザ版と同じ JSON になるよう、整数値の小数（1.0）を整数にそろえる。"""
+    if isinstance(o, dict):
+        return {k: _canon_json(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [_canon_json(v) for v in o]
+    if isinstance(o, float) and o.is_integer():
+        return int(o)
+    return o
+
+
+def batch_embed_lines(batch: dict) -> list:
+    """Robin の末尾に付ける、バッチ定義の埋め込み（複数行コメント）。"""
+    mini = json.dumps(_canon_json(batch), ensure_ascii=False, separators=(",", ":"))
+    data = mini.encode("utf-8")
+    b64 = base64.b64encode(data).decode("ascii")
+    chunks = [b64[i:i + PADBATCH_WIDTH] for i in range(0, len(b64), PADBATCH_WIDTH)]
+    crc = f"{zlib.crc32(data) & 0xFFFFFFFF:08x}"
+    return [
+        "",
+        "# ---------- 元のバッチ定義（変換器にこの Robin を読み込ませると取り出せる）----------",
+        "# PAD はコメントとして読み飛ばす。中身は書き換えないこと。",
+        "/#",
+        f"{PADBATCH_TAG} lines={len(chunks)} bytes={len(data)} crc32={crc}",
+        *chunks,
+        PADBATCH_END,
+        "#/",
+    ]
+
+
+def extract_batch_from_robin(text: str):
+    """Robin に埋め込んだバッチ定義を取り出す。戻り値は (batch, 理由)。
+
+    埋め込みが無いとき・壊れているときは batch が None で、理由に説明が入る。
+    PAD でコピーし直した Robin（行末の空白・改行 CRLF）でも読めるようにする。"""
+    lines = [ln.strip() for ln in text.replace("\r\n", "\n").split("\n")]
+    try:
+        start = next(i for i, ln in enumerate(lines) if ln.startswith(PADBATCH_TAG))
+    except StopIteration:
+        return None, "バッチ定義が埋め込まれていません"
+    head = dict(kv.split("=", 1) for kv in lines[start][len(PADBATCH_TAG):].split() if "=" in kv)
+    body = []
+    for ln in lines[start + 1:]:
+        if ln == PADBATCH_END:
+            break
+        body.append(ln)
+    else:
+        return None, "埋め込みの終わり（PADBATCH END）が見つかりません"
+    if head.get("lines") and str(len(body)) != head["lines"]:
+        return None, f"埋め込みの行数が合いません（{len(body)} / {head['lines']} 行）"
+    try:
+        data = base64.b64decode("".join(body), validate=True)
+    except (ValueError, TypeError):
+        return None, "埋め込みの中身が壊れています（Base64 として読めません）"
+    if head.get("crc32") and f"{zlib.crc32(data) & 0xFFFFFFFF:08x}" != head["crc32"]:
+        return None, "埋め込みの中身が壊れています（検査値が合いません）"
+    try:
+        return json.loads(data.decode("utf-8")), ""
+    except (ValueError, UnicodeDecodeError):
+        return None, "埋め込みの中身が壊れています（JSON として読めません）"
+
+
 def write_robin(batch: dict, details_path: str, id_col: str, path: str,
                 shot_name: str = "@ID@__@KEY@__@STAMP@",
                 download_dir: str = "",
@@ -1298,6 +1375,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
       loop    … skip 判定 / 再実行絞り込み / 件数上限 / 復帰 / 1 件分の操作 / エビデンス
       recover … 失敗した件のあと、次の件の前に起点へ戻す（batch の recover を使う）
     """
+    # 埋め込みは、生成の途中で batch に手が入る前の形で作っておく
+    embed = batch_embed_lines(batch)
     site = site_settings(batch, step_wait, prefer_clickable, blur_after_fill)
     js_one = js_act_oneline(site["preferClickable"], site["blurAfterFill"])
     drv_dir = _driver_dir(driver_dir, driver_exe)
@@ -2246,7 +2325,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     colvars = "\n".join(
         f"        SET Col{i + 1} TO Row['{c}']" for i, c in enumerate(cols)
     )
-    body = "\n".join(L).replace("@@COLVARS@@", colvars)
+    body = "\n".join(L).replace("@@COLVARS@@", colvars) + "\n" + "\n".join(embed)
     warns = _lint_robin(body.split("\n"))
     if warns:
         print(f"  ⚠ 上記 {len(warns)} 件は貼り付けが無視される可能性があります")
@@ -2467,8 +2546,12 @@ def main() -> None:
     _use_utf8_stdout()
     p = argparse.ArgumentParser(
         description="PAD 版バッチの参照実装（WebDriver を HTTP 直叩き・拡張機能不要）")
-    p.add_argument("--batch", required=True, help="バッチ定義 JSON")
-    p.add_argument("--details", required=True, help="明細 CSV / xlsx")
+    p.add_argument("--batch", help="バッチ定義 JSON")
+    p.add_argument("--details", help="明細 CSV / xlsx")
+    p.add_argument("--from-robin", default="",
+                   help="この変換器で作った Robin から、埋め込まれたバッチ定義を取り出す")
+    p.add_argument("--save-batch", default="",
+                   help="--from-robin で取り出したバッチ定義の保存先（既定: Robin と同じ名前の .batch.json）")
     p.add_argument("--values", help="共通値 JSON（任意）")
     p.add_argument("--id-column", help="ID 列（既定: 先頭列）")
     p.add_argument("--driver-url", default="http://127.0.0.1:9515",
@@ -2527,6 +2610,20 @@ def main() -> None:
                    help="処理する件数の上限。Robin では MaxItems になる（既定 1）")
     p.add_argument("--stop-on-error", action="store_true")
     args = p.parse_args()
+
+    if args.from_robin:
+        with open(args.from_robin, encoding="utf-8-sig") as f:
+            got, why = extract_batch_from_robin(f.read())
+        if got is None:
+            p.error(f"{args.from_robin}: {why}")
+        out = args.save_batch or re.sub(r"(\.robin)?\.txt$", "", args.from_robin) + ".batch.json"
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(got, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        print(f"📄 バッチ定義を取り出しました: {os.path.abspath(out)}")
+        return
+    if not args.batch or not args.details:
+        p.error("--batch と --details が必要です（Robin から取り出すときは --from-robin）")
 
     batch = load_recording(args.batch)
     common = load_recording(args.values) if args.values else {}
