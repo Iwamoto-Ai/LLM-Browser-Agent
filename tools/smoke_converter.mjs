@@ -182,6 +182,22 @@ for (const key of ["setup", "loop", "recover"]) {
   }
 }
 
+// 埋め込みの無い古い Robin を読み込むと、読み解いて組み立て、戻せなかった点を出す
+{
+  const txt = fs.readFileSync("tests/fixtures/old_edi2_publish_robin.txt", "utf8");
+  const file = new dom.window.File([txt], "old.robin.txt", { type: "text/plain" });
+  const input = d.getElementById("batchFile");
+  Object.defineProperty(input, "files", { value: [file], configurable: true });
+  input.dispatchEvent(new dom.window.Event("change"));
+  await new Promise((r) => setTimeout(r, 300));
+  const msg = d.getElementById("msg").textContent;
+  if (msg.indexOf("Robin を読み解いてバッチ定義を組み立てました") < 0) {
+    errors.push("古い Robin を読み解けていない: " + msg.slice(0, 120));
+  }
+  if (msg.indexOf("運用の設定") < 0) { errors.push("戻せなかった点が出ていない"); }
+  if (d.getElementById("saveBatch").disabled) { errors.push("読み解いたバッチ定義を保存できない"); }
+}
+
 // 背景色を固定したメッセージ欄に文字色が付いているか（ダークモードで白文字になる事故の防止）
 const css = [...d.querySelectorAll("style")].map((s) => s.textContent).join("\n");
 for (const cls of [".warn", ".err", ".ok"]) {

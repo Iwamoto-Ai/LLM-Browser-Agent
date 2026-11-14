@@ -1127,3 +1127,102 @@ def test_cli_from_robin_writes_batch(tmp_path):
     assert r.returncode == 0, r.stderr
     out = tmp_path / "x.batch.json"
     assert json.load(open(out, encoding="utf-8")) == load_recording(src)
+
+
+# ---------------------------------------------------------------- 埋め込みの無い Robin を読み解く
+_HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_RICH = os.path.join(_HERE, "tests", "fixtures", "robin_parse_rich_batch.json")
+_OLD = os.path.join(_HERE, "tests", "fixtures", "old_edi2_publish_robin.txt")
+
+
+def _robin_no_embed(batch, tmp_path, **kw):
+    """埋め込みと生成日を除いた Robin（読み解きの比較用）。"""
+    idc = (batch.get("options") or {}).get("idCol") or "ID"
+    out = pad.write_robin(batch, r"C:\temp\d.csv", idc, str(tmp_path / "p.robin.txt"),
+                          out_dir=r"C:\temp", **kw)
+    txt = open(out, encoding="utf-8").read().split("\n# ---------- 元のバッチ定義")[0]
+    return re.sub(r"# 備考：\d{4}/\d\d/\d\d", "# 備考：X", txt)
+
+
+def test_parse_robin_rebuilds_same_robin(tmp_path):
+    """バッチ定義 → Robin → 読み解き → Robin が、元の Robin と同じになる。"""
+    for p in _all_batches() + [_RICH]:
+        r1 = _robin_no_embed(load_recording(p), tmp_path)
+        got, notes = pad.parse_robin(r1)
+        assert got is not None, p
+        assert _robin_no_embed(got, tmp_path) == r1, p
+        # PAD でコピーし直した形（CRLF・字下げ）でも同じに読める
+        copied = "\r\n".join("  " + ln for ln in r1.split("\n"))
+        assert pad.parse_robin(copied)[0] == got, p
+
+
+def test_parse_robin_restores_step_details(tmp_path):
+    """読み解きで、待ち時間・回数・読み取り方・名前・列の差し込みが戻る。"""
+    got, _ = pad.parse_robin(_robin_no_embed(load_recording(_RICH), tmp_path,
+                                             details_from_result=True))
+    loop = got["loop"]
+    kinds = [s["type"] for s in loop]
+    assert kinds == ["comment", "click", "change", "scrollFind", "click", "capture", "capture",
+                     "capture", "assertText", "assertText", "download", "download", "screenshot"]
+    assert loop[0]["text"] == "{{番号}} の処理 100%"
+    assert loop[2]["value"] == "{{発注}}" and loop[2]["selectors"][0] == ["aria/発注番号"]
+    assert loop[3]["tries"] == 7 and loop[8]["timeout"] == 20 and "timeout" not in loop[9]
+    assert loop[5]["extract"] == "digits" and loop[5]["selectors"] == [["#d"]]
+    assert loop[6] == {"type": "capture", "key": "要求IDは", "name": "要求"}
+    assert loop[7]["extract"] == "digits" and loop[7]["key"] == "No."
+    assert loop[10]["name"] == "{{番号}}_dl" and "name" not in loop[11]
+    o = got["options"]
+    assert o["idCol"] == "番号" and o["stepWait"] == 30 and o["detailsFromResult"] is True
+    assert o["preferClickable"] is False and o["blurAfterFill"] is False
+    assert [s["type"] for s in got["recover"]] == ["comment", "navigate", "change", "click"]
+    assert got["teardown"][1]["selectors"][0] == ["#logout"]
+    assert got["setup"][0] == {"type": "navigate", "url": "https://edi.example.com/a?x='1'"}
+
+
+def test_parse_old_robin_without_embed(tmp_path):
+    """埋め込みの無い古い変換器の Robin（実 EDI2 ③、社名・URL は置き換え済み）を読み解ける。"""
+    txt = open(_OLD, encoding="utf-8-sig").read()
+    got, how, notes = pad.robin_to_batch(txt)
+    assert how == "parse" and got is not None
+    assert got["options"]["idCol"] == "プロジェクト番号"
+    assert "detailsFromResult" not in got["options"]      # 再実行モードの設定を拾わない
+    assert [s["type"] for s in got["setup"]] == ["setViewport", "navigate"] + ["click"] * 4
+    assert len(got["loop"]) == 22 and got["recover"][0]["type"] == "click"
+    cap = [s for s in got["loop"] if s["type"] == "capture"][0]
+    assert cap == {"type": "capture", "key": "要求IDは", "name": "要求ID", "extract": "digits"}
+    assert [s for s in got["loop"] if s["type"] == "assertText"][0]["timeout"] == 60
+    assert any("運用の設定" in n for n in notes)
+    # 組み立て直したものから作った Robin は、読み解くと同じものに戻る
+    assert pad.parse_robin(_robin_no_embed(got, tmp_path))[0] == got
+
+
+def test_robin_to_batch_prefers_embed_then_parses(tmp_path):
+    """埋め込みがあればそれを使う。壊れていれば読み解きに切り替え、理由を残す。"""
+    batch = load_recording(_RICH)
+    out = pad.write_robin(batch, r"C:\temp\d.csv", "番号", str(tmp_path / "e.robin.txt"))
+    txt = open(out, encoding="utf-8").read()
+    got, how, notes = pad.robin_to_batch(txt)
+    assert how == "embed" and got == batch and notes == []
+    lines = txt.split("\n")
+    k = next(i for i, ln in enumerate(lines) if ln.startswith("PADBATCH v1")) + 1
+    lines[k] = ("B" if lines[k][0] == "A" else "A") + lines[k][1:]
+    got, how, notes = pad.robin_to_batch("\n".join(lines))
+    assert how == "parse" and got["loop"] and "壊れています" in notes[0]
+    got, how, notes = pad.robin_to_batch("SET X TO 1\n")
+    assert got is None and how == "" and "ではないようです" in notes[0]
+
+
+def test_cli_from_robin_parses_old_robin(tmp_path):
+    """--from-robin は、埋め込みが無ければ読み解いて保存し、戻せなかった点を表示する。"""
+    import shutil
+    import subprocess
+    import sys as _sys
+    src = tmp_path / "old.robin.txt"
+    shutil.copy(_OLD, src)
+    r = subprocess.run([_sys.executable, os.path.join(_HERE, "pad_webdriver_ref.py"),
+                        "--from-robin", str(src)], capture_output=True, text=True,
+                       encoding="utf-8", cwd=_HERE)
+    assert r.returncode == 0, r.stderr
+    assert "読み解いて組み立てました" in r.stdout and "運用の設定" in r.stdout
+    got = json.load(open(tmp_path / "old.batch.json", encoding="utf-8"))
+    assert len(got["loop"]) == 22

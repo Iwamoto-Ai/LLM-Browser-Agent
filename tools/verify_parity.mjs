@@ -104,4 +104,31 @@ for (const c of cases) {
   const jsactPy = nl(fs.readFileSync(py.replace(/\.robin\.txt$/, ".jsact.js"), "utf8"));
   if (jsactPy !== nl(out.jsact)) { ng++; console.log("NG  共通JavaScriptが不一致:", c.batch); }
 }
+// Robin からバッチ定義を取り出す・読み解く結果も一致すること。
+// 埋め込みを外した Robin（古い変換器のもの）は、中身を読み解いて組み立てる。
+{
+  const robins = [];
+  const py = path.join(os.tmpdir(), "py.robin.txt");
+  for (const b of ["recordings/edi2_practice_batch.json", "tests/fixtures/robin_parse_rich_batch.json",
+                   SITE_BATCH]) {
+    execFileSync(PY, ["pad_webdriver_ref.py", "--batch", b, "--details", "C:\\temp\\d.csv",
+      "--id-column", (PadConvert.loadRecording(fs.readFileSync(b, "utf8")).options || {}).idCol || "ID", "--robin", py,
+      "--pad-out-dir", "C:\\temp"], { stdio: "pipe" });
+    const txt = fs.readFileSync(py, "utf8");
+    robins.push({ name: b + "（埋め込みあり）", text: txt });
+    robins.push({ name: b + "（埋め込みなし）",
+                  text: txt.split("\n# ---------- 元のバッチ定義")[0] });
+  }
+  robins.push({ name: "古い Robin", text: fs.readFileSync("tests/fixtures/old_edi2_publish_robin.txt", "utf8") });
+  for (const r of robins) {
+    const src = path.join(os.tmpdir(), "parity_from.robin.txt");
+    const dst = path.join(os.tmpdir(), "parity_from.batch.json");
+    fs.writeFileSync(src, r.text, "utf8");
+    execFileSync(PY, ["pad_webdriver_ref.py", "--from-robin", src, "--save-batch", dst], { stdio: "pipe" });
+    const want = JSON.stringify(JSON.parse(fs.readFileSync(dst, "utf8")));
+    const got = JSON.stringify(PadConvert.robinToBatch(r.text).batch);
+    if (got === want) { console.log("OK  Robin からの取り出しが一致:", r.name); }
+    else { ng++; console.log("NG  Robin からの取り出しが不一致:", r.name + "\n  py: " + want.slice(0, 300) + "\n  js: " + got.slice(0, 300)); }
+  }
+}
 process.exit(ng ? 1 : 0);
