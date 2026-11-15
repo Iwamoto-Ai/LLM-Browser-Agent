@@ -33,10 +33,14 @@ cols.forEach((c, i) => { baseRow[c] = vals1[i] === undefined ? "" : vals1[i]; })
 let row = {};
 // capture した値。次のバッチへ持ち越す（PAD では結果 CSV 経由）。
 let carried = {};
+// 練習サイトの資格情報（公開されているダミー）。{{SECRET:…}} はこれで埋める
+const SECRETS = { MY_USERNAME: "demo", MY_PASSWORD: "password123" };
 const fill = (s) => String(s === undefined ? "" : s)
+  .replace(/\{\{SECRET:([^}]+)\}\}/g, (_, k) => (SECRETS[k] === undefined ? "" : SECRETS[k]))
   .replace(/\{\{([^}]+)\}\}/g, (_, k) => (row[k] === undefined ? "" : row[k]));
 
 const targets = process.argv.slice(2).length ? process.argv.slice(2) : [
+  "recordings/edi2_practice_batch.json",
   "recordings/edi2_accept_batch.json",
   "recordings/edi2_delivery_batch.json",
   "recordings/edi2_publish_batch.json",
@@ -70,15 +74,22 @@ for (const rel of targets) {
     jsAct.replace(/arguments\[0\]/g, "a").replace(/arguments\[1\]/g, "b")
          .replace(/arguments\[2\]/g, "c") + "}; })()");
 
-  // ログインは人がやる部分。ここだけ直接操作する
-  d.getElementById("usernameField").value = "demo";
-  d.getElementById("passwordField").value = "password123";
-  d.getElementById("LoginBtn").dispatchEvent(
-    new dom.window.MouseEvent("click", { bubbles: true }));
+  // ログインは人がやる部分（PAD 版は setup の入力を再生しない）。
+  // ただし setup にログインの入力があるバッチ（run_batch.py でも流せるもの）は、
+  // その入力どおりに練習用の資格情報でログインする。
+  const loginInSetup = (batch.setup || []).some((st) => st.type === "change");
+  if (!loginInSetup) {
+    d.getElementById("usernameField").value = "demo";
+    d.getElementById("passwordField").value = "password123";
+    d.getElementById("LoginBtn").dispatchEvent(
+      new dom.window.MouseEvent("click", { bubbles: true }));
+  }
 
   const steps = [];
   for (const st of batch.setup || []) {
-    if (st.type === "click" || st.type === "doubleClick") { steps.push(["setup", st]); }
+    if (st.type === "click" || st.type === "doubleClick" || st.type === "change") {
+      steps.push(["setup", st]);
+    }
   }
   for (const st of batch.loop || []) { steps.push(["loop", st]); }
 

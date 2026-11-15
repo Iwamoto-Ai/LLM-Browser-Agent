@@ -2204,7 +2204,7 @@ function robinReadXlsx(ind, csvRead) {
   out = out.concat([
     i2 + "IF XlsErr THEN",
     i3 + "SET Halt TO True",
-    i3 + "SET HaltReason TO " + robinStr("明細ファイル（%DetailsFile%）を開けなかった"),
+    i3 + "SET HaltReason TO " + robinStr("明細ファイル（%DetailsFile%）を開けませんでした"),
     i2 + "ELSE",
     i3 + "Excel.SetActiveWorksheet.ActivateWorksheetByName Instance: DetailsExcel " +
       "Name: " + robinStr(DETAILS_SHEET)
@@ -2213,7 +2213,7 @@ function robinReadXlsx(ind, csvRead) {
   out = out.concat([
     i3 + "IF XlsErr THEN",
     i3 + "    SET Halt TO True",
-    i3 + "    SET HaltReason TO " + robinStr("明細ファイルに「" + DETAILS_SHEET + "」シートが無い"),
+    i3 + "    SET HaltReason TO " + robinStr("明細ファイルに「" + DETAILS_SHEET + "」シートがありません"),
     i3 + "ELSE",
     i3 + "    # 中身の型のまま読む（文字で読むと 900000000001 が 9E+11 になる）",
     i3 + "    Excel.ReadFromExcel.ReadAllCells Instance: DetailsExcel " +
@@ -2515,10 +2515,20 @@ function xlsxColName(i) {
 
 // 明細テンプレート（.xlsx）の中身。「明細」シートの 1 行目に列名、全部の列を文字列の書式に。
 // 1 行目は固定表示にして、下へスクロールしても列名が見えるようにする。
-function xlsxTemplate(headers) {
+// rows を渡すと 2 行目から文字として入れる（練習用の明細を作るときなど）。
+function xlsxTemplate(headers, rows) {
+  rows = rows || [];
   var x = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
   var ns = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"';
   var last = xlsxColName(Math.max(headers.length, 1) - 1);
+  var body = rows.map(function (r, k) {
+    var n = k + 2;
+    return '<row r="' + n + '">' + headers.map(function (h, i) {
+      var v = r[i] === undefined || r[i] === null ? "" : String(r[i]);
+      return v === "" ? "" : '<c r="' + xlsxColName(i) + n + '" s="1" t="inlineStr"><is><t xml:space="preserve">' +
+        xmlEscape(v) + "</t></is></c>";
+    }).join("") + "</row>";
+  }).join("");
   var cells = headers.map(function (h, i) {
     return '<c r="' + xlsxColName(i) + '1" s="2" t="inlineStr"><is><t>' + xmlEscape(h) + "</t></is></c>";
   }).join("");
@@ -2557,11 +2567,11 @@ function xlsxTemplate(headers) {
       "</styleSheet>" },
     { name: "xl/worksheets/sheet1.xml", text: x +
       "<worksheet " + ns + ">" +
-      '<dimension ref="A1:' + last + '1"/>' +
+      '<dimension ref="A1:' + last + (rows.length + 1) + '"/>' +
       '<sheetViews><sheetView workbookViewId="0" tabSelected="1">' +
       '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' +
       '<cols><col min="1" max="' + Math.max(headers.length, 1) + '" width="20" style="1" customWidth="1"/></cols>' +
-      '<sheetData><row r="1">' + cells + "</row></sheetData></worksheet>" }
+      '<sheetData><row r="1">' + cells + "</row>" + body + "</sheetData></worksheet>" }
   ];
   return zipStore(files);
 }
@@ -3519,7 +3529,7 @@ function buildRobin(batch, opt) {
     robinStr("[%HaltStamp%] 中止 %HaltReason%") +
     " AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8");
   A("    Display.ShowMessageDialog.ShowMessage Title: $'''中止''' " +
-    "Message: $'''%HaltReason%のため、明細を1件も処理せず中止しました。詳細は pad_progress.log を確認してください。''' " +
+    "Message: $'''明細を1件も処理せずに中止しました。理由：%HaltReason%。詳細は pad_progress.log を確認してください。''' " +
     "Icon: Display.Icon.Warning Buttons: Display.Buttons.OK " +
     "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn");
   A("END");

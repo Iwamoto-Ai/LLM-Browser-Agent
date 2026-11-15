@@ -172,9 +172,9 @@ def test_batch_runs_practice_definition(driver_url, tmp_path, monkeypatch):
     results = pad.run(batch, rows, {}, drv, str(tmp_path), "プロジェクト番号",
                       log=lambda m: None)
     assert [r["結果"] for r in results] == ["成功", "スキップ"]
-    # 明細の値がセレクタにも展開されている（aria/{{発注番号}} → aria/900000000001）
+    # 明細の値がセレクタにも展開されている（text/{{発注番号}} → text/900000000001）
     execs = [b for m, p, b in _Handler.calls if p.endswith("/execute/sync")]
-    assert any("aria/900000000001" in json.dumps(b["args"][0], ensure_ascii=False)
+    assert any("text/900000000001" in json.dumps(b["args"][0], ensure_ascii=False)
                for b in execs)
     # navigate は setup の 1 回だけ（毎件ログインし直していない）
     assert sum(1 for m, p, _ in _Handler.calls if p.endswith("/url")) == 1
@@ -1270,7 +1270,8 @@ def test_xlsx_details_reads_sheet_and_makes_result_excel(tmp_path):
     assert "%XlsNote%" in txt
     # 開けない・シートが無いときは止める。Excel を開いたままにしない
     assert txt.count("ON ERROR") == 3
-    assert "明細ファイルに「明細」シートが無い" in txt
+    assert "明細ファイルに「明細」シートがありません" in txt
+    assert "明細を1件も処理せずに中止しました。理由：%HaltReason%。" in txt
     # 生成時の点検で警告が出ない（%''% は PAD の空の文字の式）
     assert pad._lint_robin(txt.split("\n"), log=lambda *_: None) == []
 
@@ -1320,3 +1321,11 @@ def test_cli_xlsx_details_without_openpyxl(tmp_path):
     assert r.returncode == 0, r.stderr
     assert "openpyxl が無いので" in r.stdout
     assert "Excel.ReadFromExcel.ReadAllCells" in open(tmp_path / "o.robin.txt", encoding="utf-8").read()
+
+
+def test_practice_details_csv_and_xlsx_match():
+    """練習用の明細は CSV と Excel の 2 つ。中身が同じであること。"""
+    pytest.importorskip("openpyxl")
+    from details_io import load_details
+    base = os.path.join(_HERE, "data", "edi2_practice_batch")
+    assert load_details(base + ".csv") == load_details(base + ".xlsx")

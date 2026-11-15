@@ -501,7 +501,7 @@ python run_batch.py --batch recordings/edi_practice_batch.json --details data/ed
 
 - **CSV 推奨**（Excel で「**CSV UTF-8**」として保存 → そのまま読める）。1 行目 = 列名、2 行目以降 = データ。
   **列名がそのまま `{{キー}}`** になる（日本語列名も可: `{{プロジェクト番号}}`）。
-- `.xlsx` の直読みも可（`pip install openpyxl` が必要。先頭シートを読む）。
+- `.xlsx` の直読みも可（`pip install openpyxl` が必要。「明細」シートがあればそれを、無ければ先頭シートを読む）。
   数値は `900000000001.0` にならないよう整数化、日付は `YYYY-MM-DD` に整形される。
 - **ID 列**: 既定は先頭列（`--id-column` で変更可）。進捗・結果・再実行はこの値で扱う。
   上の例では**プロジェクト番号**が ID になる（案件をプロジェクト番号で管理している運用に合わせた並び）。
@@ -551,15 +551,23 @@ python run_batch.py --batch recordings/edi_practice_batch.json --details data/ed
 **Oracle 型（タブ遷移・発注確認）の練習サイトも同梱** — `test_site/edi2/` は iSupplier Portal 風の
 画面遷移（ログイン → ナビゲータ → 発注 → 拡張検索 → 受理 → 発行 → 確認完了 → ホームへ戻る）を、
 **実 EBS と同じ要素 ID**（`#usernameField`・`#POS_ORDERS`・`#SrchBtn`・`#Value_0`・`#ActionGoBtn`・
-`#PosSubmitBtn`・検索結果リンク `#N58:PosPoNumber:0`）で再現している。本番バッチと URL 以外ほぼ同一の
-定義で検証できるため、実環境の許可が下りる前の**予行演習**に使える。エビデンスは
-「プロジェクト番号__発注番号__日時.png」で保存され、セレクタ内プレースホルダ（`aria/{{発注番号}}`）や
-日本語列名の CSV もこの練習で確認できる。
+`#PosSubmitBtn`）で再現している。本番バッチと URL 以外ほぼ同一の
+定義で検証できるため、実環境の許可が下りる前の**予行演習**に使える。
+
+練習バッチ `recordings/edi2_practice_batch.json` は **注文受諾**（ログイン → ナビゲータのツリーを開く →
+受諾 → 開き直して「受理済」をエビデンスに）。続きの **納入登録・帳票の発行・Excel の取得**は
+`recordings/edi2_delivery_batch.json`・`edi2_publish_batch.json`・`edi2_fetch_batch.json`（PAD 版で使う）。
+明細は 4 つの流れで共通で、**CSV（`data/edi2_practice_batch.csv`）と Excel（`data/edi2_practice_batch.xlsx`）の
+どちらでも**よい（中身は同じ。列は プロジェクト番号・発注番号・納入日・要求ID・skip）。
+エビデンスは「プロジェクト番号__発注番号__注文受諾_日時.png」で保存され、セレクタ内プレースホルダ
+（`text/{{発注番号}}`）や日本語列名もこの練習で確認できる。
 
 ```powershell
-# EDI2（Oracle 型）練習バッチ（4 件: 成功 3 / スキップ 1。エビデンス例 PM9000000001__900000000001_日時.png）
+# EDI2（Oracle 型）練習バッチ 注文受諾（4 件: 成功 3 / スキップ 1）
 $env:MY_USERNAME="demo"; $env:MY_PASSWORD="password123"
 python run_batch.py --batch recordings/edi2_practice_batch.json --details data/edi2_practice_batch.csv --engine playwright --browser edge --no-headless --viewport-shot
+# 明細を Excel にしても同じ結果（pip install openpyxl が必要）
+python run_batch.py --batch recordings/edi2_practice_batch.json --details data/edi2_practice_batch.xlsx --engine playwright --browser edge --no-headless --viewport-shot
 ```
 
 
@@ -577,6 +585,7 @@ PAD の Web 自動化は専用のブラウザ拡張機能を必要とするが�
 HTTP で指示すれば**拡張機能なしでブラウザを操作できる**。
 
 - 明細の読み込み・ループ・skip 判定・件数制限・進捗・結果 CSV → **PAD の標準アクション**
+  （明細は **CSV でも Excel（.xlsx）でも**よい。Excel は PAD の Excel アクションで「明細」シートを読む）
 - ブラウザ操作 → **WebDriver へ HTTP**（要素の特定と操作は `/execute/sync` の JavaScript に一本化）
 - エビデンス → **WebDriver の `/screenshot`**（デスクトップではなくブラウザのページだけが写る）
 
@@ -625,11 +634,12 @@ Python も実行ファイルも要らない。ファイルを 1 つ持ってい�
   ① ブラウザの DevTools Recorder で業務操作を録画 → JSONファイルでエクスポート
   ② setup / loop / recover / teardown に分割、値を {{列名}} / {{SECRET:…}} へ
   ③ tools/pad_converter.html をブラウザーで開いて変換 →「Robin をコピー」
-  ④ C:\temp に置く: 明細CSV
+  ④ C:\temp に置く: 明細（CSV または Excel .xlsx）
      （ドライバーは既定で自動取得。自動取得をオフにするときだけ msedgedriver.exe / chromedriver.exe も）
   ⑤ PAD で新規フロー（Power Fx は無効のまま）→ キャンバスに Ctrl+V
   ⑥ MaxItems = 1 で試走 → 目で確認 → 正常動作が確認できたらデータ数に増やして本番実行
   ⑦ C:\temp に出力: エビデンスPNG / pad_result.csv / pad_progress.log
+     （明細が Excel のときは、見る用の pad_result_日時.xlsx も）
 ```
 
 <sub>③は上級者向けに Python 版 `pad_webdriver_ref.py` もある（出力は 1 文字まで同じ）。
@@ -672,6 +682,7 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 | 手動ログイン（既定） | 人が手でログインし、**繰り返しの起点画面まで進んでから**[OK]。PAD はパスワードを一度も受け取らない |
 | プロキシ切り替え | `UseProxy` の True / False で直結と社内プロキシ経由を行き来できる |
 | セットアップ失敗の検知 | ログインや起点への移動に失敗したら、明細を 1 件も流さず中止。**中止した理由**をダイアログとログに出す |
+| 明細は CSV / Excel | `--details` を `.xlsx` にすると「明細」シートを読む（番号・日付を崩さない読み方で）。最後に結果を見る用の Excel も作る。ブラウザ版の「明細テンプレート（Excel）を保存」で入れ物を作れる |
 | 件数制限 / skip 列 | `MaxItems` で試走。skip 列の行は飛ばす。打ち切った行は「未実行」として記録 |
 | 失敗後の復帰 | `recover` を次の件の前に実行し、**1 件の失敗が全件に連鎖しない** |
 | 失敗時エビデンス | `fail__<ID>__<業務キー>__日時.png` を保存 |

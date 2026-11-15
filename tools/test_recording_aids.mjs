@@ -180,6 +180,13 @@ check(out.robin.indexOf("SET StepWait TO 15") >= 0, "StepWait が入っていな
         "Excel の列名が違う: " + JSON.stringify(x.headers));
   check(JSON.stringify(x.firstRow) === JSON.stringify(["PM9000000001", "900000000001", "2026/09/01", "0012", ""]),
         "Excel の 1 件目が違う: " + JSON.stringify(x.firstRow));
+  // 練習用の明細は CSV と Excel の 2 つ。中身がずれていないこと
+  const pc = fs.readFileSync("data/edi2_practice_batch.csv", "utf8").replace(/^\uFEFF/, "").trim().split(/\r?\n/);
+  const px = await P.readXlsxDetails(new Uint8Array(fs.readFileSync("data/edi2_practice_batch.xlsx")), inflate);
+  check(px.sheetFound && JSON.stringify(px.headers) === JSON.stringify(pc[0].split(",")),
+        "練習用の明細（Excel）の列名が CSV と違う");
+  check(JSON.stringify(px.firstRow) === JSON.stringify(pc[1].split(",").concat([""]).slice(0, px.headers.length)),
+        "練習用の明細（Excel）の 1 件目が CSV と違う: " + JSON.stringify(px.firstRow));
   // テンプレートは「明細」シート・列名だけ。読み直すと同じ列名
   const cols = P.detailsTemplateColumns(["番号", "発注 & <名>"], false);
   check(cols[cols.length - 1] === "skip", "テンプレートに skip 列が無い");
