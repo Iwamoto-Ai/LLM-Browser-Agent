@@ -37,6 +37,9 @@
     既定の白文字になり、薄い背景に白文字で何も読めなくなる。 */
  .warn { background: #fff6e0; border-left: 4px solid #e8a300; color: #3d2c00; padding: 8px 12px;
          margin: 8px 0; white-space: pre-wrap; font-size: 13px; }
+ /* 手直しの前・後のどちらを使っているかの札（濃い地に薄い文字。明暗どちらでも読める） */
+ .state { display: inline-block; margin: 4px 0; padding: 3px 10px; border-radius: 4px;
+          background: #3d2c00; color: #fff6e0; font-size: 1.05em; }
  .err  { background: #ffecec; border-left: 4px solid #d33; color: #5a1111;
          padding: 8px 12px; margin: 8px 0; }
  .ok   { background: #eef7ee; border-left: 4px solid #2a2; color: #14371a;
@@ -4068,11 +4071,15 @@ root.PadConvert = {
         if (edited) {
           // 埋め込みと中身が違う＝変換したあとに PAD で直されている。違いを並べ、
           // 手直しの前・後のどちらを使うか選べるようにする（既定は手直し後）
-          noteHtml = "<br><strong>" + esc(robinNotes[0]) + "</strong><ul>" +
+          // いまどちらを使っているかを先に大きく出し、ボタンは「切り替える」と書く
+          noteHtml = "<br>" + (useEmbedded ?
+              '<span class="state">いま使っているもの：<strong>手直しの前</strong>（埋め込み）</span>' :
+              '<span class="state">いま使っているもの：<strong>手直しの後</strong>（PAD での手直しを反映）</span>') +
+            "<br>" + esc(robinNotes[0]) + "<ul>" +
             robinNotes.slice(1).map(function (t) { return "<li>" + esc(t) + "</li>"; }).join("") +
             "</ul>" + (useEmbedded ?
-              '<button id="useEdited">手直しを反映した形にする</button>' :
-              '<button id="useEmbedded">埋め込み（手直しの前）を使う</button>');
+              '<button id="useEdited">手直しの後に切り替える</button>' :
+              '<button id="useEmbedded">手直しの前（埋め込み）に切り替える</button>');
         }
         if (fromRobin) {
           // Robin から取り出したものは、すぐ JSON として残せるようにする
@@ -4081,10 +4088,10 @@ root.PadConvert = {
         show(fromRobin === "parse" || edited ? "warn" : "ok", how + "（loop " + n + " 手順）。" + noteHtml +
              (applied ? "<br><strong>保存されていた設定を反映しました。</strong>" : "") +
              "そのまま「変換する」を押せます。<br>" +
-             "振り分けを直す場合は、下の表を変えてから" +
-             "「この振り分けでバッチ定義を作る」を押し直してください。<br>" +
-             "<strong>※「使わない」にした行はバッチ定義に残らないため、" +
-             "復元できません。</strong>元の録画 JSON からやり直してください。");
+             // 読み込んだバッチ定義を下の表から作り直すと、起点の目印や recover だけの
+             // 手順などが落ちる。表は確かめる用として、直すときは元からやり直してもらう
+             "振り分けを直す場合は、バッチ定義（元の録画 JSON）からやり直してください。" +
+             "下の表から作り直すと、起点の目印や recover の手順などが失われます。");
       } else {
         show("warn", "JSON は読めましたが、録画（steps）でもバッチ定義（setup / loop）でも" +
              "ありません。ファイルを確かめてください。");

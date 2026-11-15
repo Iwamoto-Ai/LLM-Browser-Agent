@@ -211,7 +211,7 @@ for (const key of ["setup", "loop", "recover"]) {
   input.dispatchEvent(new dom.window.Event("change"));
   await new Promise((res) => setTimeout(res, 300));
   let msg = d.getElementById("msg").textContent;
-  if (msg.indexOf("手直しを反映しました") < 0 || msg.indexOf("file:///C:/x/index.html") < 0) {
+  if (msg.indexOf("いま使っているもの：手直しの後") < 0 || msg.indexOf("file:///C:/x/index.html") < 0) {
     errors.push("手直しした Robin の違いが出ていない: " + msg.slice(0, 400));
   }
   const btn = d.getElementById("useEmbedded");
@@ -220,7 +220,7 @@ for (const key of ["setup", "loop", "recover"]) {
     btn.click();
     await new Promise((res) => setTimeout(res, 100));
     msg = d.getElementById("msg").textContent;
-    if (msg.indexOf("手直しの前）を取り出しました") < 0 || !d.getElementById("useEdited")) {
+    if (msg.indexOf("いま使っているもの：手直しの前") < 0 || !d.getElementById("useEdited")) {
       errors.push("埋め込み（手直しの前）に切り替わらない: " + msg.slice(0, 160));
     }
   }
