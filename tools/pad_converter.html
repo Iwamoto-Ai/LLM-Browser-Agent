@@ -1915,6 +1915,12 @@ function firstFromNote(cands, note) {
   var m = RX_NOTE.exec(note);
   if (!m) { return cands; }
   var head = m[1];
+  var kept = robinFilterCandidates([head]);
+  if (cands.indexOf(head) < 0 && kept.length === 1 && kept[0] === head) {
+    // 変換で落とされる候補ではないのに無い → PAD で候補が直され、コメントが古いまま。
+    // コメントの候補は足さない（直した内容を戻してしまうため）
+    return cands;
+  }
   return [head].concat(cands.filter(function (c) { return c !== head; }));
 }
 
@@ -2164,9 +2170,205 @@ function parseRobin(text) {
 
 // Robin からバッチ定義を得る。埋め込みがあればそれを、無ければ読み解く。
 // { batch, how: "embed" | "parse" | "", notes }
-function robinToBatch(text) {
+// ------------------------------------------------------------
+// 埋め込みと中身の比べ合わせ（PAD で手直しされたかを見つける）
+// pad_webdriver_ref.py の compare_embed / merge_edited と同じ結果にする。
+//   A: 埋め込みからもう一度作った Robin を読み解いたもの（直す前）
+//   B: 実際の Robin を読み解いたもの（直した後）
+// ------------------------------------------------------------
+var SEC_NAMES = ["setup", "loop", "recover", "teardown"];
+
+function stepLabel(st) {
+  var t = st.type || "";
+  var sel = st.selectors && st.selectors.length ? String((st.selectors[0] || [""])[0]) : "";
+  var g = function (k) { return st[k] === undefined ? "" : st[k]; };
+  if (t === "click" || t === "doubleClick") { return "クリック " + sel; }
+  if (t === "change") { return "入力 " + sel + "「" + g("value") + "」"; }
+  if (t === "navigate") { return "ページを開く " + g("url"); }
+  if (t === "setViewport") { return "ウィンドウサイズ " + g("width") + "×" + g("height"); }
+  if (t === "assertText") {
+    return "完了確認「" + g("text") + "」" + (st.timeout ? "（最大 " + st.timeout + " 秒）" : "");
+  }
+  if (t === "capture") { return "読み取り「" + g("name") + "」"; }
+  if (t === "scrollFind") { return "スクロールして探す「" + g("text") + "」"; }
+  if (t === "download") { return "ダウンロード " + sel; }
+  if (t === "screenshot") { return "エビデンス"; }
+  if (t === "comment") { return "コメント「" + g("text") + "」"; }
+  return t;
+}
+
+// stepLabel で見分けられないときの詳しい表し方（目印の候補と値をすべて）
+function stepDetail(st) {
+  var parts = [stepLabel(st).split(" ")[0]];
+  if (st.selectors && st.selectors.length) {
+    parts.push(st.selectors.map(function (g) { return String((g || [""])[0]); }).join(" / "));
+  }
+  ["value", "text", "key", "name", "extract", "timeout", "tries", "url"].forEach(function (k) {
+    if (Object.prototype.hasOwnProperty.call(st, k)) { parts.push(k + "=" + pyStr(st[k])); }
+  });
+  return parts.join(" ");
+}
+
+// Python の str() と同じ書き方（真偽値は True / False）
+function pyStr(v) {
+  if (v === true) { return "True"; }
+  if (v === false) { return "False"; }
+  return String(v);
+}
+
+function diffSteps(name, oldS, newS) {
+  var a = oldS.map(function (s) { return JSON.stringify(s); });
+  var b = newS.map(function (s) { return JSON.stringify(s); });
+  var n = a.length, m = b.length, i, j;
+  var dp = [];
+  for (i = 0; i <= n; i++) { dp.push(new Array(m + 1).fill(0)); }
+  for (i = n - 1; i >= 0; i--) {
+    for (j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  var ops = [];
+  i = 0; j = 0;
+  while (i < n || j < m) {
+    if (i < n && j < m && a[i] === b[j]) { ops.push(["=", i, j]); i++; j++; }
+    else if (j >= m || (i < n && dp[i + 1][j] >= dp[i][j + 1])) { ops.push(["-", i, j]); i++; }
+    else { ops.push(["+", i, j]); j++; }
+  }
+  var out = [], k = 0;
+  while (k < ops.length) {
+    if (ops[k][0] === "=") { k++; continue; }
+    var run = [];
+    while (k < ops.length && ops[k][0] !== "=") { run.push(ops[k]); k++; }
+    var dels = run.filter(function (o) { return o[0] === "-"; });
+    var adds = run.filter(function (o) { return o[0] === "+"; });
+    var p;
+    for (p = 0; p < Math.min(dels.length, adds.length); p++) {
+      var lo = stepLabel(oldS[dels[p][1]]), ln = stepLabel(newS[adds[p][2]]);
+      if (lo === ln) { lo = stepDetail(oldS[dels[p][1]]); ln = stepDetail(newS[adds[p][2]]); }
+      out.push(name + " " + (adds[p][2] + 1) + " 番目：「" + lo + "」→「" + ln + "」");
+    }
+    for (p = adds.length; p < dels.length; p++) {
+      out.push(name + "：「" + stepLabel(oldS[dels[p][1]]) + "」がなくなった（" + dels[p][2] + " 番目の後）");
+    }
+    for (p = dels.length; p < adds.length; p++) {
+      out.push(name + " " + (adds[p][2] + 1) + " 番目に追加：「" + stepLabel(newS[adds[p][2]]) + "」");
+    }
+  }
+  return out;
+}
+
+// 区画ごとの、コメントと空行を除いた行（読み解けない手直しを見つける用）
+function robinRegions(text) {
+  var lines = String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n")
+    .map(function (l) { return l.trim(); });
+  function cut(start, end) {
+    var s = -1, e, q;
+    for (q = 0; q < lines.length; q++) { if (start(lines[q])) { s = q; break; } }
+    if (s < 0) { return []; }
+    e = lines.length;
+    for (q = s + 1; q < lines.length; q++) { if (end(lines[q])) { e = q; break; } }
+    return lines.slice(s + 1, e).filter(function (l) { return l && l.charAt(0) !== "#"; });
+  }
+  return {
+    setup: cut(function (l) { return startsWith(l, "# ---------- 起点画面まで進む"); },
+               function (l) { return startsWith(l, "# ---------- セットアップ失敗を検知"); }),
+    loop: cut(function (l) { return l.indexOf("%RowId% / %RowKey% 開始" + Q3) >= 0; },
+              function (l) { return l === "# ここまで来たら成功"; }),
+    recover: cut(function (l) { return l === "IF PrevFailed THEN"; },
+                 function (l) { return startsWith(l, "# 復帰の直後は画面が"); }),
+    teardown: cut(function (l) { return startsWith(l, "# ================= 後処理（batch の teardown）"); },
+                  function (l) {
+                    return startsWith(l, "# ================= 後片付け") ||
+                      startsWith(l, "# ================= 結果を Excel にする");
+                  })
+  };
+}
+
+function compareEmbed(text, regenerated) {
+  var oldB = parseRobin(regenerated).batch, newB = parseRobin(text).batch;
+  if (!oldB || !newB) { return { diffs: [], old: oldB, new: newB }; }
+  var out = [];
+  [["title", "タイトル"], ["originHint", "起点の目印"]].forEach(function (kl) {
+    var o = oldB[kl[0]] === undefined ? "" : oldB[kl[0]], nw = newB[kl[0]] === undefined ? "" : newB[kl[0]];
+    if (o !== nw) { out.push(kl[1] + "：「" + o + "」→「" + nw + "」"); }
+  });
+  var ra = robinRegions(regenerated), rb = robinRegions(text);
+  SEC_NAMES.forEach(function (key) {
+    var d = diffSteps(key, oldB[key] || [], newB[key] || []);
+    out = out.concat(d);
+    if (!d.length && JSON.stringify(ra[key]) !== JSON.stringify(rb[key])) {
+      var extra = rb[key].filter(function (l) { return ra[key].indexOf(l) < 0; });
+      var ex = extra.length ? extra[0] :
+        (ra[key].filter(function (l) { return rb[key].indexOf(l) < 0; })[0] || "");
+      if (ex.length > 80) { ex = ex.slice(0, 80) + "…"; }
+      out.push(key + "：読み解けない形の手直しがあります（例: " + ex + "）");
+    }
+  });
+  return { diffs: out, old: oldB, new: newB };
+}
+
+function regenerateRobin(batch, detailsFromResult, idCol, xlsx) {
+  return buildRobin(batch, {
+    detailsPath: xlsx ? "C:\\temp\\details.xlsx" : "C:\\temp\\details.csv", idCol: idCol, detailsFromResult: detailsFromResult,
+    driverExe: "C:\\temp\\msedgedriver.exe", outDir: "C:\\temp", proxy: "", autoDriver: false,
+    browser: "edge", proxyAuto: true, maxItems: 1, today: { y: 2026, m: 1, d: 1 }
+  }).robin;
+}
+
+function mergeEdited(embedded, oldB, parsed, diffs) {
+  var out = JSON.parse(JSON.stringify(embedded));
+  ["title", "originHint"].forEach(function (key) {
+    var e = embedded[key] === undefined ? "" : embedded[key], p = parsed[key] === undefined ? "" : parsed[key];
+    if (e !== p) { if (parsed[key]) { out[key] = parsed[key]; } else { delete out[key]; } }
+  });
+  SEC_NAMES.forEach(function (key) {
+    var hit = diffs.some(function (d) { return startsWith(d, key + " ") || startsWith(d, key + "："); });
+    if (!hit) { return; }
+    if (key === "setup") {
+      var clicks = function (b) {
+        return JSON.stringify((b.setup || []).filter(function (s) { return s.type === "click"; }));
+      };
+      if (clicks(parsed) === clicks(oldB)) {
+        var nav = (parsed.setup || []).filter(function (s) { return s.type === "navigate"; })[0];
+        var vp = (parsed.setup || []).filter(function (s) { return s.type === "setViewport"; })[0];
+        (out.setup || []).forEach(function (s) {
+          if (s.type === "navigate" && nav) { s.url = nav.url; }
+          if (s.type === "setViewport" && vp) {
+            ["width", "height"].forEach(function (k) { if (vp[k] !== undefined) { s[k] = vp[k]; } });
+          }
+        });
+        return;
+      }
+    }
+    if ((parsed[key] && parsed[key].length) || key === "setup" || key === "loop" || key === "recover") {
+      out[key] = parsed[key] || [];
+    } else {
+      delete out[key];
+    }
+  });
+  return out;
+}
+
+// 埋め込みがあるときは、PAD で手直しされていないかを比べる。手直しがあれば手直し後の形を返す
+// （useEmbedded なら埋め込みのまま）。embedded には、比べたときの埋め込み（直す前）も入れる。
+function robinToBatch(text, useEmbedded) {
   var got = extractBatchFromRobin(text);
-  if (got.batch) { return { batch: got.batch, how: "embed", notes: [] }; }
+  if (got.batch) {
+    var parsed = parseRobin(text).batch;
+    var popt = (parsed && parsed.options) || {};
+    var idc = popt.idCol || (got.batch.options || {}).idCol || "ID";
+    var c = compareEmbed(text, regenerateRobin(got.batch, !!popt.detailsFromResult, idc,
+      String(text).indexOf("SET DetailsXlsx TO True") >= 0));
+    if (!c.diffs.length) { return { batch: got.batch, how: "embed", notes: [], embedded: got.batch }; }
+    var head = "この Robin は、変換したあとに PAD などで手直しされています（" + c.diffs.length + " か所）。";
+    if (useEmbedded) {
+      return { batch: got.batch, how: "embed", notes: [head + "埋め込み（手直しの前）を使いました"].concat(c.diffs),
+               embedded: got.batch };
+    }
+    return { batch: mergeEdited(got.batch, c.old, c.new, c.diffs), how: "edited",
+             notes: [head + "手直しを反映しました（直す前を使うときは埋め込みを選んでください）"].concat(c.diffs),
+             embedded: got.batch };
+  }
   var p = parseRobin(text);
   if (String(text).indexOf(PADBATCH_TAG) >= 0) {
     if (!p.batch) { return { batch: null, how: "", notes: [got.reason].concat(p.notes) }; }
@@ -3786,14 +3988,20 @@ root.PadConvert = {
 
   function takeBatch(file) {
     batchName = file.name;
-    readFile(file, function (txt) {
+    readFile(file, function (txt) { takeBatchText(txt, false); });
+  }
+
+  // useEmbedded: PAD で手直しされた Robin でも、埋め込み（手直しの前）を使う
+  function takeBatchText(txt, useEmbedded) {
+    {
       batchText = txt;
       $("batchInfo").textContent = "読み込み: " + batchName + "（" + txt.length + " 文字）";
       var obj = null, err = "", fromRobin = "", robinNotes = [];
       // この変換器で作った Robin なら、埋め込まれたバッチ定義を取り出して使う
       if (/\.txt$/i.test(batchName) || txt.indexOf("PADBATCH v1") >= 0) {
         // 埋め込みが無い古い Robin は、中身を読み解いて組み立て直す
-        var got = PadConvert.robinToBatch(txt);
+        var got = PadConvert.robinToBatch(txt, useEmbedded);
+        var edited = got.how === "edited" || (useEmbedded && got.notes.length > 0);
         if (got.batch) {
           obj = got.batch;
           fromRobin = got.how;
@@ -3843,7 +4051,9 @@ root.PadConvert = {
         batchReady = true;          // 読み込んだ時点で変換できる
         renderAssign(recSteps.length);
         var applied = applyBatchOptions(obj);
-        var how = fromRobin === "embed" ? "Robin に埋め込まれたバッチ定義を取り出しました" :
+        var how = fromRobin === "edited" ? "Robin に埋め込まれたバッチ定義を取り出し、PAD での手直しを反映しました" :
+                  fromRobin === "embed" && edited ? "Robin に埋め込まれたバッチ定義（手直しの前）を取り出しました" :
+                  fromRobin === "embed" ? "Robin に埋め込まれたバッチ定義を取り出しました" :
                   fromRobin === "parse" ? "Robin を読み解いてバッチ定義を組み立てました" :
                   "バッチ定義 JSON として読み込みました";
         var noteHtml = "";
@@ -3855,11 +4065,20 @@ root.PadConvert = {
               return "<li>" + t.split("&").join("&amp;").split("<").join("&lt;") + "</li>";
             }).join("") + "</ul>";
         }
+        if (edited) {
+          // 埋め込みと中身が違う＝変換したあとに PAD で直されている。違いを並べ、
+          // 手直しの前・後のどちらを使うか選べるようにする（既定は手直し後）
+          noteHtml = "<br><strong>" + esc(robinNotes[0]) + "</strong><ul>" +
+            robinNotes.slice(1).map(function (t) { return "<li>" + esc(t) + "</li>"; }).join("") +
+            "</ul>" + (useEmbedded ?
+              '<button id="useEdited">手直しを反映した形にする</button>' :
+              '<button id="useEmbedded">埋め込み（手直しの前）を使う</button>');
+        }
         if (fromRobin) {
           // Robin から取り出したものは、すぐ JSON として残せるようにする
           ["copyBatch", "saveBatch"].forEach(function (id) { $(id).disabled = false; });
         }
-        show(fromRobin === "parse" ? "warn" : "ok", how + "（loop " + n + " 手順）。" + noteHtml +
+        show(fromRobin === "parse" || edited ? "warn" : "ok", how + "（loop " + n + " 手順）。" + noteHtml +
              (applied ? "<br><strong>保存されていた設定を反映しました。</strong>" : "") +
              "そのまま「変換する」を押せます。<br>" +
              "振り分けを直す場合は、下の表を変えてから" +
@@ -3870,8 +4089,16 @@ root.PadConvert = {
         show("warn", "JSON は読めましたが、録画（steps）でもバッチ定義（setup / loop）でも" +
              "ありません。ファイルを確かめてください。");
       }
-    });
+      // 手直しの前・後の切り替え。読み込んだ Robin の文字はそのまま使う
+      var robinText = txt;
+      ["useEmbedded", "useEdited"].forEach(function (id) {
+        var b = $(id);
+        if (b) { b.addEventListener("click", function () { takeBatchText(robinText, id === "useEmbedded"); }); }
+      });
+    }
   }
+
+  function esc(t) { return String(t).split("&").join("&amp;").split("<").join("&lt;"); }
 
   var SEC_OPTS = [["setup", "setup（最初に1回）"], ["loop", "loop（1件ごと）"],
                   ["loop+recover", "loop+復帰"], ["teardown", "teardown（最後に1回）"],

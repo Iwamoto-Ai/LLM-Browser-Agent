@@ -198,6 +198,34 @@ for (const key of ["setup", "loop", "recover"]) {
   if (d.getElementById("saveBatch").disabled) { errors.push("読み解いたバッチ定義を保存できない"); }
 }
 
+// PAD で手直しした Robin を読み込むと、違いを並べ、手直しの前・後を切り替えられる
+{
+  const P = dom.window.PadConvert;
+  const b = P.loadRecording(fs.readFileSync("recordings/edi2_accept_batch.json", "utf8"));
+  const r = P.buildRobin(b, { detailsPath: "C:\\temp\\d.csv", idCol: "プロジェクト番号", outDir: "C:\\temp",
+                              browser: "edge", today: { y: 2026, m: 9, d: 1 } }).robin;
+  // 置き換えは split / join で（replace の置き換え文字列では $' が特別な意味になる）
+  const edited = r.split("file:///C:/temp/index.html").join("file:///C:/x/index.html");
+  const input = d.getElementById("batchFile");
+  Object.defineProperty(input, "files", { value: [new dom.window.File([edited], "edited.robin.txt")], configurable: true });
+  input.dispatchEvent(new dom.window.Event("change"));
+  await new Promise((res) => setTimeout(res, 300));
+  let msg = d.getElementById("msg").textContent;
+  if (msg.indexOf("手直しを反映しました") < 0 || msg.indexOf("file:///C:/x/index.html") < 0) {
+    errors.push("手直しした Robin の違いが出ていない: " + msg.slice(0, 400));
+  }
+  const btn = d.getElementById("useEmbedded");
+  if (!btn) { errors.push("埋め込み（手直しの前）に切り替えるボタンが無い"); }
+  else {
+    btn.click();
+    await new Promise((res) => setTimeout(res, 100));
+    msg = d.getElementById("msg").textContent;
+    if (msg.indexOf("手直しの前）を取り出しました") < 0 || !d.getElementById("useEdited")) {
+      errors.push("埋め込み（手直しの前）に切り替わらない: " + msg.slice(0, 160));
+    }
+  }
+}
+
 // 背景色を固定したメッセージ欄に文字色が付いているか（ダークモードで白文字になる事故の防止）
 const css = [...d.querySelectorAll("style")].map((s) => s.textContent).join("\n");
 for (const cls of [".warn", ".err", ".ok"]) {

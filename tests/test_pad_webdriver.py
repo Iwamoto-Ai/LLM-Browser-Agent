@@ -1329,3 +1329,75 @@ def test_practice_details_csv_and_xlsx_match():
     from details_io import load_details
     base = os.path.join(_HERE, "data", "edi2_practice_batch")
     assert load_details(base + ".csv") == load_details(base + ".xlsx")
+
+
+# ---------------------------------------------------------------- 埋め込みと中身の比べ合わせ
+def _accept_robin(tmp_path, **kw):
+    b = load_recording(os.path.join(_HERE, "recordings", "edi2_accept_batch.json"))
+    out = pad.write_robin(b, r"C:\temp\d.csv", "プロジェクト番号",
+                          str(tmp_path / "a.robin.txt"), **kw)
+    return b, open(out, encoding="utf-8").read()
+
+
+def test_compare_embed_no_false_alarm(tmp_path):
+    """手直ししていない Robin は、変換のしかた（ID 列・Excel・設定）が違っても「手直し」と言わない。"""
+    for p in _all_batches() + [_RICH]:
+        b = load_recording(p)
+        for kw in ({}, {"details_from_result": True, "browser": "chrome", "max_items": 5},
+                   {"step_wait": 30, "prefer_clickable": False}):
+            for det, idc in ((r"C:\x\d.csv", "ID"), (r"C:\x\d.xlsx", "番号")):
+                out = pad.write_robin(b, det, idc, str(tmp_path / "n.robin.txt"), **kw)
+                got, how, notes = pad.robin_to_batch(open(out, encoding="utf-8").read())
+                assert (how, notes) == ("embed", []), (p, kw, det, notes[:3])
+                assert got == b
+
+
+def test_compare_embed_finds_url_edit_and_keeps_setup(tmp_path):
+    """PAD で TargetUrl を直すと、その違いを出し、手直し後は URL だけを直した形にする。"""
+    b, txt = _accept_robin(tmp_path)
+    edited = txt.replace("file:///C:/temp/index.html", "file:///C:/x/index.html")
+    got, how, notes = pad.robin_to_batch(edited)
+    assert how == "edited" and len(notes) == 2
+    assert notes[1] == ("setup 2 番目：「ページを開く file:///C:/temp/index.html」→"
+                        "「ページを開く file:///C:/x/index.html」")
+    want = json.loads(json.dumps(b))
+    next(s for s in want["setup"] if s["type"] == "navigate")["url"] = "file:///C:/x/index.html"
+    assert got == want                      # setup のコメントなどはそのまま
+    # 埋め込みをそのまま使うこともできる
+    got2, how2, notes2 = pad.robin_to_batch(edited, use_embedded=True)
+    assert got2 == b and how2 == "embed" and notes2[1:] == notes[1:]
+
+
+def test_compare_embed_finds_step_edits(tmp_path):
+    """目印の書き換え・アクションの削除・読み解けない追加を、それぞれ見つける。"""
+    _, txt = _accept_robin(tmp_path)
+    sel = txt.replace('[["#SrchBtn", "text/拡張検索"], "click"',
+                      '[["#SrchBtn2", "text/拡張検索"], "click"', 1)
+    _, how, notes = pad.robin_to_batch(sel)
+    assert how == "edited" and notes[1] == "loop 5 番目：「クリック #SrchBtn」→「クリック #SrchBtn2」"
+    lines = txt.split("\n")
+    k = next(i for i, ln in enumerate(lines) if '"#ActionGoBtn"' in ln)
+    got, how, notes = pad.robin_to_batch("\n".join(lines[:k] + lines[k + 1:]))
+    assert notes[1] == "loop：「クリック #ActionGoBtn」がなくなった（9 番目の後）"
+    assert len(got["loop"]) == 25
+    _, how, notes = pad.robin_to_batch(txt.replace("# ここまで来たら成功", "WAIT 3\n# ここまで来たら成功"))
+    assert notes[1] == "loop：読み解けない形の手直しがあります（例: WAIT 3）"
+
+
+def test_cli_from_robin_reports_edit_and_use_embedded(tmp_path):
+    """--from-robin は手直しの違いを表示する。--use-embedded で手直しの前を取り出せる。"""
+    import subprocess
+    import sys as _sys
+    b, txt = _accept_robin(tmp_path)
+    src = tmp_path / "e.robin.txt"
+    src.write_text(txt.replace("file:///C:/temp/index.html", "file:///C:/x/index.html"),
+                   encoding="utf-8")
+    for extra, url in (([], "file:///C:/x/index.html"),
+                       (["--use-embedded"], "file:///C:/temp/index.html")):
+        r = subprocess.run([_sys.executable, os.path.join(_HERE, "pad_webdriver_ref.py"),
+                            "--from-robin", str(src), "--save-batch", str(tmp_path / "o.json")] + extra,
+                           capture_output=True, text=True, encoding="utf-8", cwd=_HERE)
+        assert r.returncode == 0, r.stderr
+        assert "手直しされています（1 か所）" in r.stdout
+        got = json.load(open(tmp_path / "o.json", encoding="utf-8"))
+        assert next(s for s in got["setup"] if s["type"] == "navigate")["url"] == url

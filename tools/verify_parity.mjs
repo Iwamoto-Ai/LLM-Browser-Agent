@@ -122,15 +122,30 @@ for (const c of cases) {
     robins.push({ name: b + "（埋め込みあり）", text: txt });
     robins.push({ name: b + "（埋め込みなし）",
                   text: txt.split("\n# ---------- 元のバッチ定義")[0] });
+    // PAD で手直しした形（URL・目印・アクションの追加）。違いの一覧と手直し後の形も一致すること
+    const lines = txt.split("\n");
+    // 繰り返しの中の、最後のクリックの目印を書き換える
+    const end = lines.findIndex((l) => l.trim() === "# ここまで来たら成功");
+    let k = -1;
+    lines.forEach((l, i) => { if (i < end && l.indexOf("SET ActBody TO") >= 0 && l.indexOf('"click"') >= 0) { k = i; } });
+    const edited = lines.map((l, i) => (i === k ? l.split('[["').join('[["#edited", "') : l))
+      .join("\n").split("# ここまで来たら成功").join("WAIT 3\n# ここまで来たら成功")
+      .split("SET TargetUrl TO $\'\'\'").join("SET TargetUrl TO $\'\'\'https://edited.example.com/?");
+    robins.push({ name: b + "（PAD で手直し）", text: edited, useEmbedded: false });
+    robins.push({ name: b + "（PAD で手直し・埋め込みを使う）", text: edited, useEmbedded: true });
   }
   robins.push({ name: "古い Robin", text: fs.readFileSync("tests/fixtures/old_edi2_publish_robin.txt", "utf8") });
   for (const r of robins) {
     const src = path.join(os.tmpdir(), "parity_from.robin.txt");
     const dst = path.join(os.tmpdir(), "parity_from.batch.json");
     fs.writeFileSync(src, r.text, "utf8");
-    execFileSync(PY, ["pad_webdriver_ref.py", "--from-robin", src, "--save-batch", dst], { stdio: "pipe" });
-    const want = JSON.stringify(JSON.parse(fs.readFileSync(dst, "utf8")));
-    const got = JSON.stringify(PadConvert.robinToBatch(r.text).batch);
+    const pyOut = execFileSync(PY, ["pad_webdriver_ref.py", "--from-robin", src, "--save-batch", dst]
+      .concat(r.useEmbedded ? ["--use-embedded"] : []), { stdio: "pipe" }).toString();
+    const js = PadConvert.robinToBatch(r.text, !!r.useEmbedded);
+    // 違いの一覧も同じであること（Python 版は「  ・」を付けて 1 行ずつ出す）
+    const pyNotes = pyOut.split(/\r?\n/).filter((l) => l.indexOf("  ・") === 0).map((l) => l.slice(3));
+    const want = JSON.stringify(JSON.parse(fs.readFileSync(dst, "utf8"))) + "\n" + pyNotes.join("\n");
+    const got = JSON.stringify(js.batch) + "\n" + js.notes.join("\n");
     if (got === want) { console.log("OK  Robin からの取り出しが一致:", r.name); }
     else { ng++; console.log("NG  Robin からの取り出しが不一致:", r.name + "\n  py: " + want.slice(0, 300) + "\n  js: " + got.slice(0, 300)); }
   }
