@@ -1226,3 +1226,74 @@ def test_cli_from_robin_parses_old_robin(tmp_path):
     assert "読み解いて組み立てました" in r.stdout and "運用の設定" in r.stdout
     got = json.load(open(tmp_path / "old.batch.json", encoding="utf-8"))
     assert len(got["loop"]) == 22
+
+
+# ---------------------------------------------------------------- 失敗分の再実行
+def test_retry_mode_switch_comes_after_details(tmp_path):
+    """再実行の切り替えは、普段の明細を決めたあとに置く（前にあると上書きされて効かない）。"""
+    for dfr, src in ((False, "pad_result.csv"), (True, "pad_result_2.csv")):
+        out = pad.write_robin(load_recording(_RICH), r"C:\temp\d.csv", "番号",
+                              str(tmp_path / "r.robin.txt"), details_from_result=dfr)
+        lines = [ln.strip() for ln in open(out, encoding="utf-8").read().split("\n")]
+        main = max(i for i, ln in enumerate(lines) if ln.startswith("SET DetailsFile TO")
+                   and "IF RetryMode THEN" not in lines[i - 1])
+        retry = lines.index("IF RetryMode THEN")
+        assert retry > main, dfr
+        assert lines[retry + 1] == f"SET DetailsFile TO $'''%BaseDir%\\\\{src}'''"
+        assert lines[retry + 2].endswith("_retry.csv'''")
+
+
+# ---------------------------------------------------------------- 明細を Excel で受け取る
+def _xlsx_robin(tmp_path, details=r"C:\temp\edi2_batch.xlsx", **kw):
+    out = pad.write_robin(load_recording(_RICH), details, "番号",
+                          str(tmp_path / "x.robin.txt"), **kw)
+    return open(out, encoding="utf-8").read()
+
+
+def test_xlsx_details_reads_sheet_and_makes_result_excel(tmp_path):
+    """明細が .xlsx なら「明細」シートを中身の型のまま読み、最後に見る用の xlsx を作る。"""
+    txt = _xlsx_robin(tmp_path)
+    lines = [ln.strip() for ln in txt.split("\n")]
+    assert "SET DetailsXlsx TO True" in lines
+    assert "SET DetailsXlsx TO False" in lines          # 再実行は結果 CSV を読む
+    assert "Excel.SetActiveWorksheet.ActivateWorksheetByName Instance: DetailsExcel " \
+           "Name: $'''明細'''" in lines
+    assert any("GetCellContentsMode.TypedValues FirstLineIsHeader: True RangeValue=> Rows" in ln
+               for ln in lines)
+    # 列ごとに日付の時刻を落とす（列は 番号・発注 の 2 つ）
+    untime = [ln for ln in lines if ln.startswith("Text.Replace.ReplaceText Text: Col")]
+    assert len(untime) == 2 and "ReplaceWith: $'''%''%'''" in untime[0]
+    assert "IF Col1 = $'''''' THEN" in lines
+    # 結果 CSV の列（6 + 読み取り 3）を 1 つずつ文字で書く
+    writes = [ln for ln in lines if ln.startswith("Excel.WriteToExcel.WriteCell")]
+    assert len(writes) == 9 and "Value: $'''\\'%ResRow[0]%'''" in writes[0]
+    assert "%XlsNote%" in txt
+    # 開けない・シートが無いときは止める。Excel を開いたままにしない
+    assert txt.count("ON ERROR") == 3
+    assert "明細ファイルに「明細」シートが無い" in txt
+    # 生成時の点検で警告が出ない（%''% は PAD の空の文字の式）
+    assert pad._lint_robin(txt.split("\n"), log=lambda *_: None) == []
+
+
+def test_csv_details_have_no_excel_actions(tmp_path):
+    """CSV の明細や、前のバッチの結果を読むときは Excel を使わない。"""
+    assert "Excel." not in _xlsx_robin(tmp_path, details=r"C:\temp\d.csv")
+    assert "Excel." not in _xlsx_robin(tmp_path, details_from_result=True)
+
+
+def test_parse_robin_reads_xlsx_robin(tmp_path):
+    """Excel の明細を読む Robin も、読み解いて同じ Robin に戻せる。"""
+    r1 = _robin_no_embed(load_recording(_RICH), tmp_path)
+    x1 = re.sub(r"# 備考：\d{4}/\d\d/\d\d", "# 備考：X",
+                _xlsx_robin(tmp_path).split("\n# ---------- 元のバッチ定義")[0])
+    got, _ = pad.parse_robin(x1)
+    assert got == pad.parse_robin(r1)[0]
+
+
+def test_load_details_prefers_details_sheet():
+    """Excel の明細は「明細」シートを読む（先頭のシートが別でも）。"""
+    pytest.importorskip("openpyxl")
+    from details_io import load_details
+    headers, rows = load_details(os.path.join(_HERE, "tests", "fixtures", "details_sample.xlsx"))
+    assert headers == ["プロジェクト番号", "発注番号", "納入日", "コード", "skip"]
+    assert rows[0]["発注番号"] == "900000000001" and rows[0]["コード"] == "0012"
