@@ -1,0 +1,171 @@
+{
+  "title": "いろいろ 'quote' \\ test",
+  "originHint": "納入",
+  "options": {
+    "idCol": "番号",
+    "browser": "chrome",
+    "shotName": "@KEY@_@STAMP@",
+    "detailsFromResult": true,
+    "stepWait": 30,
+    "preferClickable": false,
+    "blurAfterFill": false
+  },
+  "setup": [
+    {
+      "type": "navigate",
+      "url": "https://edi.example.com/a?x='1'"
+    },
+    {
+      "type": "setViewport",
+      "width": 1500,
+      "height": 800
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "text/メニュー"
+        ],
+        [
+          "#menu"
+        ]
+      ]
+    }
+  ],
+  "loop": [
+    {
+      "type": "comment",
+      "text": "{{番号}} の処理 100%"
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI納入"
+        ],
+        [
+          "text/納入"
+        ]
+      ]
+    },
+    {
+      "type": "change",
+      "value": "{{発注}}",
+      "selectors": [
+        [
+          "aria/発注番号"
+        ],
+        [
+          "#po"
+        ]
+      ]
+    },
+    {
+      "type": "scrollFind",
+      "text": "{{発注}}",
+      "tries": 7
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "row/{{発注}}"
+        ]
+      ]
+    },
+    {
+      "type": "capture",
+      "name": "日付",
+      "selectors": [
+        [
+          "#d"
+        ]
+      ],
+      "extract": "digits"
+    },
+    {
+      "type": "capture",
+      "name": "要求",
+      "key": "要求IDは"
+    },
+    {
+      "type": "capture",
+      "name": "番号2",
+      "key": "No.",
+      "extract": "digits"
+    },
+    {
+      "type": "assertText",
+      "text": "完了",
+      "timeout": 20
+    },
+    {
+      "type": "assertText",
+      "text": "{{発注}} 済"
+    },
+    {
+      "type": "download",
+      "selectors": [
+        [
+          "#xls"
+        ]
+      ],
+      "name": "{{番号}}_dl"
+    },
+    {
+      "type": "download",
+      "selectors": [
+        [
+          "#xls2"
+        ]
+      ]
+    },
+    {
+      "type": "screenshot"
+    }
+  ],
+  "recover": [
+    {
+      "type": "comment",
+      "text": "戻る"
+    },
+    {
+      "type": "navigate",
+      "url": "https://edi.example.com/a?x='1'"
+    },
+    {
+      "type": "change",
+      "value": "x",
+      "selectors": [
+        [
+          "#q"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#home"
+        ]
+      ]
+    }
+  ],
+  "teardown": [
+    {
+      "type": "comment",
+      "text": "終わり"
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#logout"
+        ],
+        [
+          "text/ログアウト"
+        ]
+      ]
+    }
+  ]
+}

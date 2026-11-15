@@ -1,0 +1,1337 @@
+# ============================================================
+# 自動生成 PADコード(Robin)
+# ============================================================
+# 【メモ欄】自動で分かる範囲を初期値として入れてある。適宜書き換えて使う。
+# タイトル: EDI2 ② 検収状況一覧を発行して要求 ID を記録する
+# 処理内容：明細 1 件につき 18 操作を繰り返す（ID列: プロジェクト番号 ／ 業務キー: 発注番号 ／ 納入日）
+#           開始URL: https://EDI2-の-URL-に-書き換える/
+#           明細CSV: edi2_batch.csv
+#           BaseDir: C:\temp
+#           エビデンス名: @ID@__@KEY@__@STAMP@
+#           ダウンロード保存先: C:\temp\download
+# 備考：2026/09/25 生成 ／ ブラウザー=edge ／ ドライバー自動取得=有効 ／ プロキシ=未使用
+# ============================================================
+# LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai
+# Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).
+# 変換器：Python版 v1.0.0
+# ============================================================
+
+# --- 接続先：環境を切り替えるときはここを直す ---
+# 練習サイト  : file:///C:/temp/index.html
+# 本番サイト  : https://… （実環境の URL）
+# SET TargetUrl TO $'''https://EDI2-の-URL-に-書き換える/'''
+# SET TargetUrl TO $'''file:///C:/temp/index.html'''
+SET TargetUrl TO $'''https://edi.example.com/OA_HTML/AppsLocalLogin.jsp?langCode=JA&_logoutRedirect=y'''
+
+# --- プロキシ：社外へ出るときに指定する ---
+# WebDriver が起動するブラウザーは素のプロファイルで、Windows のプロキシ設定を
+# 引き継がない。社内プロキシ経由でしか外部に出られない環境では下を有効にする。
+# ※ 対象サイトだけでなく、**WebDriver の自動取得もここを通る**。
+#   練習サイトのようにローカルのファイルを開く場合でも、ドライバーは外から
+#   取ってくるので True が要る。とくに Chrome は版の問い合わせに
+#   googlechromelabs.github.io へ出るため、Edge が動いても Chrome だけ
+#   失敗することがある。
+# 対象サイトへの通信は localhost と file:// なら直結だが、それとは別に
+# ドライバーの取得で外へ出る。練習サイトでも設定が要る点に注意。
+# 使う場合: UseProxy を True にし、ProxyAddr にプロキシの host:port を書く。
+SET UseProxy TO False
+SET ProxyAddr TO $'''proxy.example.com:8080'''
+
+# --- ブラウザー：edge か chrome。ここ 1 行だけ直せば切り替わる ---
+# 対象サイトがブラウザー判定で表示を変える場合や、片方で不具合が出たときに使う。
+# 下の BrowserName（WebDriver への指定）とドライバーのプロセス名も自動で追従する。
+SET Browser TO $'''edge'''
+SET BrowserName TO $'''MicrosoftEdge'''
+SET DriverProc TO $'''msedgedriver'''
+IF Browser = $'''chrome''' THEN
+    SET BrowserName TO $'''chrome'''
+    SET DriverProc TO $'''chromedriver'''
+END
+
+# --- フォルダ・ファイル：配布時に触るのはこの BaseDir だけにする ---
+SET BaseDir TO $'''C:\\temp'''
+# ※ BaseDir の末尾に \ を付けないこと（%BaseDir%\file.png が二重になる）
+
+# --- 運用スイッチ ---
+# まず 1 にして 1 件だけ流し、画面と結果を目で確認してから増やす
+SET MaxItems TO 2
+# 起動したブラウザーとドライバーの種類・バージョンをダイアログで出す
+# False にしてもログ（pad_progress.log）には必ず 1 行残る
+SET ShowDriverInfo TO True
+# 失敗分だけを再実行するとき True（読み込み元と出力先が自動で切り替わる）
+SET RetryMode TO False
+IF RetryMode THEN
+    SET DetailsFile TO $'''%BaseDir%\\pad_result.csv'''
+    SET ResultFile TO $'''%BaseDir%\\pad_result_retry.csv'''
+END
+
+SET EdgeDriverExe TO $'''%BaseDir%\\msedgedriver.exe'''
+SET ChromeDriverExe TO $'''%BaseDir%\\chromedriver.exe'''
+SET DriverExe TO EdgeDriverExe
+IF Browser = $'''chrome''' THEN
+    SET DriverExe TO ChromeDriverExe
+END
+SET DriverUrl TO $'''http://127.0.0.1:9515'''
+SET DetailsFile TO $'''%BaseDir%\\edi2_batch.csv'''
+SET ResultFile TO $'''%BaseDir%\\pad_result.csv'''
+SET LogFile TO $'''%BaseDir%\\pad_progress.log'''
+# ブラウザーのウィンドウサイズ。**エビデンスに写る範囲はここで決まる。**
+# 複数の PC に配布する場合は、一番小さい画面に収まる値にそろえること。
+SET WinW TO 1366
+SET WinH TO 900
+# エビデンスをページ全体で撮るか。True なら、画面に入りきらない縦長・横長の
+# ページも 1 枚に収める。False なら見えている範囲だけ。
+SET FullShot TO True
+SET ShotDir TO $'''%BaseDir%'''
+# エビデンスのファイル名。差し込みは @ID@（ID列）/ @KEY@（業務キー）/
+# @STAMP@（日時 yyyyMMdd_HHmmss）。1 件ごとにその行の値へ置き換わる。
+SET ShotNameFmt TO $'''@ID@__@KEY@__@STAMP@'''
+# ダウンロードの受け取り先。落ちてきたファイルはここで名前を付け替える。
+SET DlDir TO $'''C:\\temp\\download'''
+# 同じパスを JSON に入れる用。区切り文字を重ねてある。
+# %BaseDir% から組み立てると、展開後の C:\temp が JSON の中で
+# エスケープとして読まれてしまう（\t がタブになる）ので、ここは直接書く。
+# 上の DlDir と対になっている。片方だけ直すと食い違うので、
+# 変えるときは変換器の「ダウンロード保存先」で指定し直すのが確実。
+SET DlDirJson TO $'''C:\\\\temp\\\\download'''
+
+# --- ドライバーの入手方法 ---
+# AutoDriver = True なら、入っているブラウザーに合わせて自動で取ってくる。
+# ブラウザーが更新されても入れ替えが要らない。
+#
+# DriverSource = direct  … ベンダーのサイトから直接取る（推奨）。
+#   使うのは curl.exe / tar.exe / powershell.exe だけで、どれも Windows に
+#   最初から入っている Microsoft 署名済みの実行ファイル。持ち込みの exe を
+#   実行できない環境でも動く。落ちてくるドライバーもベンダー署名付き。
+# DriverSource = manager … Selenium Manager に任せる。
+#   selenium-manager-windows.exe を BaseDir に置いておく必要がある。取得元:
+#   https://github.com/SeleniumHQ/selenium_manager_artifacts/releases
+#   ※ 署名の無い実行ファイルを止める環境では、これ自体が起動できない。
+#
+# AutoDriver = False … 下の固定パスを使う。ブラウザー更新時は手で入れ替える。
+SET AutoDriver TO True
+SET DriverSource TO $'''direct'''
+SET SmExe TO $'''selenium-manager-windows.exe'''
+
+# AutoDriver = False のときに使う固定パス。Browser に追従させるため、
+# edge / chrome それぞれの既定を持ち、下の IF で切り替える。
+# ドライバーの置き場所を変えるときは、上の SET EdgeDriverExe / ChromeDriverExe を直す。
+# --- 要素操作の共通 JavaScript ---
+# PAD は長すぎる 1 行を貼り付けても黙って無視するため、短い行に分けて継ぎ足す。
+# （%JsAct% は直前までの内容。順番どおりに貼ること）
+SET JsAct TO $'''var cands = arguments[0], action = arguments[1], value = arguments[2]; var Q = String.fromCharCode(3'''
+SET JsAct TO $'''%JsAct%9), DQ = String.fromCharCode(34); function lit(s) { if (s.indexOf(Q) < 0) { return Q + s + Q; } retu'''
+SET JsAct TO $'''%JsAct%rn DQ + s + DQ; } function docsOf(root, out) { out.push(root); var fs; try { fs = root.querySelector'''
+SET JsAct TO $'''%JsAct%All(`iframe, frame`); } catch (e) { return out; } for (var k = 0; k < fs.length; k++) { var d = null'''
+SET JsAct TO $'''%JsAct%; try { d = fs[k].contentDocument; } catch (e) { d = null; } if (d && out.indexOf(d) < 0) { docsOf(d'''
+SET JsAct TO $'''%JsAct%, out); } } return out; } function allDocs() { try { return docsOf(document, []); } catch (e) { retu'''
+SET JsAct TO $'''%JsAct%rn [document]; } } function qs(doc, sel) { try { return doc.querySelector(sel); } catch (e) { return'''
+SET JsAct TO $'''%JsAct% null; } } function byXPath(doc, xp) { try { return doc.evaluate(xp, doc, null, 9, null).singleNodeV'''
+SET JsAct TO $'''%JsAct%alue; } catch (e) { return null; } } function findIn(doc, sel) { try { if (sel.indexOf(`id/`) === 0)'''
+SET JsAct TO $'''%JsAct% { return doc.getElementById(sel.slice(3)); } if (sel.indexOf(`xpath/`) === 0) { return byXPath(doc,'''
+SET JsAct TO $'''%JsAct% sel.slice(6)); } if (sel.indexOf(`text/`) === 0) { var t = sel.slice(5).trim(); return byXPath(doc,'''
+SET JsAct TO $'''%JsAct% `//*[not(self::script) and normalize-space(text())=` + lit(t) + `]`); } if (sel.indexOf(`aria/`) =='''
+SET JsAct TO $'''%JsAct%= 0) { var n = sel.slice(5).split(`[`)[0].trim(); var el = qs(doc, `[aria-label=` + lit(n) + `]`) ||'''
+SET JsAct TO $'''%JsAct% qs(doc, `[title=` + lit(n) + `]`) || qs(doc, `[alt=` + lit(n) + `]`); if (el) { return el; } el = b'''
+SET JsAct TO $'''%JsAct%yXPath(doc, `//*[not(self::script) and (@aria-label=` + lit(n) + ` or @title=` + lit(n) + ` or @alt='''
+SET JsAct TO $'''%JsAct%` + lit(n) + `)]`); if (el) { return el; } return byXPath(doc, `//*[not(self::script) and normalize-'''
+SET JsAct TO $'''%JsAct%space(text())=` + lit(n) + `]`); } if (sel.indexOf(`row/`) === 0) { var key = sel.slice(4).trim(); v'''
+SET JsAct TO $'''%JsAct%ar rows = doc.querySelectorAll(`tr`); for (var r = 0; r < rows.length; r++) { var txt = (rows[r].inn'''
+SET JsAct TO $'''%JsAct%erText || ``) + (rows[r].textContent || ``); if (txt.indexOf(key) < 0) { continue; } var hit = rows['''
+SET JsAct TO $'''%JsAct%r].querySelector(`a[href], button, input[type=image]`); if (!hit) { hit = rows[r].querySelector(`a, '''
+SET JsAct TO $'''%JsAct%img`); } if (hit) { return hit; } } return null; } if (sel.indexOf(`pierce/`) === 0) { sel = sel.sli'''
+SET JsAct TO $'''%JsAct%ce(7); } return doc.querySelector(sel); } catch (e) { return null; } } function find(sel) { var docs'''
+SET JsAct TO $'''%JsAct% = allDocs(); for (var j = 0; j < docs.length; j++) { var hit = findIn(docs[j], sel); if (hit) { ret'''
+SET JsAct TO $'''%JsAct%urn hit; } } return null; } if (action === `scroll`) { var docs = allDocs(); var moved = 0; for (var'''
+SET JsAct TO $'''%JsAct% j = 0; j < docs.length; j++) { var all = docs[j].querySelectorAll(`div, table, tbody`); for (var k '''
+SET JsAct TO $'''%JsAct%= 0; k < all.length; k++) { var el = all[k]; if (el.scrollHeight > el.clientHeight + 10 && el.client'''
+SET JsAct TO $'''%JsAct%Height > 40) { var before = el.scrollTop; el.scrollTop = before + el.clientHeight; if (el.scrollTop '''
+SET JsAct TO $'''%JsAct%!== before) { moved = moved + 1; } } } if (docs[j].defaultView) { docs[j].defaultView.scrollBy(0, 40'''
+SET JsAct TO $'''%JsAct%0); } } return { ok: true, used: null, moved: moved }; } if (action === `after` || action === `after'''
+SET JsAct TO $'''%JsAct%Digits`) { var docs = allDocs(); var src = ``; for (var j = 0; j < docs.length; j++) { var b = docs['''
+SET JsAct TO $'''%JsAct%j].body || docs[j].documentElement; if (b) { src = src + (b.innerText || ``) + ` ` + (b.textContent '''
+SET JsAct TO $'''%JsAct%|| ``) + ` `; } } var at = value ? src.indexOf(value) : -1; if (at < 0) { return { ok: false, used: '''
+SET JsAct TO $'''%JsAct%null }; } var rest = src.slice(at + value.length, at + value.length + 80); var out = ``; var p = 0; '''
+SET JsAct TO $'''%JsAct%if (action === `afterDigits`) { var isNum = function (c) { return c >= `0` && c <= `9`; }; while (p '''
+SET JsAct TO $'''%JsAct%< rest.length && p < 10 && !isNum(rest.charAt(p))) { p = p + 1; } while (p < rest.length && isNum(re'''
+SET JsAct TO $'''%JsAct%st.charAt(p))) { out = out + rest.charAt(p); p = p + 1; } } else { var skip = `:：=　`; var blank = fu'''
+SET JsAct TO $'''%JsAct%nction (c) { return c.charCodeAt(0) <= 32; }; while (p < rest.length && (blank(rest.charAt(p)) || sk'''
+SET JsAct TO $'''%JsAct%ip.indexOf(rest.charAt(p)) >= 0)) { p = p + 1; } var stop = `。、　`; while (p < rest.length && out.len'''
+SET JsAct TO $'''%JsAct%gth < 50 && !blank(rest.charAt(p)) && stop.indexOf(rest.charAt(p)) < 0) { out = out + rest.charAt(p)'''
+SET JsAct TO $'''%JsAct%; p = p + 1; } } if (!out) { return { ok: false, used: null }; } return { ok: true, used: null, text'''
+SET JsAct TO $'''%JsAct%: out }; } if (action === `exists`) { var docs = allDocs(); var txt = ``; for (var j = 0; j < docs.l'''
+SET JsAct TO $'''%JsAct%ength; j++) { var b = docs[j].body || docs[j].documentElement; if (b) { txt = txt + (b.innerText || '''
+SET JsAct TO $'''%JsAct%``) + (b.textContent || ``); } } return { ok: txt.indexOf(value) >= 0, used: null }; } for (var i = '''
+SET JsAct TO $'''%JsAct%0; i < cands.length; i++) { var el = find(cands[i]); if (!el) { continue; } if (action === `click`) '''
+SET JsAct TO $'''%JsAct%{ try { el.scrollIntoView({ block: `center` }); } catch (e) {} el.click(); } else if (action === `fi'''
+SET JsAct TO $'''%JsAct%ll`) { el.focus(); el.value = value; el.dispatchEvent(new Event(`input`, { bubbles: true })); el.dis'''
+SET JsAct TO $'''%JsAct%patchEvent(new Event(`change`, { bubbles: true })); } else if (action === `text`) { var s = el.inner'''
+SET JsAct TO $'''%JsAct%Text || el.textContent || ``; return { ok: true, used: cands[i], text: s.trim() }; } return { ok: tr'''
+SET JsAct TO $'''%JsAct%ue, used: cands[i] }; } return { ok: false, used: null };'''
+# ※ 継ぎ足しがうまくいかない場合は、共通 JavaScript（変換器のコピー機能、または
+#   Python 版が同時に出力する .jsact ファイル）の中身を「変数の設定」アクション
+#   （変数名 JsAct）の値の欄に手で貼り付けてもよい。
+
+
+# --- バージョン比較用の JavaScript ---
+# ブラウザーとドライバーのメジャーバージョン（最初のドット手前）を取り出して比べる。
+# Chrome/Edge はビルド番号まで一致するとは限らず、合わせるのはメジャーだけでよい。
+# 文字列リテラルはバッククォートを使う（JSON にも Robin にもそのまま置ける）。
+SET JsVer TO $'''var b = String(arguments[0]).split(`.`)[0]; var d = String(arguments[1]).split(`.`)[0]; return { ok: true, bMajor: b, dMajor: d, match: (b === d) };'''
+# 途中で中止するかどうかの目印（ドライバー取得やログインの失敗で True になる）
+SET Halt TO False
+# 中止した理由。最後のダイアログとログにそのまま出すので、
+# Halt を立てる箇所では必ずこれも設定すること。
+SET HaltReason TO $''''''
+# セッションを張れたか。後片付けで DELETE を投げてよいかの判定に使う。
+SET SessionOk TO False
+
+# --- 実行開始をログに残す ---
+# ここは中止しても必ず通る。ループの中だけで書くと、起点に着けずに
+# 中止したとき「ログを確認してください」と案内しながらログが空になる。
+File.WriteText File: LogFile TextToWrite: $'''===== 実行開始 上限%MaxItems%件 RetryMode=%RetryMode% Browser=%Browser% =====''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+
+# ドライバーをどう用意したか。ログとダイアログに出す。
+SET DriverSrc TO $'''固定パス（AutoDriver=False のためブラウザー更新時は手動で入れ替え）'''
+SET SmMsg TO $''''''
+
+# ---------- ベンダーから直接取ってくる（DriverSource = direct）----------
+# 版ごとのフォルダに入れる。ブラウザーが更新されると版が変わり、
+# フォルダ名も変わるので自動的に取り直しになる。中身を比べる必要がない。
+IF AutoDriver THEN
+IF DriverSource = $'''direct''' THEN
+    # 入っているブラウザーの版をレジストリから読む。
+    # [Console]::Write は改行を付けないので、そのまま URL に埋め込める。
+    # [char]46 は「.」。引用符を書かずに済ませるための書き方。
+    SET VerCmd TO $'''powershell -NoProfile -Command [Console]::Write((Get-ItemProperty HKCU:\\Software\\Microsoft\\Edge\\BLBeacon).version)'''
+    IF Browser = $'''chrome''' THEN
+        SET VerCmd TO $'''powershell -NoProfile -Command [Console]::Write((Get-ItemProperty HKCU:\\Software\\Google\\Chrome\\BLBeacon).version.Split([char]46)[0])'''
+    END
+    Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: VerCmd WorkingDirectory: BaseDir Timeout: 120 StandardOutput=> BrowserKey StandardError=> VerErr ExitCode=> VerExit
+    IF BrowserKey = $'''''' THEN
+        SET Halt TO True
+        SET HaltReason TO $'''レジストリからブラウザーの版を読めませんでした'''
+    END
+
+    # Edge は入っている版の zip がそのまま用意されている。Chrome は版ぴったりの
+    # ドライバーが無いことが多いので、メジャー番号でその世代の最新版を問い合わせる。
+    SET DrvVer TO BrowserKey
+    IF Halt = False THEN
+        IF Browser = $'''chrome''' THEN
+            SET RelUrl TO $'''https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_%BrowserKey%'''
+            SET VerFile TO $'''%BaseDir%\\drvver.txt'''
+            SET RelCmd TO $'''curl.exe -f -L -sS -o "%VerFile%" %RelUrl%'''
+            IF UseProxy THEN
+                SET RelCmd TO $'''curl.exe -f -L -sS -x %ProxyAddr% -o "%VerFile%" %RelUrl%'''
+            END
+            Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: RelCmd WorkingDirectory: BaseDir Timeout: 300 StandardOutput=> RelOut StandardError=> RelErr ExitCode=> RelExit
+            SET ReadCmd TO $'''powershell -NoProfile -Command [Console]::Write((Get-Content -Raw %VerFile%).Trim())'''
+            Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: ReadCmd WorkingDirectory: BaseDir Timeout: 120 StandardOutput=> DrvVer StandardError=> ReadErr ExitCode=> ReadExit
+            IF DrvVer = $'''''' THEN
+                SET Halt TO True
+                SET HaltReason TO $'''ドライバーの版を問い合わせられませんでした（curl=%RelExit% / %RelErr%）。UseProxy の設定を確認してください'''
+            END
+        END
+    END
+
+    IF Halt = False THEN
+        Folder.Create FolderPath: BaseDir FolderName: $'''driver''' Folder=> DrvRoot
+        Folder.Create FolderPath: $'''%BaseDir%\\driver''' FolderName: DrvVer Folder=> DrvDirObj
+        SET DrvDir TO $'''%BaseDir%\\driver\\%DrvVer%'''
+        # Edge の zip は exe が直下、Chrome は chromedriver-win64 の下に入る
+        SET DrvHome TO DrvDir
+        SET DrvExeName TO $'''msedgedriver.exe'''
+        SET ZipUrl TO $'''https://msedgedriver.microsoft.com/%DrvVer%/edgedriver_win64.zip'''
+        IF Browser = $'''chrome''' THEN
+            SET DrvHome TO $'''%DrvDir%\\chromedriver-win64'''
+            SET DrvExeName TO $'''chromedriver.exe'''
+            SET ZipUrl TO $'''https://storage.googleapis.com/chrome-for-testing-public/%DrvVer%/win64/chromedriver-win64.zip'''
+            # Chrome の zip は chromedriver-win64 の下に展開される。
+            # 先に作っておく。Folder.GetFiles はフォルダが無いとエラーで止まり、
+            # 展開前の存在確認ができない（Edge は DrvDir がそのまま使えるので通る）。
+            Folder.Create FolderPath: DrvDir FolderName: $'''chromedriver-win64''' Folder=> DrvHomeObj
+        END
+        SET ZipPath TO $'''%DrvDir%\\driver.zip'''
+        Folder.GetFiles Folder: DrvHome FileFilter: DrvExeName IncludeSubfolders: False FailOnAccessDenied: True SortBy1: Folder.SortBy.Name SortDescending1: False SortBy2: Folder.SortBy.LastModified SortDescending2: False SortBy3: Folder.SortBy.LastAccessed SortDescending3: False Files=> HaveDrv
+        IF HaveDrv.Count = 0 THEN
+            # -f を付けないと 404 でも curl は成功を返し、エラーページを zip として
+            # 保存してしまう。その先の tar が失敗して原因が読めなくなる。
+            SET DlCmd TO $'''curl.exe -f -L -sS -o "%ZipPath%" %ZipUrl%'''
+            IF UseProxy THEN
+                SET DlCmd TO $'''curl.exe -f -L -sS -x %ProxyAddr% -o "%ZipPath%" %ZipUrl%'''
+            END
+            Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: DlCmd WorkingDirectory: BaseDir Timeout: 600 StandardOutput=> DlOut StandardError=> DlErr ExitCode=> DlExit
+            IF DlExit <> 0 THEN
+                SET Halt TO True
+                SET HaltReason TO $'''ドライバーを取得できませんでした（curl の終了コード %DlExit%）'''
+            END
+            IF Halt = False THEN
+                SET UnzipCmd TO $'''tar.exe -xf "%ZipPath%" -C "%DrvDir%"'''
+                Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: UnzipCmd WorkingDirectory: BaseDir Timeout: 300 StandardOutput=> UzOut StandardError=> UzErr ExitCode=> UzExit
+                # 展開できたら zip は要らない。20MB 前後あるので残さない。
+                # 失敗したときは残す。手で開いて中身を確かめられる。
+                IF UzExit = 0 THEN
+                    File.Delete Files: ZipPath
+                END
+            END
+        END
+    END
+
+    IF Halt = False THEN
+        Folder.GetFiles Folder: DrvHome FileFilter: DrvExeName IncludeSubfolders: False FailOnAccessDenied: True SortBy1: Folder.SortBy.Name SortDescending1: False SortBy2: Folder.SortBy.LastModified SortDescending2: False SortBy3: Folder.SortBy.LastAccessed SortDescending3: False Files=> HaveDrv2
+        IF HaveDrv2.Count = 0 THEN
+            SET Halt TO True
+            SET HaltReason TO $'''ドライバーを展開できませんでした（tar の終了コード %UzExit%）'''
+        END
+    END
+    IF Halt = False THEN
+        SET DriverExe TO $'''%DrvHome%\\%DrvExeName%'''
+        SET DriverSrc TO $'''ベンダーから直接取得（%DrvVer% / 版ごとのフォルダに保管）'''
+    END
+END
+END
+
+# ---------- Selenium Manager に任せる（DriverSource = manager）----------
+# 設定は冒頭の AutoDriver / SmExe。取得できたらそのパスで DriverExe を上書きする。
+IF AutoDriver THEN
+IF DriverSource = $'''manager''' THEN
+    SET SmArgs TO $'''%SmExe% --browser %Browser% --browser-version stable --output json'''
+    IF UseProxy THEN
+        SET SmArgs TO $'''%SmArgs% --proxy %ProxyAddr%'''
+    END
+    Scripting.RunDOSCommand.RunDOSCommandAndFailOnTimeout DOSCommandOrApplication: SmArgs WorkingDirectory: BaseDir Timeout: 300 StandardOutput=> SmOutput StandardError=> SmError ExitCode=> SmExit
+    # 終了コードを先に見る。exe が起動できないと出力が空になり、そのまま
+    # JSON に変換しようとして「CustomObject が取れません」という、原因の
+    # 分からないエラーになる。
+    IF SmExit <> 0 THEN
+        SET Halt TO True
+        SET HaltReason TO $'''Selenium Manager を実行できませんでした'''
+        Display.ShowMessageDialog.ShowMessage Title: $'''Selenium Manager を実行できません''' Message: SmError Icon: Display.Icon.Warning Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> SmBtn2
+    END
+    IF Halt = False THEN
+    Variables.ConvertJsonToCustomObject Json: SmOutput CustomObject=> SmObj
+    IF SmObj['result']['code'] = 0 THEN
+        SET DriverExe TO SmObj['result']['driver_path']
+        SET DriverSrc TO $'''Selenium Manager（ブラウザーのバージョンに合わせて自動取得）'''
+        SET SmMsg TO SmObj['result']['message']
+    END
+    IF SmObj['result']['code'] <> 0 THEN
+        SET Halt TO True
+        SET HaltReason TO $'''ドライバーの取得に失敗しました（Selenium Manager）'''
+        Display.ShowMessageDialog.ShowMessage Title: $'''ドライバー取得に失敗''' Message: SmOutput Icon: Display.Icon.Information Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> SmBtn
+    END
+    END
+END
+END
+
+# ここから先はドライバーが要る。取得に失敗していたら入らない。
+# 入ってしまうと更新前の古いドライバーで起動し、
+#「sessionId がありません」という無関係なエラーに化ける。
+IF Halt = False THEN
+# --- 古いドライバーが残っていたら終了する ---
+# 前回の実行が異常終了すると、ドライバーがポート 9515 を掴んだまま残り、
+# 新しいドライバーが起動できない（古い方が応答してしまう）。
+# 別のブラウザーのフローを続けて動かす場合もポートを奪い合うため、両方を終了させる。
+System.TerminateProcess.TerminateProcessByName ProcessName: $'''msedgedriver'''
+System.TerminateProcess.TerminateProcessByName ProcessName: $'''chromedriver'''
+WAIT 1
+
+# --- WebDriver を起動 ---
+System.RunApplication.RunApplication ApplicationPath: DriverExe CommandLineArguments: $'''--port=9515''' WindowStyle: System.ProcessWindowStyle.Hidden ProcessId=> DriverPid
+WAIT 3
+
+# --- セッション開始（ブラウザ起動）---
+# ブラウザーは冒頭の Browser、プロキシの有無は UseProxy で切り替わる。
+# 組み合わせが増えるので、本文は前から継ぎ足して組み立てる。
+SET SessionBody TO $'''{"capabilities": {"alwaysMatch": {"browserName": "%BrowserName%"'''
+IF UseProxy THEN
+    SET SessionBody TO $'''%SessionBody%, "proxy": {"proxyType": "manual", "httpProxy": "%ProxyAddr%", "sslProxy": "%ProxyAddr%"}'''
+END
+# ダウンロードの受け取り方。ブラウザーは素のプロファイルなので、
+# ここで指定しないと既定のダウンロードフォルダに落ち、確認も出る。
+#   default_directory      … 保存先。JSON の中の Windows パスは \ を 4 本
+#   prompt_for_download    … 保存ダイアログを出さない
+#   always_open_pdf_externally … PDF をビューアで開かずファイルとして落とす
+#   automatic_downloads: 1 … 「複数ファイルのダウンロードを許可しますか」を出さない
+SET PrefKey TO $'''ms:edgeOptions'''
+IF Browser = $'''chrome''' THEN
+    SET PrefKey TO $'''goog:chromeOptions'''
+END
+SET SessionBody TO $'''%SessionBody%, "%PrefKey%": {"prefs": {"download.default_directory": "%DlDirJson%"'''
+SET SessionBody TO $'''%SessionBody%, "download.prompt_for_download": false, "plugins.always_open_pdf_externally": true'''
+SET SessionBody TO $'''%SessionBody%, "profile": {"default_content_setting_values": {"automatic_downloads": 1}}}}'''
+SET SessionBody TO $'''%SessionBody%}}}'''
+SET AppJson TO $'''application/json'''
+SET NewUrl TO $'''%DriverUrl%/session'''
+Web.InvokeWebService.InvokeWebService Url: NewUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: SessionBody EncodeRequestBody: False FailOnErrorStatus: False Response=> SessionResp StatusCode=> SessionStatus
+# ↓ 「sessionId がありません」と出たらこの行を有効にして生の応答を確認する
+# Display.ShowMessageDialog.ShowMessage Title: $'''WebDriver 応答''' Message: SessionResp Icon: Display.Icon.Information Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> BtnDbg
+# セッションが作れたかを応答コードで判定する。ここを見ないと、失敗応答
+#（value の中身が error/message に入れ替わる）をそのまま読みに行って
+#「sessionId がありません」という、原因の分からないエラーになる。
+IF SessionStatus <> 200 THEN
+    SET Halt TO True
+    SET HaltReason TO $'''WebDriver のセッションを作成できませんでした（ブラウザーとドライバーの不一致など）'''
+    Display.ShowMessageDialog.ShowMessage Title: $'''セッション作成に失敗''' Message: SessionResp Icon: Display.Icon.Warning Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> SessBtn
+END
+END
+
+IF Halt = False THEN
+Variables.ConvertJsonToCustomObject Json: SessionResp CustomObject=> SessionObj
+# カスタムオブジェクトはブラケット記法で参照する。ドット記法は使えない。
+SET SessionId TO SessionObj['value']['sessionId']
+SET SessionOk TO True
+# 以降で使い回す URL を組み立てておく（1 行を短く保つため）
+SET ExecUrl TO $'''%DriverUrl%/session/%SessionId%/execute/sync'''
+SET GoUrl TO $'''%DriverUrl%/session/%SessionId%/url'''
+SET RectUrl TO $'''%DriverUrl%/session/%SessionId%/window/rect'''
+SET ShotUrl TO $'''%DriverUrl%/session/%SessionId%/screenshot'''
+# ページ全体を 1 枚に撮るための口。W3C 標準の外にある Chrome / Edge 独自の
+# 命令で、見えていない部分まで含めて撮れる。
+SET CdpUrl TO $'''%DriverUrl%/session/%SessionId%/chromium/send_command_and_get_result'''
+SET QuitUrl TO $'''%DriverUrl%/session/%SessionId%'''
+
+# --- 起動したブラウザーとドライバーを確認する ---
+# 値はセッションの応答（capabilities）から取る。実際に動いているものが出る。
+SET BrowserVer TO SessionObj['value']['capabilities']['browserVersion']
+# 起動したのが要求どおりのブラウザーかを先に確かめる。ドライバーは取り違えても
+# セッションを張ってしまうことがあり、そのときは空白のウィンドウが出るだけで
+# 気づけない。ここで止めないと、続く capabilities の参照キーも食い違う。
+SET RealBrowser TO SessionObj['value']['capabilities']['browserName']
+IF RealBrowser <> BrowserName THEN
+    SET Halt TO True
+    SET HaltReason TO $'''要求したブラウザー(%BrowserName%)と実際に起動したブラウザー(%RealBrowser%)が違います。ドライバーの取り違えです'''
+    Display.ShowMessageDialog.ShowMessage Title: $'''ブラウザーの取り違え''' Message: HaltReason Icon: Display.Icon.Warning Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> MixBtn
+END
+
+IF Halt = False THEN
+SET DriverVer TO $'''(不明)'''
+IF Browser = $'''chrome''' THEN
+    SET DriverVer TO SessionObj['value']['capabilities']['chrome']['chromedriverVersion']
+END
+IF Browser = $'''edge''' THEN
+    SET DriverVer TO SessionObj['value']['capabilities']['msedge']['msedgedriverVersion']
+END
+# メジャーバージョンの比較はページ側の JavaScript にやらせる。
+# PAD のテキスト分割アクションを増やさずに済み、貼り付け事故の余地が減る。
+SET VerBody TO $'''{"script": "%JsVer%", "args": ["%BrowserVer%", "%DriverVer%"]}'''
+Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: VerBody EncodeRequestBody: False FailOnErrorStatus: False Response=> VerResp StatusCode=> VerStatus
+Variables.ConvertJsonToCustomObject Json: VerResp CustomObject=> VerObj
+SET VerJudge TO $'''不一致（ブラウザー更新の可能性あり）'''
+IF VerObj['value']['match'] = True THEN
+    SET VerJudge TO $'''一致'''
+END
+SET DriverInfo TO $'''ブラウザー=%Browser% %BrowserVer% / WebDriver=%DriverProc% %DriverVer% / メジャー判定=%VerJudge% / 取得方法=%DriverSrc% / パス=%DriverExe%'''
+File.WriteText File: LogFile TextToWrite: $'''[ドライバー] %DriverInfo%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+# ダイアログにだけ補足を足す。ここはページを開く前なのでブラウザーは白紙で、
+# 初めて見た人が異常だと思いやすい。ログ側は 1 行を短く保つため足さない。
+SET DriverInfoMsg TO $'''%DriverInfo%  ※この時点ではまだページを開いていません（白紙で正常）。OK を押すとページを開きます。'''
+IF ShowDriverInfo THEN
+    Display.ShowMessageDialog.ShowMessage Title: $'''ドライバー確認''' Message: DriverInfoMsg Icon: Display.Icon.Information Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> DrvBtn
+END
+END
+
+END
+# ================= セットアップ（最初に 1 回）=================
+# セッションが張れていなければ、以降の URL 変数が存在しないので入らない。
+IF Halt = False THEN
+SET RowError TO $''''''
+# [1] ウィンドウサイズ（冒頭の WinW / WinH で決まる）
+SET RectBody TO $'''{"width": %WinW%, "height": %WinH%}'''
+Web.InvokeWebService.InvokeWebService Url: RectUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: RectBody EncodeRequestBody: False FailOnErrorStatus: False Response=> RectResp StatusCode=> RectStatus
+# [2] ページを開く（URL は冒頭の TargetUrl で設定）
+SET UrlBody TO $'''{"url": "%TargetUrl%"}'''
+Web.InvokeWebService.InvokeWebService Url: GoUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: UrlBody EncodeRequestBody: False FailOnErrorStatus: False Response=> UrlResp StatusCode=> UrlStatus
+WAIT 2
+
+# ---------- 手動ログイン ----------
+# フローを止めて人がログインする。ここで止めるのはログインだけで、
+# 起点画面までの移動は[OK]のあと機械が行う。
+# PAD はパスワードを一度も受け取らないので、変数ペイン・実行ログ・
+# エラーメッセージのどこにも残らない。生成物にも入らない。
+# WebDriver は自分が起動したブラウザーしか操作できない。別に開いてある
+# 普段のブラウザーでログインしても、フローはそのタブを見られない。
+Display.ShowMessageDialog.ShowMessage Title: $'''手動ログイン''' Message: $'''ログインしたら[OK]。そのあと自動で起点画面まで進みます。ブラウザーは閉じないでください。''' Icon: Display.Icon.Information Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> LoginBtn
+IF LoginBtn = $'''Cancel''' THEN
+    SET Halt TO True
+    SET HaltReason TO $'''手動ログインがキャンセルされました'''
+END
+
+
+# ---------- 起点画面かどうかを確認する ----------
+# ループ最初の操作対象がこの画面にあるかを、クリックせずに調べる。
+# 見つからなければ、その場で進めてもらって何度でも試せるようにする。
+# 1 度きりで中止すると、画面を直してから実行し直すことになって手間が増える。
+SET StartOk TO False
+SET StartTry TO 0
+LOOP WHILE StartOk = False
+    # ---------- 起点画面まで進む ----------
+    # ログイン直後の画面から、繰り返しの起点までメニューを辿る。
+    # 毎周やり直すのは、1 回目にログイン前の画面で空振りしても、
+    # ログインしてから[OK]を押せばそのまま起点まで進めるようにするため。
+    # すでに起点にいるときはメニューが無くて空振りするだけ。
+    # click aria/拡張
+    SET ActBody TO $'''{"script": "%JsAct%", "args": [["aria/拡張", "#MenuRow img:nth-of-type(1)"], "click", ""]}'''
+    Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+    WAIT 1
+    # click aria/拡張 取引情報入力・照会
+    SET ActBody TO $'''{"script": "%JsAct%", "args": [["aria/拡張 取引情報入力・照会"], "click", ""]}'''
+    Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+    WAIT 1
+    # click aria/拡張 帳票出力
+    SET ActBody TO $'''{"script": "%JsAct%", "args": [["aria/拡張 帳票出力"], "click", ""]}'''
+    Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+    WAIT 1
+    # click aria/ホーム
+    SET ActBody TO $'''{"script": "%JsAct%", "args": [["aria/ホーム", "td:nth-of-type(4) td:nth-of-type(2) img"], "click", ""]}'''
+    Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+    WAIT 1
+
+    # 起点かどうかを調べる。移動で ActBody を使い回しているので、
+    # ここで確認用の本文に入れ直す。
+    SET ActBody TO $'''{"script": "%JsAct%", "args": [["text/検収状況一覧"], "find", ""]}'''
+    Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+    # 応答コードを先に見る。エラー応答には ok が無いので、そのまま
+    # 読みに行くと「プロパティがありません」で止まる。
+    IF ActStatus = 200 THEN
+        Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+        IF ActObj['value']['ok'] = True THEN
+            SET StartOk TO True
+        END
+    END
+    IF StartOk = False THEN
+        SET StartTry TO StartTry + 1
+        IF StartTry = 1 THEN
+            Display.ShowMessageDialog.ShowMessage Title: $'''ログインは終わりましたか''' Message: $'''ログインが済んでいなければ、ログインしてから[OK]。済んでいれば「検収状況一覧」が見える画面まで進めて[OK]。''' Icon: Display.Icon.Warning Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> StartBtn
+        END
+        IF StartTry > 1 THEN
+            Display.ShowMessageDialog.ShowMessage Title: $'''起点画面ではありません''' Message: $'''起点画面が出ていません。「検収状況一覧」が見える画面まで進めて[OK]。（%StartTry% 回目）''' Icon: Display.Icon.Warning Buttons: Display.Buttons.OKCancel DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> StartBtn
+        END
+        IF StartBtn = $'''Cancel''' THEN
+            SET Halt TO True
+            SET HaltReason TO $'''繰り返しの起点画面に到達できませんでした'''
+            SET StartOk TO True
+        END
+    END
+END
+
+# ---------- セットアップ失敗を検知して止める ----------
+# ここで止めないと、ループ先頭で RowError がリセットされるため、
+# 全件が「ステップ1で要素が見つかりません」という偽の失敗として記録される。
+IF RowError <> $'''''' THEN
+    SET Halt TO True
+    SET HaltReason TO RowError
+END
+END
+
+# ダウンロードの受け取り先。すでにあってもエラーにはならない。
+Folder.Create FolderPath: $'''C:\\temp''' FolderName: $'''download''' Folder=> DlDirObj
+
+# ================= 明細（CSV）を読み込む =================
+IF Halt = False THEN
+    File.ReadFromCSVFile.ReadCSV CSVFile: DetailsFile Encoding: File.CSVEncoding.UTF8 TrimFields: True FirstLineContainsColumnNames: True ColumnsSeparator: File.CSVColumnsSeparator.Comma CSVTable=> Rows
+    # 結果 CSV は、そのまま明細として読み直せる列構成にする。
+    # ID だけでなく業務キーも入れないと、再実行で対象を特定できない。
+    File.WriteText File: ResultFile TextToWrite: $'''プロジェクト番号,発注番号,結果,理由,エビデンス,実行日時,要求ID''' AppendNewLine: True IfFileExists: File.IfFileExists.Overwrite Encoding: File.FileEncoding.UTF8
+    SET OkCount TO 0
+    SET NgCount TO 0
+    SET SkipCount TO 0
+    SET Attempted TO 0
+    SET PrevFailed TO False
+
+    # ================= 明細ごとの繰り返し =================
+    LOOP FOREACH Row IN Rows
+        # 明細の列を変数に取り出す（リテラル内に単引用符を入れないため）
+        SET Col1 TO Row['プロジェクト番号']
+        SET Col2 TO Row['発注番号']
+        SET Col3 TO Row['納入日']
+        SET RowId TO Col1
+        SET RowKey TO Col2
+        SET RowError TO $''''''
+        SET Cap1 TO $''''''
+
+        # 再実行モードでは「失敗」行だけを対象にする
+        IF RetryMode THEN
+            # 対象は「失敗」と「未実行」。未実行は件数上限で打ち切った行で、
+            # これを外すと上限を刻んで回したとき続きが流せない。
+            SET DoRow TO False
+            IF Row['結果'] = $'''失敗''' THEN
+                SET DoRow TO True
+            END
+            IF Row['結果'] = $'''未実行''' THEN
+                SET DoRow TO True
+            END
+            IF DoRow = False THEN
+                NEXT LOOP
+            END
+        END
+
+        # skip 列に値がある行は飛ばす（再実行 CSV には skip 列が無いので除外）
+        IF RetryMode = False THEN
+            IF Row['skip'] <> $'''''' THEN
+                SET SkipCount TO SkipCount + 1
+                File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,スキップ,,,,''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+                NEXT LOOP
+            END
+        END
+
+        # 件数上限。打ち切った行も記録に残す（どこから再開するか分かる）
+        IF Attempted >= MaxItems THEN
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,未実行,"件数上限 %MaxItems% 件に達したため",,,''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            NEXT LOOP
+        END
+        SET Attempted TO Attempted + 1
+
+        # 直前の件が失敗していたら、起点に復帰してから始める。
+        # 失敗した画面のまま次の件を始めると 1 件の失敗が全件に連鎖する。
+        IF PrevFailed THEN
+            # 復帰: click aria/ホーム
+            SET ActBody TO $'''{"script": "%JsAct%", "args": [["aria/ホーム", "td:nth-of-type(4) td:nth-of-type(2) img"], "click", ""]}'''
+            Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+            WAIT 1
+            # 復帰の直後は画面がまだ切り替わりきっていないことがある。
+            # 実 EDI では、戻った直後にメニューを押そうとして空振りした。
+            WAIT 2
+            SET PrevFailed TO False
+        END
+        # 悲観的に置く。最後まで通れば False に戻る（フラグを立てる箇所が 1 行で済む）
+        SET PrevFailed TO True
+
+        # 日時つきのファイル名を作る。MM は月、mm は分。
+        DateTime.GetCurrentDateTime.Local DateTimeFormat: DateTime.DateTimeFormat.DateAndTime CurrentDateTime=> NowDt
+        Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt CustomFormat: $'''yyyyMMdd_HHmmss''' Result=> Stamp
+        Text.ConvertDateTimeToText.FromCustomDateTime DateTime: NowDt CustomFormat: $'''yyyy/MM/dd HH:mm:ss''' Result=> RecStamp
+        # エビデンスのファイル名。書式は冒頭の ShotNameFmt で決める。
+        SET ShotName TO ShotNameFmt
+        Text.Replace.ReplaceTextWithRegex Text: ShotName TextToFind: $'''@ID@''' IgnoreCase: False ReplaceWith: RowId ActivateEscapeSequences: False Result=> ShotName
+        Text.Replace.ReplaceTextWithRegex Text: ShotName TextToFind: $'''@KEY@''' IgnoreCase: False ReplaceWith: RowKey ActivateEscapeSequences: False Result=> ShotName
+        Text.Replace.ReplaceTextWithRegex Text: ShotName TextToFind: $'''@STAMP@''' IgnoreCase: False ReplaceWith: Stamp ActivateEscapeSequences: False Result=> ShotName
+        SET ShotPath TO $'''%ShotDir%\\%ShotName%.png'''
+        SET FailShot TO $'''%ShotDir%\\fail_%ShotName%.png'''
+        File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 開始''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+
+        # 💬 発注 %Col2%（%Col1%）の帳票を発行
+        # [1] click text/検収状況一覧
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["text/検収状況一覧"], "click", ""]}'''
+        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ1（click text/検収状況一覧）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ1（click text/検収状況一覧）で要素が見つかりません'''
+            END
+        END
+        IF RowError <> $'''''' THEN
+            SET NgCount TO NgCount + 1
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%,%Cap1%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            NEXT LOOP
+        END
+        WAIT 1
+
+        # 💬 各欄は入れたあと外を押して確定させる。Oracle はフォーカスが外れたときに検証が走る
+        # [2] fill #N320
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["#N320", "aria/ステータス"], "fill", "ALL"]}'''
+        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ2（fill #N320）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ2（fill #N320）で要素が見つかりません'''
+            END
+        END
+        IF RowError <> $'''''' THEN
+            SET NgCount TO NgCount + 1
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%,%Cap1%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            NEXT LOOP
+        END
+        WAIT 1
+
+        # [3] click #_oafOraBodyContainer
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["#_oafOraBodyContainer"], "click", ""]}'''
+        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ3（click #_oafOraBodyContainer）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ3（click #_oafOraBodyContainer）で要素が見つかりません'''
+            END
+        END
+        IF RowError <> $'''''' THEN
+            SET NgCount TO NgCount + 1
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%,%Cap1%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            NEXT LOOP
+        END
+        WAIT 1
+
+        # [4] fill #N321
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["#N321", "aria/発注番号(From)"], "fill", "%Col2%"]}'''
+        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ4（fill #N321）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ4（fill #N321）で要素が見つかりません'''
+            END
+        END
+        IF RowError <> $'''''' THEN
+            SET NgCount TO NgCount + 1
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%,%Cap1%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            NEXT LOOP
+        END
+        WAIT 1
+
+        # [5] click #_oafOraBodyContainer
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["#_oafOraBodyContainer"], "click", ""]}'''
+        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ5（click #_oafOraBodyContainer）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ5（click #_oafOraBodyContainer）で要素が見つかりません'''
+            END
+        END
+        IF RowError <> $'''''' THEN
+            SET NgCount TO NgCount + 1
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%,%Cap1%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            NEXT LOOP
+        END
+        WAIT 1
+
+        # [6] fill #N322
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["#N322", "aria/発注番号(To)"], "fill", "%Col2%"]}'''
+        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ6（fill #N322）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ6（fill #N322）で要素が見つかりません'''
+            END
+        END
+        IF RowError <> $'''''' THEN
+            SET NgCount TO NgCount + 1
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%,%Cap1%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            NEXT LOOP
+        END
+        WAIT 1
+
+        # [7] click #_oafOraBodyContainer
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["#_oafOraBodyContainer"], "click", ""]}'''
+        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ7（click #_oafOraBodyContainer）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ7（click #_oafOraBodyContainer）で要素が見つかりません'''
+            END
+        END
+        IF RowError <> $'''''' THEN
+            SET NgCount TO NgCount + 1
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%,%Cap1%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            NEXT LOOP
+        END
+        WAIT 1
+
+        # [8] fill #N323
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["#N323", "aria/納入日(From)"], "fill", "%Col3%"]}'''
+        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ8（fill #N323）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ8（fill #N323）で要素が見つかりません'''
+            END
+        END
+        IF RowError <> $'''''' THEN
+            SET NgCount TO NgCount + 1
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%,%Cap1%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            NEXT LOOP
+        END
+        WAIT 1
+
+        # [9] click #_oafOraBodyContainer
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["#_oafOraBodyContainer"], "click", ""]}'''
+        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ9（click #_oafOraBodyContainer）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ9（click #_oafOraBodyContainer）で要素が見つかりません'''
+            END
+        END
+        IF RowError <> $'''''' THEN
+            SET NgCount TO NgCount + 1
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%,%Cap1%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            NEXT LOOP
+        END
+        WAIT 1
+
+        # [10] fill #N324
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["#N324", "aria/納入日(To)"], "fill", "%Col3%"]}'''
+        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ10（fill #N324）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ10（fill #N324）で要素が見つかりません'''
+            END
+        END
+        IF RowError <> $'''''' THEN
+            SET NgCount TO NgCount + 1
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%,%Cap1%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            NEXT LOOP
+        END
+        WAIT 1
+
+        # [11] click #_oafOraBodyContainer
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["#_oafOraBodyContainer"], "click", ""]}'''
+        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ11（click #_oafOraBodyContainer）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ11（click #_oafOraBodyContainer）で要素が見つかりません'''
+            END
+        END
+        IF RowError <> $'''''' THEN
+            SET NgCount TO NgCount + 1
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%,%Cap1%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            NEXT LOOP
+        END
+        WAIT 1
+
+        # [12] click aria/続行(C)
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["aria/続行(C)"], "click", ""]}'''
+        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ12（click aria/続行(C)）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ12（click aria/続行(C)）で要素が見つかりません'''
+            END
+        END
+        IF RowError <> $'''''' THEN
+            SET NgCount TO NgCount + 1
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%,%Cap1%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            NEXT LOOP
+        END
+        WAIT 1
+
+        # 💬 レビュー画面。発行を押すと要求 ID がポップアップ（iframe の中）で出る
+        # [13] click #FndReqSubmit
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["#FndReqSubmit", "aria/発行"], "click", ""]}'''
+        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ13（click #FndReqSubmit）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ13（click #FndReqSubmit）で要素が見つかりません'''
+            END
+        END
+        IF RowError <> $'''''' THEN
+            SET NgCount TO NgCount + 1
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%,%Cap1%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            NEXT LOOP
+        END
+        WAIT 1
+
+        # 完了確認。「ボタンは押せたが実際には処理されていない」を検知する。
+        # [14] 完了確認: 予定されました（最大 60 秒待つ）
+        SET AstFound TO False
+        SET AstWaited TO 0
+        LOOP WHILE AstFound = False AND AstWaited < 60
+            SET ActBody TO $'''{"script": "%JsAct%", "args": [[], "exists", "予定されました"]}'''
+            Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+            IF ActStatus = 200 THEN
+                Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+                IF ActObj['value']['ok'] = True THEN
+                    SET AstFound TO True
+                END
+            END
+            IF AstFound = False THEN
+                WAIT 1
+                SET AstWaited TO AstWaited + 1
+            END
+        END
+        IF AstFound = False THEN
+            SET RowError TO $'''ステップ14（完了確認: 予定されました）画面に文字列がありません（60 秒待機）'''
+        END
+        IF RowError <> $'''''' THEN
+            SET NgCount TO NgCount + 1
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%,%Cap1%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            NEXT LOOP
+        END
+
+        # 💬 「要求IDは」の直後の数字だけを結果 CSV に残す（要素を指定しない）
+        # 画面に出た値を読み取って、結果 CSV の「要求ID」列に残す。
+        # 次のバッチはこの CSV をそのまま明細として読める。
+        # [15] capture 要求ID
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [[], "afterDigits", "要求IDは"]}'''
+        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ15（capture 要求ID）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ15（capture 要求ID）で「要求IDは」の後に読み取る文字がありません'''
+            END
+            IF ActObj['value']['ok'] = True THEN
+                SET Cap1 TO ActObj['value']['text']
+            END
+        END
+        IF RowError <> $'''''' THEN
+            SET NgCount TO NgCount + 1
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%,%Cap1%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            NEXT LOOP
+        END
+
+        # エビデンス保存（名前は冒頭の ShotNameFmt で決まる）
+        # WebDriver に撮らせるとページの表示領域だけが写る。
+        # デスクトップや他ウィンドウは写らず、フォーカスにも依存しない。
+        # 逆にスクロールしないと見えない範囲は写らない点に注意。
+        SET ShotSaved TO False
+        IF FullShot THEN
+            SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+            Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+            IF ShotStatus = 200 THEN
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']['data']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: ShotPath IfFileExists: File.IfExists.Overwrite
+                SET ShotSaved TO True
+            END
+        END
+        # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+        IF ShotSaved = False THEN
+            Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+            Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+            SET ShotB64 TO ShotObj['value']
+            File.ConvertFromBase64 Base64Text: ShotB64 File: ShotPath IfFileExists: File.IfExists.Overwrite
+        END
+
+        # [16] click #OADialogPopupRN button
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["#OADialogPopupRN button", "#defaultDialogPopup button", "aria/OK", "text/OK"], "click", ""]}'''
+        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ16（click #OADialogPopupRN button）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ16（click #OADialogPopupRN button）で要素が見つかりません'''
+            END
+        END
+        IF RowError <> $'''''' THEN
+            SET NgCount TO NgCount + 1
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%,%Cap1%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            NEXT LOOP
+        END
+        WAIT 1
+
+        # [17] click aria/ホーム
+        SET ActBody TO $'''{"script": "%JsAct%", "args": [["aria/ホーム", "td:nth-of-type(4) td:nth-of-type(2) img"], "click", ""]}'''
+        Web.InvokeWebService.InvokeWebService Url: ExecUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: ActBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ActResp StatusCode=> ActStatus
+        IF ActStatus <> 200 THEN
+            SET RowError TO $'''ステップ17（click aria/ホーム）で WebDriver がエラーを返しました（HTTP %ActStatus%）'''
+        END
+        IF ActStatus = 200 THEN
+            Variables.ConvertJsonToCustomObject Json: ActResp CustomObject=> ActObj
+            IF ActObj['value']['ok'] <> True THEN
+                SET RowError TO $'''ステップ17（click aria/ホーム）で要素が見つかりません'''
+            END
+        END
+        IF RowError <> $'''''' THEN
+            SET NgCount TO NgCount + 1
+            SET ShotSaved TO False
+            IF FullShot THEN
+                SET CdpBody TO $'''{"cmd": "Page.captureScreenshot", "params": {"format": "png", "captureBeyondViewport": true}}'''
+                Web.InvokeWebService.InvokeWebService Url: CdpUrl Method: Web.Method.Post Accept: AppJson ContentType: AppJson RequestBody: CdpBody EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                IF ShotStatus = 200 THEN
+                    Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                    SET ShotB64 TO ShotObj['value']['data']
+                    File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+                    SET ShotSaved TO True
+                END
+            END
+            # 全体撮影が使えなかったときは、見えている範囲だけでも残す。
+            IF ShotSaved = False THEN
+                Web.InvokeWebService.InvokeWebService Url: ShotUrl Method: Web.Method.Get Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> ShotResp StatusCode=> ShotStatus
+                Variables.ConvertJsonToCustomObject Json: ShotResp CustomObject=> ShotObj
+                SET ShotB64 TO ShotObj['value']
+                File.ConvertFromBase64 Base64Text: ShotB64 File: FailShot IfFileExists: File.IfExists.Overwrite
+            END
+            File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,失敗,"%RowError%","%FailShot%",%RecStamp%,%Cap1%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 失敗 %RowError%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] 応答 %ActResp%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+            NEXT LOOP
+        END
+        WAIT 1
+
+        # ここまで来たら成功
+        SET PrevFailed TO False
+        SET OkCount TO OkCount + 1
+        File.WriteText File: ResultFile TextToWrite: $'''%RowId%,%RowKey%,成功,,"%ShotPath%",%RecStamp%,%Cap1%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+        File.WriteText File: LogFile TextToWrite: $'''[%RecStamp%] %RowId% / %RowKey% 成功''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+    END
+END
+
+# ================= 後片付け =================
+# セッションを張れなかったときは QuitUrl が無いので投げない。
+IF SessionOk THEN
+Web.InvokeWebService.InvokeWebService Url: QuitUrl Method: Web.Method.Delete Accept: AppJson ContentType: AppJson EncodeRequestBody: False FailOnErrorStatus: False Response=> QuitResp StatusCode=> QuitStatus
+END
+System.TerminateProcess.TerminateProcessByName ProcessName: DriverProc
+IF Halt = False THEN
+    Display.ShowMessageDialog.ShowMessage Title: $'''完了''' Message: $'''成功 %OkCount% / 失敗 %NgCount% / スキップ %SkipCount%（上限 %MaxItems% 件）  結果CSV: %ResultFile%''' Icon: Display.Icon.Information Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn
+END
+IF Halt THEN
+    DateTime.GetCurrentDateTime.Local DateTimeFormat: DateTime.DateTimeFormat.DateAndTime CurrentDateTime=> HaltDt
+    Text.ConvertDateTimeToText.FromCustomDateTime DateTime: HaltDt CustomFormat: $'''yyyy/MM/dd HH:mm:ss''' Result=> HaltStamp
+    File.WriteText File: LogFile TextToWrite: $'''[%HaltStamp%] 中止 %HaltReason%''' AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8
+    Display.ShowMessageDialog.ShowMessage Title: $'''中止''' Message: $'''%HaltReason%のため、明細を1件も処理せず中止しました。詳細は pad_progress.log を確認してください。''' Icon: Display.Icon.Warning Buttons: Display.Buttons.OK DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn
+END

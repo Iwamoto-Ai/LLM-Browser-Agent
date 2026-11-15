@@ -150,8 +150,25 @@ check(out.robin.indexOf("SET StepWait TO 15") >= 0, "StepWait が入っていな
   check(/埋め込まれていません/.test(P.extractBatchFromRobin("SET X TO 1").reason), "埋め込み無しの理由が出ない");
 }
 
+// ---------------------------------------------------------------- 6. 埋め込みの無い Robin を読み解く
+{
+  const opt = { detailsPath: "C:\\temp\\d.csv", outDir: "C:\\temp", browser: "edge",
+                today: { y: 2026, m: 9, d: 1 } };
+  const bare = (b) => P.buildRobin(b, Object.assign({ idCol: (b.options || {}).idCol || "ID" }, opt))
+    .robin.split("\n# ---------- 元のバッチ定義")[0];
+  for (const f of ["examples/pad/pad_sample_batch.json", "recordings/edi2_practice_batch.json",
+                   "recordings/edi2_fetch_batch.json", "tests/fixtures/robin_parse_rich_batch.json"]) {
+    const r1 = bare(P.loadRecording(fs.readFileSync(f, "utf8")));
+    const got = P.robinToBatch(r1);
+    check(got.how === "parse" && got.batch, "読み解けない: " + f);
+    if (got.batch) { check(bare(got.batch) === r1, "読み解いたものから同じ Robin にならない: " + f); }
+  }
+  const none = P.robinToBatch("SET X TO 1");
+  check(!none.batch && /ではないようです/.test(none.notes[0]), "Robin でないものの理由が出ない");
+}
+
 if (errors.length) {
   console.log("NG  録画の下ごしらえ\n  " + errors.join("\n  "));
   process.exit(1);
 }
-console.log("OK  録画の下ごしらえ: 押せる要素の優先 / フォーカス外し / Win+Shift+S / 列の自動割り当て / バッチ定義の埋め込み");
+console.log("OK  録画の下ごしらえ: 押せる要素の優先 / フォーカス外し / Win+Shift+S / 列の自動割り当て / バッチ定義の埋め込み / Robin の読み解き");

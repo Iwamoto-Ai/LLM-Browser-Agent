@@ -68,7 +68,7 @@
   <div class="drop" id="drop">ここにドラッグ＆ドロップ、またはファイルを選択</div>
   <input type="file" id="batchFile" accept=".json,.txt">
   <div class="hint">録画 JSON・バッチ定義 JSON のほか、この変換器で作った Robin（.txt）も読める。
-     Robin の末尾に埋め込まれた元のバッチ定義を取り出す。</div>
+     Robin の末尾に埋め込まれた元のバッチ定義を取り出す。埋め込みの無い古い Robin は、中身を読み解いて組み立てる。</div>
   <div class="hint" id="batchInfo"></div>
 </fieldset>
 
@@ -1860,6 +1860,317 @@ function extractBatchFromRobin(text) {
   catch (e) { return { batch: null, reason: "埋め込みの中身が壊れています（JSON として読めません）" }; }
 }
 
+// ------------------------------------------------------------
+// Robin を読み解いてバッチ定義に組み立て直す（埋め込みの無い古い Robin 用）
+// pad_webdriver_ref.py の parse_robin と同じ結果になるように書く。
+// ------------------------------------------------------------
+var Q3 = "'''";
+var RX_ACT = /^SET ActBody TO \$'''(.*)'''$/;
+var RX_COL = /^SET Col(\d+) TO Row\['(.*)'\]$/;
+var RX_SET_STR = /^SET (\w+) TO \$'''(.*)'''$/;
+var RX_SET_NUM = /^SET (\w+) TO (\d+)$/;
+var RX_HINT = /「([^」]+)」が見える画面/;
+var RX_NOTE = /^# (?:\[\d+\] |復帰: |後処理: )?(?:click|fill) (.+)$/;
+var DEFAULT_SHOT = "@ID@__@KEY@__@STAMP@";
+
+// Robin の文字列リテラルの中身を元の文字列に戻す（\\ → \、\' → '）
+function robinUnstr(v) {
+  var out = "", i = 0;
+  while (i < v.length) {
+    if (v[i] === "\\" && i + 1 < v.length && (v[i + 1] === "\\" || v[i + 1] === "'")) {
+      out += v[i + 1];
+      i += 2;
+    } else {
+      out += v[i];
+      i += 1;
+    }
+  }
+  return out;
+}
+
+// SET ActBody の行から args（[候補, 操作, 値]）を取り出す。読めなければ null。
+function actArgs(line) {
+  var m = RX_ACT.exec(line);
+  if (!m) { return null; }
+  var raws = [m[1], robinUnstr(m[1])];
+  for (var k = 0; k < raws.length; k++) {
+    var args = null;
+    try {
+      var o = JSON.parse(raws[k]);
+      args = (o && typeof o === "object" && !Array.isArray(o)) ? o.args : null;
+    } catch (e) { continue; }
+    if (Array.isArray(args) && args.length >= 3 && Array.isArray(args[0])) { return args; }
+  }
+  return null;
+}
+
+// ActBody の候補は ID が先に並び替わっている。直前のコメントに録画の 1 番目の候補が
+// 残っているので、それを先頭に戻す。
+function firstFromNote(cands, note) {
+  var m = RX_NOTE.exec(note);
+  if (!m) { return cands; }
+  var head = m[1];
+  return [head].concat(cands.filter(function (c) { return c !== head; }));
+}
+
+function startsWith(s, p) { return s.indexOf(p) === 0; }
+
+// Robin を読み解いてバッチ定義を組み立てる。{ batch, notes }。読めなければ batch が null。
+function parseRobin(text) {
+  var lines = String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n")
+    .map(function (l) { return l.trim(); });
+  if (!lines.some(function (l) { return RX_ACT.test(l); })) {
+    return { batch: null, notes: ["この変換器で作った Robin ではないようです（操作の行が見つかりません）"] };
+  }
+  var notes = [];
+  var cols = {}, sets = {}, retry = false;
+  lines.forEach(function (ln) {
+    var m = RX_COL.exec(ln);
+    if (m) {
+      var n = parseInt(m[1], 10);
+      if (!Object.prototype.hasOwnProperty.call(cols, n)) { cols[n] = m[2]; }
+      return;
+    }
+    // 再実行モードの読み込み元・出力先は、普段の設定ではないので読まない
+    if (ln === "IF RetryMode THEN") { retry = true; }
+    else if (retry && ln === "END") { retry = false; }
+    if (retry) { return; }
+    m = RX_SET_STR.exec(ln) || RX_SET_NUM.exec(ln);
+    if (m && !Object.prototype.hasOwnProperty.call(sets, m[1])) { sets[m[1]] = m[2]; }
+  });
+  function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
+  function get(k) { return has(sets, k) ? sets[k] : ""; }
+  function isDigits(v) { return /^\d+$/.test(v); }
+  function unvar(v) {
+    return String(v).replace(/%Col(\d+)%/g, function (all, d) {
+      var n = parseInt(d, 10);
+      return has(cols, n) ? "{{" + cols[n] + "}}" : all;
+    });
+  }
+  function sels(cands) { return cands.map(function (c) { return [unvar(c)]; }); }
+  function actAt(i) {
+    var a = actArgs(lines[i]);
+    if (a && (a[1] === "click" || a[1] === "fill") && i > 0) {
+      a = [firstFromNote(a[0], lines[i - 1])].concat(a.slice(1));
+    }
+    return a;
+  }
+  function find(pred, start) {
+    for (var i = Math.max(start || 0, 0); i < lines.length; i++) { if (pred(lines[i])) { return i; } }
+    return -1;
+  }
+  function section(a0, a1) {
+    var out = [];
+    for (var i = a0; i < a1; i++) {
+      var ln = lines[i];
+      if (startsWith(ln, "# 💬 ")) { out.push({ type: "comment", text: unvar(ln.slice("# 💬 ".length)) }); continue; }
+      var a = actAt(i);
+      if (a && a[1] === "fill") { out.push({ type: "change", value: unvar(a[2]), selectors: sels(a[0]) }); }
+      else if (a && a[1] === "click") { out.push({ type: "click", selectors: sels(a[0]) }); }
+    }
+    return out;
+  }
+
+  var batch = {};
+  for (var t = 0; t < Math.min(40, lines.length); t++) {
+    if (startsWith(lines[t], "# タイトル:")) {
+      var title = lines[t].slice("# タイトル:".length).trim();
+      if (title) { batch.title = title; }
+      break;
+    }
+  }
+  var opts = {};
+  if (has(cols, 1)) { opts.idCol = cols[1]; }
+  if (get("Browser") === "edge" || get("Browser") === "chrome") { opts.browser = get("Browser"); }
+  var shot = robinUnstr(has(sets, "ShotNameFmt") ? sets.ShotNameFmt : DEFAULT_SHOT);
+  if (shot && shot !== DEFAULT_SHOT) { opts.shotName = shot; }
+  var df = robinUnstr(get("DetailsFile"));
+  if (df.slice(-"\\pad_result.csv".length) === "\\pad_result.csv") { opts.detailsFromResult = true; }
+  if (isDigits(get("StepWait")) && parseInt(get("StepWait"), 10) !== STEP_WAIT) {
+    opts.stepWait = parseInt(get("StepWait"), 10);
+  }
+  var jsHead = "";
+  for (var h = 0; h < lines.length; h++) { if (startsWith(lines[h], "SET JsAct TO $" + Q3)) { jsHead = lines[h]; break; } }
+  if (jsHead.indexOf("PREFER = false") >= 0) { opts.preferClickable = false; }
+  if (jsHead.indexOf("BLUR = false") >= 0) { opts.blurAfterFill = false; }
+
+  // ---- setup
+  var s0 = find(function (l) { return startsWith(l, "# ================= セットアップ"); });
+  var s1 = find(function (l) { return startsWith(l, "# ================= 明細（CSV）"); }, s0);
+  if (s1 < 0) { s1 = lines.length; }
+  var setup = [];
+  var url = robinUnstr(get("TargetUrl"));
+  var i, ln, a;
+  for (i = Math.max(s0, 0); i < s1; i++) {
+    ln = lines[i];
+    if (/^# \[\d+\] ウィンドウサイズ/.test(ln)) {
+      var vp = { type: "setViewport" };
+      if (isDigits(get("WinW"))) { vp.width = parseInt(get("WinW"), 10); }
+      if (isDigits(get("WinH"))) { vp.height = parseInt(get("WinH"), 10); }
+      setup.push(vp);
+    } else if (/^# \[\d+\] ページを開く/.test(ln)) {
+      setup.push({ type: "navigate", url: url });
+    }
+  }
+  var moving = false, origin = null;
+  for (i = Math.max(s0, 0); i < s1; i++) {
+    ln = lines[i];
+    if (startsWith(ln, "# ---------- 起点画面まで進む")) { moving = true; continue; }
+    a = actAt(i);
+    if (a && a[1] === "find") { moving = false; origin = a[0]; }
+    else if (a && moving && a[1] === "click") { setup.push({ type: "click", selectors: sels(a[0]) }); }
+  }
+  if (origin !== null) {
+    var derived = "";
+    for (var c = 0; c < origin.length; c++) {
+      if (startsWith(origin[c], "aria/") || startsWith(origin[c], "text/")) {
+        derived = origin[c].slice(origin[c].indexOf("/") + 1).split("[")[0].trim();
+        if (derived) { break; }
+      }
+    }
+    for (i = Math.max(s0, 0); i < s1; i++) {
+      var hm = RX_HINT.exec(lines[i]);
+      if (hm) {
+        if (hm[1] !== derived) { batch.originHint = hm[1]; }
+        break;
+      }
+    }
+  }
+  if (Object.keys(opts).length) { batch.options = opts; }
+  batch.setup = setup;
+
+  // ---- loop
+  var l0 = find(function (l) { return l.indexOf("%RowId% / %RowKey% 開始" + Q3) >= 0; });
+  var l1 = find(function (l) { return l === "# ここまで来たら成功"; }, l0);
+  var from = l0 >= 0 ? l0 + 1 : lines.length, to = l1 >= 0 ? l1 : lines.length;
+  var loop = [], pend = null, extra = {}, st;
+  var last = function () { return loop.length ? loop[loop.length - 1] : null; };
+  for (i = from; i < to; i++) {
+    ln = lines[i];
+    if (startsWith(ln, "# 💬 ")) {
+      loop.push({ type: "comment", text: unvar(ln.slice("# 💬 ".length)) });
+    } else if (startsWith(ln, "# エビデンス保存")) {
+      loop.push({ type: "screenshot" });
+    } else if (startsWith(ln, "# 一覧に検索欄が無い画面で")) {
+      pend = "scrollFind"; extra = {};
+    } else if (startsWith(ln, "# 画面に出た値を読み取って、結果 CSV の「")) {
+      pend = "capture"; extra = { name: ln.split("「").slice(1).join("「").split("」")[0] };
+    } else if (startsWith(ln, "# ダウンロードしたファイルをエビデンスにする")) {
+      pend = "download"; extra = {};
+    } else if (startsWith(ln, "# 完了確認。")) {
+      pend = "assertText"; extra = {};
+    } else if (startsWith(ln, "LOOP WHILE AstFound = False AND AstWaited < ") && pend === "assertText") {
+      extra.timeout = parseInt(ln.slice(ln.lastIndexOf("<") + 1).trim(), 10);
+    } else if (startsWith(ln, "LOOP WHILE SclFound = False AND SclTries < ") && pend === "scrollFind") {
+      extra.tries = parseInt(ln.slice(ln.lastIndexOf("<") + 1).trim(), 10);
+    } else if (startsWith(ln, "SET DlName TO $" + Q3) && last() && last().type === "download") {
+      var nm = unvar(robinUnstr(ln.slice(("SET DlName TO $" + Q3).length, -3)));
+      if (nm !== shot) { last().name = nm; }
+    } else {
+      a = actAt(i);
+      if (a === null) { continue; }
+      var cands = a[0], act = a[1], val = a[2];
+      if (pend === "scrollFind") {
+        if (act === "exists") {
+          loop.push({ type: "scrollFind", text: unvar(val), tries: has(extra, "tries") ? extra.tries : 20 });
+          pend = null; extra = {};
+        }
+        continue;
+      }
+      if (act === "scroll") { continue; }
+      if (pend === "capture") {
+        st = { type: "capture" };
+        if (cands.length) { st.selectors = sels(cands); }
+        if (act === "after" || act === "afterDigits") { st.key = unvar(val); }
+        st.name = has(extra, "name") ? extra.name : "取得値";
+        loop.push(st);
+      } else if (pend === "download") {
+        loop.push({ type: "download", selectors: sels(cands) });
+      } else if (pend === "assertText") {
+        st = { type: "assertText", text: unvar(val) };
+        if (extra.timeout) { st.timeout = extra.timeout; }
+        loop.push(st);
+      } else if (act === "fill") {
+        loop.push({ type: "change", value: unvar(val), selectors: sels(cands) });
+      } else if (act === "click") {
+        loop.push({ type: "click", selectors: sels(cands) });
+      } else {
+        notes.push("読めない操作を飛ばしました: " + act);
+      }
+      pend = null; extra = {};
+    }
+  }
+  // 数字だけにする capture（要素を指定するもの）は、目印の直後の 1 行で分かる
+  var ci = -1;
+  for (i = from; i < to; i++) {
+    ln = lines[i];
+    if (startsWith(ln, "# 画面に出た値を読み取って、結果 CSV の「")) {
+      ci += 1;
+    } else if (ln === "# 数字以外を落として番号だけにする" || (actArgs(ln) || [null, ""])[1] === "afterDigits") {
+      var caps = loop.filter(function (s) { return s.type === "capture"; });
+      if (ci >= 0 && ci < caps.length) { caps[ci].extract = "digits"; }
+    }
+  }
+  batch.loop = loop;
+  if (l0 < 0 || !loop.length) { notes.push("繰り返しの部分が見つかりませんでした"); }
+
+  // ---- recover
+  var r0 = find(function (l) { return l === "IF PrevFailed THEN"; });
+  var r1 = find(function (l) { return startsWith(l, "# 復帰の直後は画面が"); }, r0);
+  var recover = [];
+  if (r0 >= 0 && r1 >= 0) {
+    var auto = lines.slice(r0 + 1, r1).some(function (l) { return startsWith(l, "# batch に recover が無いので"); });
+    for (i = r0 + 1; i < r1; i++) {
+      if (startsWith(lines[i], "SET UrlBody TO")) {
+        if (!auto) { recover.push({ type: "navigate" }); }
+      } else {
+        recover = recover.concat(section(i, i + 1));
+      }
+    }
+  }
+  batch.recover = recover;
+
+  // ---- teardown
+  var t0 = find(function (l) { return startsWith(l, "# ================= 後処理（batch の teardown）"); });
+  if (t0 >= 0) {
+    var t1 = find(function (l) { return startsWith(l, "# ================= 後片付け"); }, t0);
+    var teardown = section(t0 + 1, t1 >= 0 ? t1 : lines.length);
+    if (teardown.length) { batch.teardown = teardown; }
+  }
+
+  var used = JSON.stringify(batch);
+  var lost = Object.keys(cols).map(function (k) { return parseInt(k, 10); })
+    .sort(function (x, y) { return x - y; })
+    .filter(function (n) { return n > 1 && used.indexOf("{{" + cols[n] + "}}") < 0; })
+    .map(function (n) { return cols[n]; });
+  if (lost.length) { notes.push("Robin の中で使われていない列は戻せません（動きは変わりません）: " + lost.join("、")); }
+  if (!setup.some(function (s) { return s.type === "setViewport"; }) && has(sets, "WinW") &&
+      (sets.WinW !== String(DEFAULT_WIN_W) || get("WinH") !== String(DEFAULT_WIN_H))) {
+    notes.push("ウィンドウサイズ " + sets.WinW + "×" + (has(sets, "WinH") ? sets.WinH : "None") +
+               " は録画ではなく変換時の指定です。同じにするには変換器でもう一度指定してください");
+  }
+  notes.push("件数上限・プロキシ・ドライバー・保存先などの運用の設定はバッチ定義に入りません。" +
+             "変換器でもう一度指定してください");
+  notes.push("ダブルクリックはクリックとして戻しています（Robin では同じ操作になるため）");
+  notes.push("setup の入力とコメントは Robin に入らないので戻せません");
+  notes.push("目印の候補は、変換のときに選び直したあとの形で戻っています");
+  return { batch: batch, notes: notes };
+}
+
+// Robin からバッチ定義を得る。埋め込みがあればそれを、無ければ読み解く。
+// { batch, how: "embed" | "parse" | "", notes }
+function robinToBatch(text) {
+  var got = extractBatchFromRobin(text);
+  if (got.batch) { return { batch: got.batch, how: "embed", notes: [] }; }
+  var p = parseRobin(text);
+  if (String(text).indexOf(PADBATCH_TAG) >= 0) {
+    if (!p.batch) { return { batch: null, how: "", notes: [got.reason].concat(p.notes) }; }
+    return { batch: p.batch, how: "parse", notes: [got.reason + "。代わりに Robin を読み解きました"].concat(p.notes) };
+  }
+  if (!p.batch) { return { batch: null, how: "", notes: p.notes }; }
+  return { batch: p.batch, how: "parse", notes: p.notes };
+}
+
 function buildRobin(batch, opt) {
   var detailsPath = opt.detailsPath;
   var idCol = opt.idCol;
@@ -2874,6 +3185,8 @@ root.PadConvert = {
   siteSettings: siteSettings,
   batchEmbedLines: batchEmbedLines,
   extractBatchFromRobin: extractBatchFromRobin,
+  parseRobin: parseRobin,
+  robinToBatch: robinToBatch,
   keyShotAfter: keyShotAfter,
   autoColumnAssign: autoColumnAssign,
   csvFirstRow: csvFirstRow,
@@ -3037,16 +3350,18 @@ root.PadConvert = {
     readFile(file, function (txt) {
       batchText = txt;
       $("batchInfo").textContent = "読み込み: " + batchName + "（" + txt.length + " 文字）";
-      var obj = null, err = "", fromRobin = false;
+      var obj = null, err = "", fromRobin = "", robinNotes = [];
       // この変換器で作った Robin なら、埋め込まれたバッチ定義を取り出して使う
       if (/\.txt$/i.test(batchName) || txt.indexOf("PADBATCH v1") >= 0) {
-        var got = PadConvert.extractBatchFromRobin(txt);
+        // 埋め込みが無い古い Robin は、中身を読み解いて組み立て直す
+        var got = PadConvert.robinToBatch(txt);
         if (got.batch) {
           obj = got.batch;
-          fromRobin = true;
+          fromRobin = got.how;
+          robinNotes = got.notes;
           batchText = JSON.stringify(got.batch, null, 2);
         } else {
-          err = got.reason + "（埋め込みは 2026/11 以降の変換器で作った Robin にだけ入っています）";
+          err = got.notes.join(" / ");
         }
       } else {
         try { obj = PadConvert.loadRecording(txt); }
@@ -3089,8 +3404,23 @@ root.PadConvert = {
         batchReady = true;          // 読み込んだ時点で変換できる
         renderAssign(recSteps.length);
         var applied = applyBatchOptions(obj);
-        show("ok", (fromRobin ? "Robin に埋め込まれたバッチ定義を取り出しました" :
-                                "バッチ定義 JSON として読み込みました") + "（loop " + n + " 手順）。" +
+        var how = fromRobin === "embed" ? "Robin に埋め込まれたバッチ定義を取り出しました" :
+                  fromRobin === "parse" ? "Robin を読み解いてバッチ定義を組み立てました" :
+                  "バッチ定義 JSON として読み込みました";
+        var noteHtml = "";
+        if (fromRobin === "parse") {
+          noteHtml = "<br><strong>バッチ定義が埋め込まれていない Robin です。</strong>" +
+            "読み解いた結果なので、次の点は元と違うことがあります。" +
+            "「バッチ定義を保存」で JSON にしておくと、次からはそれを使えます。<ul>" +
+            robinNotes.map(function (t) {
+              return "<li>" + t.split("&").join("&amp;").split("<").join("&lt;") + "</li>";
+            }).join("") + "</ul>";
+        }
+        if (fromRobin) {
+          // Robin から取り出したものは、すぐ JSON として残せるようにする
+          ["copyBatch", "saveBatch"].forEach(function (id) { $(id).disabled = false; });
+        }
+        show(fromRobin === "parse" ? "warn" : "ok", how + "（loop " + n + " 手順）。" + noteHtml +
              (applied ? "<br><strong>保存されていた設定を反映しました。</strong>" : "") +
              "そのまま「変換する」を押せます。<br>" +
              "振り分けを直す場合は、下の表を変えてから" +

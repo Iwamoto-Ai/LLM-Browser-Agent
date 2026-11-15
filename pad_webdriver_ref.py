@@ -1344,6 +1344,337 @@ def extract_batch_from_robin(text: str):
         return None, "埋め込みの中身が壊れています（JSON として読めません）"
 
 
+# ------------------------------------------------------------
+# Robin を読み解いてバッチ定義に組み立て直す（埋め込みの無い古い Robin 用）
+#
+# この変換器が書いた Robin は形が決まっているので、ステップの目印・操作・値を
+# 読み取れる。ただし変換のときに形が変わったもの（ダブルクリック、setup の入力、
+# コメントの {{SECRET}} など）は戻せない。戻せなかったものは notes に残す。
+# 確かめ方: バッチ定義 → Robin → 読み解き → Robin が、元の Robin と同じになること。
+# ------------------------------------------------------------
+_RX_ACT = re.compile(r"^SET ActBody TO \$'''(.*)'''$")
+_RX_COL = re.compile(r"^SET Col(\d+) TO Row\['(.*)'\]$")
+_RX_SET_STR = re.compile(r"^SET (\w+) TO \$'''(.*)'''$")
+_RX_SET_NUM = re.compile(r"^SET (\w+) TO (\d+)$")
+_RX_HINT = re.compile(r"「([^」]+)」が見える画面")
+_DEFAULT_SHOT = "@ID@__@KEY@__@STAMP@"
+_Q3 = "'" * 3
+
+
+def _robin_unstr(v: str) -> str:
+    """Robin の文字列リテラルの中身を元の文字列に戻す（\\\\ → \\、\\' → '）。"""
+    out, i = [], 0
+    while i < len(v):
+        if v[i] == "\\" and i + 1 < len(v) and v[i + 1] in "\\'":
+            out.append(v[i + 1])
+            i += 2
+        else:
+            out.append(v[i])
+            i += 1
+    return "".join(out)
+
+
+def _act_args(line: str):
+    """SET ActBody の行から args（[候補, 操作, 値]）を取り出す。読めなければ None。"""
+    m = _RX_ACT.match(line)
+    if not m:
+        return None
+    for raw in (m.group(1), _robin_unstr(m.group(1))):
+        try:
+            args = json.loads(raw).get("args")
+        except (ValueError, AttributeError):
+            continue
+        if isinstance(args, list) and len(args) >= 3 and isinstance(args[0], list):
+            return args
+    return None
+
+
+_RX_NOTE = re.compile(r"^# (?:\[\d+\] |復帰: |後処理: )?(?:click|fill) (.+)$")
+
+
+def _first_from_note(cands: list, note: str) -> list:
+    """ActBody の候補は ID が先に並び替わっている。直前のコメントには録画の
+    1 番目の候補が残っているので、それを先頭に戻す。"""
+    m = _RX_NOTE.match(note)
+    if not m:
+        return cands
+    head = m.group(1)
+    return [head] + [c for c in cands if c != head]
+
+
+def parse_robin(text: str):
+    """Robin を読み解いてバッチ定義を組み立てる。戻り値は (batch, notes)。
+
+    読み解けないときは batch が None。notes は「戻せなかったもの」などの説明。"""
+    lines = [ln.strip() for ln in str(text).replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    if not any(_RX_ACT.match(ln) for ln in lines):
+        return None, ["この変換器で作った Robin ではないようです（操作の行が見つかりません）"]
+    notes = []
+
+    cols, sets = {}, {}
+    retry = False
+    for ln in lines:
+        m = _RX_COL.match(ln)
+        if m:
+            cols.setdefault(int(m.group(1)), m.group(2))
+            continue
+        # 再実行モードの読み込み元・出力先は、普段の設定ではないので読まない
+        if ln == "IF RetryMode THEN":
+            retry = True
+        elif retry and ln == "END":
+            retry = False
+        if retry:
+            continue
+        m = _RX_SET_STR.match(ln) or _RX_SET_NUM.match(ln)
+        if m and m.group(1) not in sets:
+            sets[m.group(1)] = m.group(2)
+
+    def unvar(v):
+        return re.sub(r"%Col(\d+)%",
+                      lambda m: "{{" + cols[int(m.group(1))] + "}}"
+                      if int(m.group(1)) in cols else m.group(0), str(v))
+
+    def sels(cands):
+        return [[unvar(c)] for c in cands]
+
+    def act_at(i):
+        """i 行目の操作。目印の候補は直前のコメントで録画の並びに戻す。"""
+        a = _act_args(lines[i])
+        if a and a[1] in ("click", "fill") and i > 0:
+            a = [_first_from_note(a[0], lines[i - 1])] + a[1:]
+        return a
+
+    def find(pred, start=0):
+        for i in range(max(start, 0), len(lines)):
+            if pred(lines[i]):
+                return i
+        return -1
+
+    def section(a0, a1):
+        """recover / teardown の、壊れても止めない操作を読む。"""
+        out = []
+        for i in range(a0, a1):
+            ln = lines[i]
+            if ln.startswith("# 💬 "):
+                out.append({"type": "comment", "text": unvar(ln[len("# 💬 "):])})
+                continue
+            a = act_at(i)
+            if a and a[1] == "fill":
+                out.append({"type": "change", "value": unvar(a[2]), "selectors": sels(a[0])})
+            elif a and a[1] == "click":
+                out.append({"type": "click", "selectors": sels(a[0])})
+        return out
+
+    batch = {}
+    for ln in lines[:40]:
+        if ln.startswith("# タイトル:"):
+            title = ln[len("# タイトル:"):].strip()
+            if title:
+                batch["title"] = title
+            break
+
+    opts = {}
+    if 1 in cols:
+        opts["idCol"] = cols[1]
+    if sets.get("Browser") in ("edge", "chrome"):
+        opts["browser"] = sets["Browser"]
+    shot = _robin_unstr(sets.get("ShotNameFmt", _DEFAULT_SHOT))
+    if shot and shot != _DEFAULT_SHOT:
+        opts["shotName"] = shot
+    if _robin_unstr(sets.get("DetailsFile", "")).endswith("\\pad_result.csv"):
+        opts["detailsFromResult"] = True
+    if sets.get("StepWait", "").isdigit() and int(sets["StepWait"]) != STEP_WAIT:
+        opts["stepWait"] = int(sets["StepWait"])
+    js_head = next((ln for ln in lines if ln.startswith("SET JsAct TO $" + _Q3)), "")
+    if "PREFER = false" in js_head:
+        opts["preferClickable"] = False
+    if "BLUR = false" in js_head:
+        opts["blurAfterFill"] = False
+
+    # ---- setup
+    s0 = find(lambda ln: ln.startswith("# ================= セットアップ"))
+    s1 = find(lambda ln: ln.startswith("# ================= 明細（CSV）"), s0)
+    s1 = s1 if s1 >= 0 else len(lines)
+    setup = []
+    url = _robin_unstr(sets.get("TargetUrl", ""))
+    for i in range(max(s0, 0), s1):
+        ln = lines[i]
+        if re.match(r"^# \[\d+\] ウィンドウサイズ", ln):
+            vp = {"type": "setViewport"}
+            if sets.get("WinW", "").isdigit():
+                vp["width"] = int(sets["WinW"])
+            if sets.get("WinH", "").isdigit():
+                vp["height"] = int(sets["WinH"])
+            setup.append(vp)
+        elif re.match(r"^# \[\d+\] ページを開く", ln):
+            setup.append({"type": "navigate", "url": url})
+    moving = False
+    origin = None
+    for i in range(max(s0, 0), s1):
+        ln = lines[i]
+        if ln.startswith("# ---------- 起点画面まで進む"):
+            moving = True
+            continue
+        a = act_at(i)
+        if a and a[1] == "find":
+            moving = False
+            origin = a[0]
+        elif a and moving and a[1] == "click":
+            setup.append({"type": "click", "selectors": sels(a[0])})
+    if origin is not None:
+        derived = ""
+        for c in origin:
+            if c.startswith(("aria/", "text/")):
+                derived = c.split("/", 1)[1].split("[")[0].strip()
+                if derived:
+                    break
+        for ln in lines[max(s0, 0):s1]:
+            m = _RX_HINT.search(ln)
+            if m:
+                if m.group(1) != derived:
+                    batch["originHint"] = m.group(1)
+                break
+    if opts:
+        batch["options"] = opts
+    batch["setup"] = setup
+
+    # ---- loop
+    l0 = find(lambda ln: ("%RowId% / %RowKey% 開始" + _Q3) in ln)
+    l1 = find(lambda ln: ln == "# ここまで来たら成功", l0)
+    loop = []
+    pend, extra = None, {}
+    for i in range(l0 + 1 if l0 >= 0 else len(lines), l1 if l1 >= 0 else len(lines)):
+        ln = lines[i]
+        if ln.startswith("# 💬 "):
+            loop.append({"type": "comment", "text": unvar(ln[len("# 💬 "):])})
+        elif ln.startswith("# エビデンス保存"):
+            loop.append({"type": "screenshot"})
+        elif ln.startswith("# 一覧に検索欄が無い画面で"):
+            pend, extra = "scrollFind", {}
+        elif ln.startswith("# 画面に出た値を読み取って、結果 CSV の「"):
+            pend, extra = "capture", {"name": ln.split("「", 1)[1].split("」", 1)[0]}
+        elif ln.startswith("# ダウンロードしたファイルをエビデンスにする"):
+            pend, extra = "download", {}
+        elif ln.startswith("# 完了確認。"):
+            pend, extra = "assertText", {}
+        elif ln.startswith("LOOP WHILE AstFound = False AND AstWaited < ") and pend == "assertText":
+            extra["timeout"] = int(ln.rsplit("<", 1)[1])
+        elif ln.startswith("LOOP WHILE SclFound = False AND SclTries < ") and pend == "scrollFind":
+            extra["tries"] = int(ln.rsplit("<", 1)[1])
+        elif ln.startswith("SET DlName TO $" + _Q3) and loop and loop[-1]["type"] == "download":
+            nm = unvar(_robin_unstr(ln[len("SET DlName TO $" + _Q3):-3]))
+            if nm != shot:
+                loop[-1]["name"] = nm
+        else:
+            a = act_at(i)
+            if a is None:
+                continue
+            cands, act, val = a[0], a[1], a[2]
+            if pend == "scrollFind":
+                if act == "exists":
+                    loop.append({"type": "scrollFind", "text": unvar(val),
+                                 "tries": extra.get("tries", 20)})
+                    pend, extra = None, {}
+                continue
+            if act == "scroll":
+                continue
+            if pend == "capture":
+                st = {"type": "capture"}
+                if cands:
+                    st["selectors"] = sels(cands)
+                if act in ("after", "afterDigits"):
+                    st["key"] = unvar(val)
+                st["name"] = extra.get("name", "取得値")
+                loop.append(st)
+            elif pend == "download":
+                loop.append({"type": "download", "selectors": sels(cands)})
+            elif pend == "assertText":
+                st = {"type": "assertText", "text": unvar(val)}
+                if extra.get("timeout"):
+                    st["timeout"] = extra["timeout"]
+                loop.append(st)
+            elif act == "fill":
+                loop.append({"type": "change", "value": unvar(val), "selectors": sels(cands)})
+            elif act == "click":
+                loop.append({"type": "click", "selectors": sels(cands)})
+            else:
+                notes.append(f"読めない操作を飛ばしました: {act}")
+            pend, extra = None, {}
+    # 数字だけにする capture（要素を指定するもの）は、目印の直後の 1 行で分かる
+    ci = -1
+    for i in range(l0 + 1 if l0 >= 0 else len(lines), l1 if l1 >= 0 else len(lines)):
+        ln = lines[i]
+        if ln.startswith("# 画面に出た値を読み取って、結果 CSV の「"):
+            ci += 1
+        elif ln == "# 数字以外を落として番号だけにする" or \
+                (_act_args(ln) or [None, ""])[1] == "afterDigits":
+            caps = [s for s in loop if s["type"] == "capture"]
+            if 0 <= ci < len(caps):
+                caps[ci]["extract"] = "digits"
+    batch["loop"] = loop
+    if l0 < 0 or not loop:
+        notes.append("繰り返しの部分が見つかりませんでした")
+
+    # ---- recover（失敗した次の件の前に起点へ戻る）
+    r0 = find(lambda ln: ln == "IF PrevFailed THEN")
+    r1 = find(lambda ln: ln.startswith("# 復帰の直後は画面が"), r0)
+    recover = []
+    if r0 >= 0 and r1 >= 0:
+        auto = any(ln.startswith("# batch に recover が無いので") for ln in lines[r0 + 1:r1])
+        for i in range(r0 + 1, r1):
+            if lines[i].startswith("SET UrlBody TO"):
+                if not auto:
+                    recover.append({"type": "navigate"})
+            else:
+                recover.extend(section(i, i + 1))
+    batch["recover"] = recover
+
+    # ---- teardown
+    t0 = find(lambda ln: ln.startswith("# ================= 後処理（batch の teardown）"))
+    if t0 >= 0:
+        t1 = find(lambda ln: ln.startswith("# ================= 後片付け"), t0)
+        teardown = section(t0 + 1, t1 if t1 >= 0 else len(lines))
+        if teardown:
+            batch["teardown"] = teardown
+
+    used = json.dumps(batch, ensure_ascii=False)
+    lost = [c for n, c in sorted(cols.items()) if n > 1 and "{{" + c + "}}" not in used]
+    if lost:
+        notes.append("Robin の中で使われていない列は戻せません（動きは変わりません）: " + "、".join(lost))
+    if not any(st["type"] == "setViewport" for st in setup) and "WinW" in sets and \
+            (sets.get("WinW"), sets.get("WinH")) != (str(DEFAULT_WIN_W), str(DEFAULT_WIN_H)):
+        notes.append(f"ウィンドウサイズ {sets.get('WinW')}×{sets.get('WinH')} は録画ではなく変換時の"
+                     "指定です。同じにするには変換器でもう一度指定してください")
+    notes.extend([
+        "件数上限・プロキシ・ドライバー・保存先などの運用の設定はバッチ定義に入りません。"
+        "変換器でもう一度指定してください",
+        "ダブルクリックはクリックとして戻しています（Robin では同じ操作になるため）",
+        "setup の入力とコメントは Robin に入らないので戻せません",
+        "目印の候補は、変換のときに選び直したあとの形で戻っています",
+    ])
+    return batch, notes
+
+
+def robin_to_batch(text: str):
+    """Robin からバッチ定義を得る。埋め込みがあればそれを、無ければ読み解く。
+
+    戻り値は (batch, how, notes)。how は "embed"（埋め込み）/ "parse"（読み解き）/
+    ""（どちらもできなかった）。"""
+    got, why = extract_batch_from_robin(text)
+    if got is not None:
+        return got, "embed", []
+    if "PADBATCH v1" in text:
+        # 埋め込みはあるが壊れている。読み解きで代わりに組み立てる
+        batch, notes = parse_robin(text)
+        if batch is None:
+            return None, "", [why] + notes
+        return batch, "parse", [why + "。代わりに Robin を読み解きました"] + notes
+    batch, notes = parse_robin(text)
+    if batch is None:
+        return None, "", notes
+    return batch, "parse", notes
+
+
 def write_robin(batch: dict, details_path: str, id_col: str, path: str,
                 shot_name: str = "@ID@__@KEY@__@STAMP@",
                 download_dir: str = "",
@@ -2549,7 +2880,8 @@ def main() -> None:
     p.add_argument("--batch", help="バッチ定義 JSON")
     p.add_argument("--details", help="明細 CSV / xlsx")
     p.add_argument("--from-robin", default="",
-                   help="この変換器で作った Robin から、埋め込まれたバッチ定義を取り出す")
+                   help="この変換器で作った Robin から、埋め込まれたバッチ定義を取り出す"
+                        "（埋め込みが無い古い Robin は読み解いて組み立てる）")
     p.add_argument("--save-batch", default="",
                    help="--from-robin で取り出したバッチ定義の保存先（既定: Robin と同じ名前の .batch.json）")
     p.add_argument("--values", help="共通値 JSON（任意）")
@@ -2613,14 +2945,20 @@ def main() -> None:
 
     if args.from_robin:
         with open(args.from_robin, encoding="utf-8-sig") as f:
-            got, why = extract_batch_from_robin(f.read())
+            got, how, notes = robin_to_batch(f.read())
         if got is None:
-            p.error(f"{args.from_robin}: {why}")
+            p.error(f"{args.from_robin}: " + " / ".join(notes))
         out = args.save_batch or re.sub(r"(\.robin)?\.txt$", "", args.from_robin) + ".batch.json"
         with open(out, "w", encoding="utf-8") as f:
             json.dump(got, f, ensure_ascii=False, indent=2)
             f.write("\n")
-        print(f"📄 バッチ定義を取り出しました: {os.path.abspath(out)}")
+        if how == "embed":
+            print(f"📄 バッチ定義を取り出しました: {os.path.abspath(out)}")
+        else:
+            print(f"📄 バッチ定義が埋め込まれていないので、Robin を読み解いて組み立てました: "
+                  f"{os.path.abspath(out)}")
+            for n in notes:
+                print(f"  ・{n}")
         return
     if not args.batch or not args.details:
         p.error("--batch と --details が必要です（Robin から取り出すときは --from-robin）")
