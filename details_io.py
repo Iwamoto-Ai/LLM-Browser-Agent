@@ -33,7 +33,8 @@ def load_details(path: str) -> tuple[list[str], list[dict]]:
             sys.exit(".xlsx を直接読むには openpyxl が必要です: pip install openpyxl\n"
                      "（または Excel で『CSV UTF-8』として保存し、その CSV を指定してください）")
         wb = openpyxl.load_workbook(path, data_only=True)
-        ws = wb.worksheets[0]
+        # 「明細」シートがあればそれ（PAD 版の Robin が読むシート）、無ければ先頭のシート
+        ws = wb["明細"] if "明細" in wb.sheetnames else wb.worksheets[0]
         it = ws.iter_rows(values_only=True)
         headers = [_cell_to_str(h) for h in next(it)]
         rows = []

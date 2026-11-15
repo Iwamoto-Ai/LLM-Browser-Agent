@@ -1247,7 +1247,8 @@ def _lint_robin(lines: list, log=print) -> list:
                         f"{i}行: {ns}.{val} は実機で未確認の列挙値です。"
                         f"確認済み: {'/'.join(sorted(ok))}")
         for lit in re.findall(r"\$'''(.*?)'''", s):
-            body = lit.replace("\\'", "")
+            # %''% は PAD の「空の文字」の式（実機の Robin がこの形）なので除く
+            body = lit.replace("\\'", "").replace("%''%", "")
             if "'" in body:
                 warns.append(f"{i}行: リテラル内の単引用符が未エスケープです（\\' にする）: {s[:80]}")
         # JSON 本文に生の二重引用符が混ざっていないか。
@@ -1655,6 +1656,130 @@ def parse_robin(text: str):
     return batch, notes
 
 
+# ------------------------------------------------------------
+# 明細を Excel（.xlsx）で受け取る
+#
+# PAD の Excel アクションの書き方は、実機（Power Fx 無効のフロー）で写したもの。
+# 値は TypedValues（中身の型のまま）で読む。PlainText だと 900000000001 が
+# 9E+11 になる。日付は「2026/09/01 0:00:00」で来るので、後ろの時刻を落とす。
+# ------------------------------------------------------------
+DETAILS_SHEET = "明細"
+
+
+def details_is_xlsx(path: str) -> bool:
+    """明細ファイルが Excel か（拡張子で見る）。"""
+    return str(path or "").lower().endswith((".xlsx", ".xlsm"))
+
+
+def _robin_on_error(ind: str, var: str) -> list:
+    """直前のアクションが失敗しても止めず、var を True にして次へ進む。"""
+    return [f"{ind}ON ERROR", f"{ind}    SET {var} TO True", f"{ind}END"]
+
+
+def _robin_read_xlsx(ind: str, csv_read: str) -> list:
+    """明細を Excel から読む（再実行のときは結果 CSV なので CSV のまま）。"""
+    i2, i3 = ind + "    ", ind + "        "
+    out = [
+        f"{ind}IF DetailsXlsx THEN",
+        f"{i2}# 「{DETAILS_SHEET}」シートの 1 行目を列名として、すべての値を読む。",
+        f"{i2}# 読み取り専用で開くので、誰かがこのファイルを開いていても読める。",
+        f"{i2}SET XlsErr TO False",
+        f"{i2}Excel.LaunchExcel.LaunchAndOpenUnderExistingProcess Path: DetailsFile "
+        "Visible: False ReadOnly: True UseMachineLocale: False Instance=> DetailsExcel",
+    ]
+    out += _robin_on_error(i2, "XlsErr")
+    out += [
+        f"{i2}IF XlsErr THEN",
+        f"{i3}SET Halt TO True",
+        f"{i3}SET HaltReason TO {_robin_str('明細ファイル（%DetailsFile%）を開けなかった')}",
+        f"{i2}ELSE",
+        f"{i3}Excel.SetActiveWorksheet.ActivateWorksheetByName Instance: DetailsExcel "
+        f"Name: {_robin_str(DETAILS_SHEET)}",
+    ]
+    out += _robin_on_error(i3, "XlsErr")
+    out += [
+        f"{i3}IF XlsErr THEN",
+        f"{i3}    SET Halt TO True",
+        f"{i3}    SET HaltReason TO "
+        f"{_robin_str('明細ファイルに「' + DETAILS_SHEET + '」シートが無い')}",
+        f"{i3}ELSE",
+        f"{i3}    # 中身の型のまま読む（文字で読むと 900000000001 が 9E+11 になる）",
+        f"{i3}    Excel.ReadFromExcel.ReadAllCells Instance: DetailsExcel "
+        "GetCellContentsMode: Excel.GetCellContentsMode.TypedValues "
+        "FirstLineIsHeader: True RangeValue=> Rows",
+        f"{i3}END",
+        f"{i3}Excel.CloseExcel.Close Instance: DetailsExcel",
+        f"{i2}END",
+        f"{ind}ELSE",
+        f"{i2}{csv_read}",
+        f"{ind}END",
+    ]
+    return out
+
+
+def _robin_xlsx_untime(ncols: int, ind: str) -> list:
+    """Excel の日付は「2026/09/01 0:00:00」で来るので、後ろの時刻を落とす。"""
+    out = [f"{ind}# Excel の日付は時刻付きで来るので、後ろの「 0:00:00」を落とす"]
+    for i in range(1, ncols + 1):
+        out.append(f"{ind}Text.Replace.ReplaceText Text: Col{i} "
+                   f"TextToFind: {_robin_str(' 0:00:00')} IgnoreCase: False "
+                   "ReplaceWith: $\'\'\'%\'\'%\'\'\' ActivateEscapeSequences: False "
+                   f"ComparisonType: Text.TextComparisonType.Ordinal Result=> Col{i}")
+    out += [f"{ind}# Excel では、中身を消しただけの行も読まれる。ID が空の行は飛ばす",
+            f"{ind}IF Col1 = $\'\'\'\'\'\' THEN",
+            f"{ind}    NEXT LOOP",
+            f"{ind}END"]
+    return out
+
+
+def _robin_result_xlsx(ncols: int) -> list:
+    """結果 CSV から、見る用の xlsx を作る。名前に日時を付けて、前回の分を
+    開いたままでも保存できるようにする。値は ' を付けて文字のまま書く。"""
+    out = [
+        "# ================= 結果を Excel にする =================",
+        "# 結果 CSV から、見る用の pad_result_日時.xlsx を作る（CSV はそのまま残る）。",
+        "# 値の先頭に ' を付けて文字のまま書く。付けないと 900000000001 が 9E+11 に、",
+        "# 0012 が 12 になる。作れなかったときも CSV は使える。",
+        "SET XlsNote TO $\'\'\'\'\'\'",
+        "IF Halt = False THEN",
+        "    DateTime.GetCurrentDateTime.Local "
+        "DateTimeFormat: DateTime.DateTimeFormat.DateAndTime CurrentDateTime=> XlsDt",
+        f"    Text.ConvertDateTimeToText.FromCustomDateTime DateTime: XlsDt "
+        f"CustomFormat: {_robin_str('yyyyMMdd_HHmmss')} Result=> XlsStamp",
+        "    SET ResultXlsx TO $\'\'\'%BaseDir%\\\\pad_result_%XlsStamp%.xlsx\'\'\'",
+        "    File.ReadFromCSVFile.ReadCSV CSVFile: ResultFile "
+        "Encoding: File.CSVEncoding.UTF8 TrimFields: False "
+        "FirstLineContainsColumnNames: False "
+        "ColumnsSeparator: File.CSVColumnsSeparator.Comma CSVTable=> ResRows",
+        "    SET XlsErr TO False",
+        "    Excel.LaunchExcel.LaunchUnderExistingProcess Visible: False "
+        "UseMachineLocale: False Instance=> ResExcel",
+        "    SET ResR TO 0",
+        "    LOOP FOREACH ResRow IN ResRows",
+        "        SET ResR TO ResR + 1",
+    ]
+    for c in range(ncols):
+        out.append(f"        Excel.WriteToExcel.WriteCell Instance: ResExcel "
+                   f"Value: $\'\'\'\\\'%ResRow[{c}]%\'\'\' Column: {c + 1} Row: ResR")
+    out += [
+        "    END",
+        "    Excel.CloseExcel.CloseAndSaveAs Instance: ResExcel "
+        "DocumentFormat: Excel.ExcelFormat.OpenXmlWorkbook DocumentPath: ResultXlsx",
+    ]
+    out += _robin_on_error("    ", "XlsErr")
+    out += [
+        "    IF XlsErr THEN",
+        "        Excel.CloseExcel.Close Instance: ResExcel",
+        "        SET XlsNote TO $\'\'\'  （結果の Excel は作れませんでした。CSV を使ってください）\'\'\'",
+        "    ELSE",
+        "        SET XlsNote TO $\'\'\'  結果Excel: %ResultXlsx%\'\'\'",
+        "    END",
+        "END",
+        "",
+    ]
+    return out
+
+
 def robin_to_batch(text: str):
     """Robin からバッチ定義を得る。埋め込みがあればそれを、無ければ読み解く。
 
@@ -1754,6 +1879,9 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     _dl_dir, _dl_json = _download_dir(out_dir, download_dir)
     # 画面から読み取る値。結果 CSV の列になり、次のバッチの明細に渡せる。
     caps = _capture_names(batch)
+    # 明細が Excel（.xlsx）なら、PAD の Excel アクションで「明細」シートを読み、
+    # 最後に結果 CSV から見る用の xlsx を作る。前のバッチの結果を読むときは CSV。
+    xlsx = details_is_xlsx(details_path) and not details_from_result
     _cap_blank = "," * len(caps)
     _cap_vals = "".join(f",%Cap{i + 1}%" for i in range(len(caps)))
     _mkeys = " ／ ".join(cols[1:]) if len(cols) > 1 else "なし"
@@ -1844,10 +1972,6 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("SET ShowDriverInfo TO True")
     A("# 失敗分だけを再実行するとき True（読み込み元と出力先が自動で切り替わる）")
     A("SET RetryMode TO False")
-    A("IF RetryMode THEN")
-    A("    SET DetailsFile TO $'''%BaseDir%\\\\pad_result.csv'''")
-    A("    SET ResultFile TO $'''%BaseDir%\\\\pad_result_retry.csv'''")
-    A("END")
     A("")
     # ファイル名はブラウザーで決まる。置き場所（フォルダ）は両方で共通。
     _edge = _robin_under_base(drv_dir + "\\msedgedriver.exe", out_dir)
@@ -1871,6 +1995,19 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     else:
         A(f"SET DetailsFile TO {_robin_under_base(details_path, out_dir)}")
         A("SET ResultFile TO $'''%BaseDir%\\\\pad_result.csv'''")
+    # 再実行の切り替えは、普段の読み込み元・出力先を決めた**あと**に置く。
+    # 前に置くと、すぐ下の SET で普段の明細に戻ってしまい、再実行にならない。
+    if xlsx:
+        A("# 明細は Excel。「明細」シートの 1 行目を列名として読む")
+        A("SET DetailsXlsx TO True")
+    _res = "pad_result_2" if details_from_result else "pad_result"
+    A("# 失敗分の再実行では、この結果 CSV を明細として読み直す（出力先は別名）")
+    A("IF RetryMode THEN")
+    A(f"    SET DetailsFile TO $'''%BaseDir%\\\\{_res}.csv'''")
+    A(f"    SET ResultFile TO $'''%BaseDir%\\\\{_res}_retry.csv'''")
+    if xlsx:
+        A("    SET DetailsXlsx TO False")
+    A("END")
     A("SET LogFile TO $'''%BaseDir%\\\\pad_progress.log'''")
     A("# ブラウザーのウィンドウサイズ。**エビデンスに写る範囲はここで決まる。**")
     A("# 複数の PC に配布する場合は、一番小さい画面に収まる値にそろえること。")
@@ -2397,10 +2534,17 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("")
     A("# ================= 明細（CSV）を読み込む =================")
     A("IF Halt = False THEN")
-    A("    File.ReadFromCSVFile.ReadCSV CSVFile: DetailsFile "
-      "Encoding: File.CSVEncoding.UTF8 TrimFields: True "
-      "FirstLineContainsColumnNames: True "
-      "ColumnsSeparator: File.CSVColumnsSeparator.Comma CSVTable=> Rows")
+    _csv_read = ("File.ReadFromCSVFile.ReadCSV CSVFile: DetailsFile "
+                 "Encoding: File.CSVEncoding.UTF8 TrimFields: True "
+                 "FirstLineContainsColumnNames: True "
+                 "ColumnsSeparator: File.CSVColumnsSeparator.Comma CSVTable=> Rows")
+    if xlsx:
+        L.extend(_robin_read_xlsx("    ", _csv_read))
+        # 読めなかったら Halt。ここで一度閉じて、続きは Halt でないときだけ
+        A("END")
+        A("IF Halt = False THEN")
+    else:
+        A("    " + _csv_read)
     A("    # 結果 CSV は、そのまま明細として読み直せる列構成にする。")
     A("    # ID だけでなく業務キーも入れないと、再実行で対象を特定できない。")
     key_head = cols[1] if len(cols) > 1 else "業務キー"
@@ -2623,6 +2767,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
                     f"後処理: {act} {cands[0] if cands else ''}", cols))
         A("")
 
+    if xlsx:
+        L.extend(_robin_result_xlsx(6 + len(caps)))
     A("# ================= 後片付け =================")
     A("# セッションを張れなかったときは QuitUrl が無いので投げない。")
     A("IF SessionOk THEN")
@@ -2632,7 +2778,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("IF Halt = False THEN")
     A("    Display.ShowMessageDialog.ShowMessage Title: $'''完了''' "
       "Message: $'''成功 %OkCount% / 失敗 %NgCount% / スキップ %SkipCount%"
-      "（上限 %MaxItems% 件）  結果CSV: %ResultFile%''' "
+      "（上限 %MaxItems% 件）  結果CSV: %ResultFile%" +
+      ("%XlsNote%" if xlsx else "") + "''' "
       "Icon: Display.Icon.Information Buttons: Display.Buttons.OK "
       "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn")
     A("END")
@@ -2656,6 +2803,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     colvars = "\n".join(
         f"        SET Col{i + 1} TO Row['{c}']" for i, c in enumerate(cols)
     )
+    if xlsx:
+        colvars += "\n" + "\n".join(_robin_xlsx_untime(len(cols), "        "))
     body = "\n".join(L).replace("@@COLVARS@@", colvars) + "\n" + "\n".join(embed)
     warns = _lint_robin(body.split("\n"))
     if warns:
@@ -2966,7 +3115,18 @@ def main() -> None:
     batch = load_recording(args.batch)
     common = load_recording(args.values) if args.values else {}
     # Robin 生成のみの場合、--details は「会社 PC 側のパス」でよく、手元に実体が無くてよい
-    if args.robin and not os.path.exists(args.details):
+    # Excel の明細を読むには openpyxl が要る。Robin を作るだけなら中身は列名の確認にしか
+    # 使わないので、無ければ確認を飛ばす（Excel を読むのは PAD の側）。
+    _no_xlsx_reader = False
+    if details_is_xlsx(args.details) and os.path.exists(args.details):
+        try:
+            import openpyxl  # noqa: F401
+        except ImportError:
+            _no_xlsx_reader = True
+    if args.robin and (not os.path.exists(args.details) or _no_xlsx_reader):
+        if _no_xlsx_reader:
+            print("  ⚠ openpyxl が無いので、明細（Excel）の列名は確かめずに Robin を作ります"
+                  "（pip install openpyxl で確かめられます）")
         headers, rows = [args.id_column or "ID"], []
     else:
         headers, rows = load_details(args.details)

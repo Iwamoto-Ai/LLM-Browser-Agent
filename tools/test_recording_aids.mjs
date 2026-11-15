@@ -8,8 +8,11 @@
 //
 // 3・4 は、実際の納入登録の録画（番号はダミーに置換済み）を手を加えずに通す。
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import vm from "node:vm";
 import { JSDOM } from "jsdom";
+import zlib from "node:zlib";
 
 const html = fs.readFileSync("tools/pad_converter.html", "utf8");
 const core = html.match(/<script id="pad-core">([\s\S]*?)<\/script>/)[1];
@@ -167,8 +170,36 @@ check(out.robin.indexOf("SET StepWait TO 15") >= 0, "StepWait が入っていな
   check(!none.batch && /ではないようです/.test(none.notes[0]), "Robin でないものの理由が出ない");
 }
 
+// ---------------------------------------------------------------- 7. 明細を Excel で受け取る
+{
+  const inflate = (u8) => new Uint8Array(zlib.inflateRawSync(u8));
+  // Excel（ここでは openpyxl）で作った明細。「明細」シートを選び、番号・日付・先頭 0 を崩さない
+  const x = await P.readXlsxDetails(new Uint8Array(fs.readFileSync("tests/fixtures/details_sample.xlsx")), inflate);
+  check(x.sheet === "明細" && x.sheetFound, "「明細」シートを選んでいない: " + x.sheet);
+  check(JSON.stringify(x.headers) === JSON.stringify(["プロジェクト番号", "発注番号", "納入日", "コード", "skip"]),
+        "Excel の列名が違う: " + JSON.stringify(x.headers));
+  check(JSON.stringify(x.firstRow) === JSON.stringify(["PM9000000001", "900000000001", "2026/09/01", "0012", ""]),
+        "Excel の 1 件目が違う: " + JSON.stringify(x.firstRow));
+  // テンプレートは「明細」シート・列名だけ。読み直すと同じ列名
+  const cols = P.detailsTemplateColumns(["番号", "発注 & <名>"], false);
+  check(cols[cols.length - 1] === "skip", "テンプレートに skip 列が無い");
+  check(P.detailsTemplateColumns(["番号"], true).indexOf("skip") < 0, "前の結果を読むバッチに skip 列を足した");
+  const t = await P.readXlsxDetails(P.xlsxTemplate(cols), inflate);
+  check(t.sheetFound && JSON.stringify(t.headers) === JSON.stringify(cols), "テンプレートを読み直せない");
+  fs.writeFileSync(path.join(os.tmpdir(), "pad_template_check.xlsx"), P.xlsxTemplate(cols));
+  // Excel の明細なら Robin に Excel の読み込みが入り、CSV なら入らない
+  const b = P.loadRecording(fs.readFileSync("tests/fixtures/robin_parse_rich_batch.json", "utf8"));
+  const o = { idCol: "番号", outDir: "C:\\temp", browser: "edge", today: { y: 2026, m: 9, d: 1 } };
+  const rx = P.buildRobin(b, Object.assign({ detailsPath: "C:\\temp\\d.xlsx" }, o));
+  const rc = P.buildRobin(b, Object.assign({ detailsPath: "C:\\temp\\d.csv" }, o));
+  check(rx.robin.indexOf("Excel.ReadFromExcel.ReadAllCells") >= 0, "xlsx なのに Excel で読んでいない");
+  check(rc.robin.indexOf("Excel.") < 0, "CSV なのに Excel のアクションが入った");
+  check(rx.warns.length === rc.warns.length, "Excel の部分で警告が出る: " + rx.warns.join(" / "));
+  check(JSON.stringify(rx.columns) === JSON.stringify(["番号", "発注"]), "変換結果の列が違う: " + JSON.stringify(rx.columns));
+}
+
 if (errors.length) {
   console.log("NG  録画の下ごしらえ\n  " + errors.join("\n  "));
   process.exit(1);
 }
-console.log("OK  録画の下ごしらえ: 押せる要素の優先 / フォーカス外し / Win+Shift+S / 列の自動割り当て / バッチ定義の埋め込み / Robin の読み解き");
+console.log("OK  録画の下ごしらえ: 押せる要素の優先 / フォーカス外し / Win+Shift+S / 列の自動割り当て / バッチ定義の埋め込み / Robin の読み解き / Excel の明細");
