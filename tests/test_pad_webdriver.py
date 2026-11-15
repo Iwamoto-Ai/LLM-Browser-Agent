@@ -1270,7 +1270,8 @@ def test_xlsx_details_reads_sheet_and_makes_result_excel(tmp_path):
     assert "%XlsNote%" in txt
     # 開けない・シートが無いときは止める。Excel を開いたままにしない
     assert txt.count("ON ERROR") == 3
-    assert "明細ファイルに「明細」シートが無い" in txt
+    assert "明細ファイルに「明細」シートがありません" in txt
+    assert "明細を1件も処理せずに中止しました。理由：%HaltReason%。" in txt
     # 生成時の点検で警告が出ない（%''% は PAD の空の文字の式）
     assert pad._lint_robin(txt.split("\n"), log=lambda *_: None) == []
 

@@ -2204,7 +2204,7 @@ function robinReadXlsx(ind, csvRead) {
   out = out.concat([
     i2 + "IF XlsErr THEN",
     i3 + "SET Halt TO True",
-    i3 + "SET HaltReason TO " + robinStr("明細ファイル（%DetailsFile%）を開けなかった"),
+    i3 + "SET HaltReason TO " + robinStr("明細ファイル（%DetailsFile%）を開けませんでした"),
     i2 + "ELSE",
     i3 + "Excel.SetActiveWorksheet.ActivateWorksheetByName Instance: DetailsExcel " +
       "Name: " + robinStr(DETAILS_SHEET)
@@ -2213,7 +2213,7 @@ function robinReadXlsx(ind, csvRead) {
   out = out.concat([
     i3 + "IF XlsErr THEN",
     i3 + "    SET Halt TO True",
-    i3 + "    SET HaltReason TO " + robinStr("明細ファイルに「" + DETAILS_SHEET + "」シートが無い"),
+    i3 + "    SET HaltReason TO " + robinStr("明細ファイルに「" + DETAILS_SHEET + "」シートがありません"),
     i3 + "ELSE",
     i3 + "    # 中身の型のまま読む（文字で読むと 900000000001 が 9E+11 になる）",
     i3 + "    Excel.ReadFromExcel.ReadAllCells Instance: DetailsExcel " +
@@ -3519,7 +3519,7 @@ function buildRobin(batch, opt) {
     robinStr("[%HaltStamp%] 中止 %HaltReason%") +
     " AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8");
   A("    Display.ShowMessageDialog.ShowMessage Title: $'''中止''' " +
-    "Message: $'''%HaltReason%のため、明細を1件も処理せず中止しました。詳細は pad_progress.log を確認してください。''' " +
+    "Message: $'''明細を1件も処理せずに中止しました。理由：%HaltReason%。詳細は pad_progress.log を確認してください。''' " +
     "Icon: Display.Icon.Warning Buttons: Display.Buttons.OK " +
     "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn");
   A("END");

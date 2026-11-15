@@ -1691,7 +1691,7 @@ def _robin_read_xlsx(ind: str, csv_read: str) -> list:
     out += [
         f"{i2}IF XlsErr THEN",
         f"{i3}SET Halt TO True",
-        f"{i3}SET HaltReason TO {_robin_str('明細ファイル（%DetailsFile%）を開けなかった')}",
+        f"{i3}SET HaltReason TO {_robin_str('明細ファイル（%DetailsFile%）を開けませんでした')}",
         f"{i2}ELSE",
         f"{i3}Excel.SetActiveWorksheet.ActivateWorksheetByName Instance: DetailsExcel "
         f"Name: {_robin_str(DETAILS_SHEET)}",
@@ -1701,7 +1701,7 @@ def _robin_read_xlsx(ind: str, csv_read: str) -> list:
         f"{i3}IF XlsErr THEN",
         f"{i3}    SET Halt TO True",
         f"{i3}    SET HaltReason TO "
-        f"{_robin_str('明細ファイルに「' + DETAILS_SHEET + '」シートが無い')}",
+        f"{_robin_str('明細ファイルに「' + DETAILS_SHEET + '」シートがありません')}",
         f"{i3}ELSE",
         f"{i3}    # 中身の型のまま読む（文字で読むと 900000000001 が 9E+11 になる）",
         f"{i3}    Excel.ReadFromExcel.ReadAllCells Instance: DetailsExcel "
@@ -2792,7 +2792,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
       f"TextToWrite: {_robin_str('[%HaltStamp%] 中止 %HaltReason%')} "
       f"AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
     A("    Display.ShowMessageDialog.ShowMessage Title: $'''中止''' "
-      "Message: $'''%HaltReason%のため、明細を1件も処理せず中止しました。"
+      "Message: $'''明細を1件も処理せずに中止しました。理由：%HaltReason%。"
       "詳細は pad_progress.log を確認してください。''' "
       "Icon: Display.Icon.Warning Buttons: Display.Buttons.OK "
       "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn")
