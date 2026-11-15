@@ -1,11 +1,23 @@
 // ============================================================
-// 練習EDI2 発注確認バッチ定義
+// 練習EDI2 注文受諾（①）バッチ定義 — 練習サイト test_site/edi2/ 用
 //  ・行の先頭が // または # の行はコメント（読み飛ばされる）
 //  ・{"type":"comment","text":"…"} ステップは実行ログに 💬 表示される
-//  ・{{列名}} は明細CSVの値で埋まる（セレクタ内でも使用可）
+//  ・{{列名}} は明細の値で埋まる（セレクタ内でも使用可）
+//  ・明細は data/edi2_practice_batch.csv（Excel 版は .xlsx）
+//
+// 続きの流れは recordings/ の ②納入登録 edi2_delivery_batch.json、
+// ③帳票の発行 edi2_publish_batch.json、④Excel の取得 edi2_fetch_batch.json。
+// このファイルは、録画から作った edi2_accept_batch.json と同じ手順に
+// ログインを足したもの（run_batch.py でも最後まで流せるように）。
+// PAD 版に変換すると、ログインの入力は入らず、人が手でログインする。
 // ============================================================
 {
-  "title": "練習EDI2 発注確認(注文受諾) バッチ — 検索→受理→発行→エビデンス→ホームへ戻る（実EBSと同じ要素ID）",
+  "title": "練習EDI2 注文受諾 バッチ（①）— ログイン→ツリーを開く→受諾→開き直して受理済をエビデンスに",
+  "originHint": "検収状況一覧",
+  "options": {
+    "idCol": "プロジェクト番号",
+    "browser": "edge"
+  },
   "setup": [
     {
       "type": "setViewport",
@@ -15,6 +27,10 @@
     {
       "type": "navigate",
       "url": "http://localhost:8000/edi2/index.html"
+    },
+    {
+      "type": "comment",
+      "text": "ログイン（run_batch.py は環境変数の値で入力する。PAD 版は入力しないので人が手でログインする）"
     },
     {
       "type": "change",
@@ -44,10 +60,25 @@
       "type": "click",
       "selectors": [
         [
-          "aria/ログイン"
+          "#LoginBtn"
         ],
         [
-          "#LoginBtn"
+          "text/ログイン"
+        ]
+      ]
+    },
+    {
+      "type": "comment",
+      "text": "ツリーを開いておく。展開はトグルなので 1 回だけ"
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI仕入先"
+        ],
+        [
+          "text/📁 仕入先（練習）"
         ]
       ]
     },
@@ -55,15 +86,52 @@
       "type": "click",
       "selectors": [
         [
-          "#LI取引情報入力・照会 div.textdiv"
+          "#LI取引情報入力・照会"
         ],
         [
-          "text/取引情報入力・照会"
+          "text/📁 取引情報入力・照会"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI帳票出力"
+        ],
+        [
+          "text/📁 帳票出力"
+        ]
+      ]
+    },
+    {
+      "type": "comment",
+      "text": "家アイコンで起点へ。ここがすべての業務の出発点"
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#homeIcon"
+        ],
+        [
+          "text/ホーム"
         ]
       ]
     }
   ],
   "loop": [
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#PosHpgGenericUrl3c"
+        ],
+        [
+          "text/ホームページ"
+        ]
+      ]
+    },
     {
       "type": "comment",
       "text": "発注 {{発注番号}}（{{プロジェクト番号}}）の受諾を開始"
@@ -88,10 +156,10 @@
       "type": "click",
       "selectors": [
         [
-          "aria/拡張検索"
+          "#SrchBtn"
         ],
         [
-          "#SrchBtn"
+          "text/拡張検索"
         ]
       ]
     },
@@ -101,31 +169,25 @@
       "selectors": [
         [
           "#Value_0"
-        ],
-        [
-          "aria/発注番号"
         ]
       ]
     },
     {
       "type": "click",
       "selectors": [
-        [
-          "aria/進む"
-        ],
         [
           "#AdvGoBtn"
-        ]
-      ]
-    },
-    {
-      "type": "click",
-      "selectors": [
-        [
-          "aria/{{発注番号}}"
         ],
         [
-          "xpath///*[@id=\"N58:PosPoNumber:0\"]"
+          "text/進む"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "text/{{発注番号}}"
         ]
       ]
     },
@@ -134,6 +196,9 @@
       "selectors": [
         [
           "#ActionGoBtn"
+        ],
+        [
+          "text/進む"
         ]
       ]
     },
@@ -142,6 +207,9 @@
       "selectors": [
         [
           "#ActionGoBtn"
+        ],
+        [
+          "text/進む"
         ]
       ]
     },
@@ -149,7 +217,7 @@
       "type": "click",
       "selectors": [
         [
-          "xpath///*[@id=\"PosSubmitBtn\"]"
+          "#PosSubmitBtn"
         ],
         [
           "text/発行"
@@ -158,21 +226,16 @@
     },
     {
       "type": "comment",
-      "text": "発行済み → 確認完了画面をエビデンス保存"
-    },
-    {
-      "type": "screenshot",
-      "name": "{{プロジェクト番号}}__{{発注番号}}",
-      "full_page": false
+      "text": "ここまでで受諾は完了。ステータスを反映した画面を撮るため、一度ホームへ戻って開き直す"
     },
     {
       "type": "click",
       "selectors": [
         [
-          "aria/ホーム"
+          "#homeIcon"
         ],
         [
-          "#homeIcon"
+          "text/ホーム"
         ]
       ]
     },
@@ -180,10 +243,110 @@
       "type": "click",
       "selectors": [
         [
-          "#LI取引情報入力・照会 div.textdiv"
+          "#LI仕入先"
         ],
         [
-          "text/取引情報入力・照会"
+          "text/📁 仕入先（練習）"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#LI取引情報入力・照会"
+        ],
+        [
+          "text/📁 取引情報入力・照会"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#PosHpgGenericUrl3c"
+        ],
+        [
+          "text/ホームページ"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#POS_ORDERS"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#POS_PURCHASE_ORDERS"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#SrchBtn"
+        ],
+        [
+          "text/拡張検索"
+        ]
+      ]
+    },
+    {
+      "type": "change",
+      "value": "{{発注番号}}",
+      "selectors": [
+        [
+          "#Value_0"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#AdvGoBtn"
+        ],
+        [
+          "text/進む"
+        ]
+      ]
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "text/{{発注番号}}"
+        ]
+      ]
+    },
+    {
+      "type": "assertText",
+      "text": "受理済"
+    },
+    {
+      "type": "comment",
+      "text": "発注情報（ステータス 受理済）をエビデンスとして保存"
+    },
+    {
+      "type": "screenshot",
+      "name": "{{プロジェクト番号}}__{{発注番号}}__注文受諾"
+    },
+    {
+      "type": "click",
+      "selectors": [
+        [
+          "#homeIcon"
+        ],
+        [
+          "text/ホーム"
         ]
       ]
     }
@@ -193,21 +356,10 @@
       "type": "click",
       "selectors": [
         [
-          "aria/ホーム"
-        ],
-        [
           "#homeIcon"
-        ]
-      ]
-    },
-    {
-      "type": "click",
-      "selectors": [
-        [
-          "#LI取引情報入力・照会 div.textdiv"
         ],
         [
-          "text/取引情報入力・照会"
+          "text/ホーム"
         ]
       ]
     }

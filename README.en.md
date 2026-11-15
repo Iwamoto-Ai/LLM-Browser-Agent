@@ -552,7 +552,7 @@ The same applies to single-run recording JSON files.
 
 - **CSV recommended** (save from Excel as "**CSV UTF-8**"). Row 1 = column names, rows 2+ = data.
   **Column names become `{{keys}}`** (Japanese column names are fine: `{{プロジェクト番号}}`).
-- Reading `.xlsx` directly is also supported (requires `pip install openpyxl`; the first sheet is read).
+- Reading `.xlsx` directly is also supported (requires `pip install openpyxl`; the sheet named 「明細」 is read if present, otherwise the first sheet).
   Numbers are converted safely (no `900000000001.0`), dates become `YYYY-MM-DD`.
 - **ID column**: defaults to the first column (change with `--id-column`). Progress, results and re-runs
   are keyed by this value. In the example below the **project number** is the ID (matching an operation
@@ -601,16 +601,24 @@ python run_batch.py --batch recordings/edi_practice_batch.json --details data/ed
 **An Oracle-style (tab-navigation, PO acknowledgment) practice site is also bundled** — `test_site/edi2/`
 reproduces the iSupplier-Portal-style flow (login → navigator → Orders → advanced search → accept →
 submit → confirmation → back to home) with **the same element IDs as the real EBS**
-(`#usernameField`, `#POS_ORDERS`, `#SrchBtn`, `#Value_0`, `#ActionGoBtn`, `#PosSubmitBtn`, result link
-`#N58:PosPoNumber:0`). The definition is nearly identical to the production batch except for the URL, so
-you can **rehearse before access to the real system is granted**. Evidence is saved as
-"project__po-number__timestamp.png", and selector placeholders (`aria/{{発注番号}}`) plus Japanese CSV
-column names are exercised too.
+(`#usernameField`, `#POS_ORDERS`, `#SrchBtn`, `#Value_0`, `#ActionGoBtn`, `#PosSubmitBtn`). The definition is nearly identical to the production batch except for the URL, so
+you can **rehearse before access to the real system is granted**.
+
+The practice batch `recordings/edi2_practice_batch.json` is the **PO acceptance** flow (log in → open the
+navigator tree → accept → reopen the PO and save the "accepted" screen as evidence). The follow-on flows
+**delivery registration, report submission and Excel download** are
+`recordings/edi2_delivery_batch.json`, `edi2_publish_batch.json` and `edi2_fetch_batch.json` (used with PAD).
+The details file is shared by all four flows and comes as **both CSV (`data/edi2_practice_batch.csv`) and Excel
+(`data/edi2_practice_batch.xlsx`)** with the same content (columns: プロジェクト番号, 発注番号, 納入日, 要求ID, skip).
+Evidence is saved as "project__po-number__注文受諾_timestamp.png", and selector placeholders
+(`text/{{発注番号}}`) plus Japanese column names are exercised too.
 
 ```powershell
-# EDI2 (Oracle-style) practice batch (4 items: 3 ok / 1 skipped; evidence like PM9000000001__900000000001_timestamp.png)
+# EDI2 (Oracle-style) practice batch, PO acceptance (4 items: 3 ok / 1 skipped)
 $env:MY_USERNAME="demo"; $env:MY_PASSWORD="password123"
 python run_batch.py --batch recordings/edi2_practice_batch.json --details data/edi2_practice_batch.csv --engine playwright --browser edge --no-headless --viewport-shot
+# Same result with the Excel details (requires pip install openpyxl)
+python run_batch.py --batch recordings/edi2_practice_batch.json --details data/edi2_practice_batch.xlsx --engine playwright --browser edge --no-headless --viewport-shot
 ```
 
 ---
@@ -627,6 +635,7 @@ that extension**: `msedgedriver.exe` itself runs as a local HTTP server, so driv
 "Invoke web service" action lets you **control the browser with no extension at all**.
 
 - Reading details, looping, skip handling, item limit, progress, result CSV → **native PAD actions**
+  (the details file can be **CSV or Excel (.xlsx)**; Excel is read with PAD's Excel actions from the sheet named 「明細」)
 - Browser operations → **HTTP to WebDriver** (element lookup and actions are unified into one
   `/execute/sync` JavaScript call)
 - Evidence → **WebDriver's `/screenshot`** (captures only the browser page, not the desktop)
@@ -682,11 +691,12 @@ Conversion environment (a PC with Python; no browser, no WebDriver needed)
                     │  hand the generated PAD code (Robin) to the execution environment
                     ▼
 Execution environment (only WebDriver and PAD; no Python needed)
-  4. Put in C:\temp: msedgedriver.exe / details CSV / pad_flow.jsact.js
+  4. Put in C:\temp: msedgedriver.exe / details (CSV or Excel .xlsx) / pad_flow.jsact.js
      (plus selenium-manager-windows.exe if you use --auto-driver)
   5. Create a new desktop flow in PAD (Power Fx disabled) → Ctrl+V on the canvas
   6. Trial run with MaxItems = 1 → inspect → raise to 10 for production
   7. Outputs in C:\temp: evidence PNGs / pad_result.csv / pad_progress.log
+     (plus a pad_result_<timestamp>.xlsx for viewing when the details file is Excel)
 ```
 
 ### ⚙️ Converter (Python version, for advanced users) — pad_webdriver_ref.py
@@ -720,6 +730,7 @@ What you get is not the raw recorded steps but **a flow with the control structu
 | Manual login (default) | A human logs in by hand **and navigates to the loop start screen** before pressing OK. PAD never receives the password |
 | Proxy switch | `UseProxy` (True / False) toggles between a direct connection and the corporate proxy |
 | Setup failure detection | If login or navigation to the start screen fails, no detail rows are processed at all. **The reason for stopping** is shown in the dialog and written to the log |
+| Details as CSV / Excel | With `--details` ending in `.xlsx`, the sheet named 「明細」 is read in a way that keeps long numbers and dates intact, and a viewing copy of the results is saved as Excel at the end. The browser converter's "明細テンプレート（Excel）を保存" button creates an empty details workbook |
 | Item limit / skip column | `MaxItems` for trial runs; rows with a value in `skip` are skipped; rows cut off are recorded as "not run" |
 | Recovery after failure | `recover` runs before the next item, so **one failure does not cascade to every row** |
 | Failure evidence | Saves `fail__<ID>__<key>__timestamp.png` |

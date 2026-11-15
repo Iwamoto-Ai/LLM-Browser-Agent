@@ -1396,8 +1396,13 @@ END
 
 ## 🚚 練習できる業務フロー
 
-練習サイト（`test_site/edi2/`）には 3 つの流れが入っている。バッチ定義は
-`recordings/` にあり、そのまま変換して試せる。明細は `data/edi2_practice_batch.csv`。
+練習サイト（`test_site/edi2/`）には 4 つの流れが入っている。バッチ定義は
+`recordings/` にあり、そのまま変換して試せる。明細は 4 つとも共通で `data/edi2_practice_batch.csv`
+（同じ中身の Excel 版 `data/edi2_practice_batch.xlsx` もある）。
+
+`edi2_practice_batch.json` は、注文受諾と同じ手順の前に**ログインの入力**を足したもの。
+`run_batch.py`（Python 版の実行器）で最後まで流すためのもので、PAD 版に変換すると
+ログインの入力は入らず、人が手でログインする（起点までの操作と繰り返しは注文受諾と同じ）。
 
 | 流れ | バッチ定義 | 内容 |
 | --- | --- | --- |
