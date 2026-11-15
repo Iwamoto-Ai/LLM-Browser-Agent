@@ -1400,6 +1400,10 @@ def _first_from_note(cands: list, note: str) -> list:
     if not m:
         return cands
     head = m.group(1)
+    if head not in cands and _robin_filter_candidates([head]) == [head]:
+        # 変換で落とされる候補ではないのに無い → PAD で候補が直され、コメントが
+        # 古いまま。コメントの候補は足さない（直した内容を戻してしまうため）
+        return cands
     return [head] + [c for c in cands if c != head]
 
 
@@ -1780,14 +1784,236 @@ def _robin_result_xlsx(ncols: int) -> list:
     return out
 
 
-def robin_to_batch(text: str):
+# ------------------------------------------------------------
+# 埋め込みと中身の比べ合わせ（PAD で手直しされたかを見つける）
+#
+# 埋め込みは変換したときのバッチ定義。PAD で Robin を直すと、埋め込みは
+# 直す前のまま残る。そこで次の 2 つを読み解いて比べる。
+#   A: 埋め込みからもう一度作った Robin を読み解いたもの（直す前）
+#   B: 実際の Robin を読み解いたもの（直した後）
+# どちらも読み解いた形なので、読み解きで落ちる情報（setup の入力など）は
+# 両方で同じように落ち、それが違いとして出ることはない。
+# 読み解けない形の手直し（PAD でアクションを足したなど）は、区画ごとの
+# 行を比べて「読み解けない手直しがあります」と知らせる。
+# ------------------------------------------------------------
+_SEC_NAMES = (("setup", "setup"), ("loop", "loop"), ("recover", "recover"),
+              ("teardown", "teardown"))
+
+
+def _step_label(st: dict) -> str:
+    """ステップを 1 行で表す（違いの一覧に使う）。"""
+    t = st.get("type", "")
+    sel = ""
+    if st.get("selectors"):
+        sel = str((st["selectors"][0] or [""])[0])
+    if t in ("click", "doubleClick"):
+        return f"クリック {sel}"
+    if t == "change":
+        return f"入力 {sel}「{st.get('value', '')}」"
+    if t == "navigate":
+        return f"ページを開く {st.get('url', '')}"
+    if t == "setViewport":
+        return f"ウィンドウサイズ {st.get('width', '')}×{st.get('height', '')}"
+    if t == "assertText":
+        tm = f"（最大 {st['timeout']} 秒）" if st.get("timeout") else ""
+        return f"完了確認「{st.get('text', '')}」{tm}"
+    if t == "capture":
+        return f"読み取り「{st.get('name', '')}」"
+    if t == "scrollFind":
+        return f"スクロールして探す「{st.get('text', '')}」"
+    if t == "download":
+        return f"ダウンロード {sel}"
+    if t == "screenshot":
+        return "エビデンス"
+    if t == "comment":
+        return f"コメント「{st.get('text', '')}」"
+    return t
+
+
+def _step_detail(st: dict) -> str:
+    """_step_label で見分けられないときの詳しい表し方（目印の候補と値をすべて）。"""
+    parts = [_step_label(st).split(" ")[0]]
+    if st.get("selectors"):
+        parts.append(" / ".join(str((g or [""])[0]) for g in st["selectors"]))
+    for k in ("value", "text", "key", "name", "extract", "timeout", "tries", "url"):
+        if k in st:
+            parts.append(f"{k}={st[k]}")
+    return " ".join(parts)
+
+
+def _diff_steps(name: str, old: list, new: list) -> list:
+    """2 つのステップの並びの違いを、人が読める行にする。
+
+    最長の共通部分（LCS）で並びをそろえ、続けて消えたものと増えたものは
+    前から順に「変わった」として組にする。番号は直した後（new）の数え方。"""
+    a = [_canon_json(s) for s in old]
+    b = [_canon_json(s) for s in new]
+    n, m = len(a), len(b)
+    dp = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(n - 1, -1, -1):
+        for j in range(m - 1, -1, -1):
+            dp[i][j] = dp[i + 1][j + 1] + 1 if a[i] == b[j] else max(dp[i + 1][j], dp[i][j + 1])
+    ops, i, j = [], 0, 0
+    while i < n or j < m:
+        if i < n and j < m and a[i] == b[j]:
+            ops.append(("=", i, j))
+            i += 1
+            j += 1
+        elif j >= m or (i < n and dp[i + 1][j] >= dp[i][j + 1]):
+            ops.append(("-", i, j))
+            i += 1
+        else:
+            ops.append(("+", i, j))
+            j += 1
+    out, k = [], 0
+    while k < len(ops):
+        if ops[k][0] == "=":
+            k += 1
+            continue
+        run = []
+        while k < len(ops) and ops[k][0] != "=":
+            run.append(ops[k])
+            k += 1
+        dels = [o for o in run if o[0] == "-"]
+        adds = [o for o in run if o[0] == "+"]
+        for d, ad in zip(dels, adds):
+            lo, ln = _step_label(old[d[1]]), _step_label(new[ad[2]])
+            if lo == ln:
+                # 1 行の表し方が同じなら、目印の候補をすべて並べて違いを見せる
+                lo, ln = _step_detail(old[d[1]]), _step_detail(new[ad[2]])
+            out.append(f"{name} {ad[2] + 1} 番目：「{lo}」→「{ln}」")
+        for d in dels[len(adds):]:
+            out.append(f"{name}：「{_step_label(old[d[1]])}」がなくなった"
+                       f"（{d[2]} 番目の後）")
+        for ad in adds[len(dels):]:
+            out.append(f"{name} {ad[2] + 1} 番目に追加：「{_step_label(new[ad[2]])}」")
+    return out
+
+
+def _robin_regions(text: str) -> dict:
+    """区画ごとの、コメントと空行を除いた行（読み解けない手直しを見つける用）。"""
+    lines = [ln.strip() for ln in str(text).replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+
+    def cut(start, end):
+        s = next((i for i, ln in enumerate(lines) if start(ln)), -1)
+        if s < 0:
+            return []
+        e = next((i for i in range(s + 1, len(lines)) if end(lines[i])), len(lines))
+        return [ln for ln in lines[s + 1:e] if ln and not ln.startswith("#")]
+
+    return {
+        "setup": cut(lambda ln: ln.startswith("# ---------- 起点画面まで進む"),
+                     lambda ln: ln.startswith("# ---------- セットアップ失敗を検知")),
+        "loop": cut(lambda ln: ("%RowId% / %RowKey% 開始" + _Q3) in ln,
+                    lambda ln: ln == "# ここまで来たら成功"),
+        "recover": cut(lambda ln: ln == "IF PrevFailed THEN",
+                       lambda ln: ln.startswith("# 復帰の直後は画面が")),
+        "teardown": cut(lambda ln: ln.startswith("# ================= 後処理（batch の teardown）"),
+                        lambda ln: ln.startswith(("# ================= 後片付け",
+                                                  "# ================= 結果を Excel にする"))),
+    }
+
+
+def compare_embed(text: str, regenerated: str):
+    """埋め込みから作り直した Robin（regenerated）と、実際の Robin の違い。
+
+    戻り値は (違いの行のリスト, 直す前の読み解き, 直した後の読み解き)。
+    違いが空なら手直しは無い。"""
+    old, _ = parse_robin(regenerated)
+    new, _ = parse_robin(text)
+    if old is None or new is None:
+        return [], old, new
+    out = []
+    for key, label in (("title", "タイトル"), ("originHint", "起点の目印")):
+        if old.get(key, "") != new.get(key, ""):
+            out.append(f"{label}：「{old.get(key, '')}」→「{new.get(key, '')}」")
+    ra, rb = _robin_regions(regenerated), _robin_regions(text)
+    for key, name in _SEC_NAMES:
+        d = _diff_steps(name, old.get(key) or [], new.get(key) or [])
+        out.extend(d)
+        if not d and ra.get(key) != rb.get(key):
+            extra = [ln for ln in rb.get(key) or [] if ln not in (ra.get(key) or [])]
+            ex = extra[0] if extra else next(
+                (ln for ln in ra.get(key) or [] if ln not in (rb.get(key) or [])), "")
+            if len(ex) > 80:
+                ex = ex[:80] + "…"
+            out.append(f"{name}：読み解けない形の手直しがあります（例: {ex}）")
+    return out, old, new
+
+
+def _regenerate_robin(batch: dict, details_from_result: bool, id_col: str,
+                      xlsx: bool = False) -> str:
+    """埋め込みのバッチ定義から、比べるための Robin を作り直す（中身だけ見る）。
+
+    ID 列は実際の Robin と同じにする（列の番号 %Col1% などがそろうように）。"""
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        fp = os.path.join(td, "regen.robin.txt")
+        write_robin(batch, r"C:\temp\details.xlsx" if xlsx else r"C:\temp\details.csv",
+                    id_col, fp,
+                    details_from_result=details_from_result)
+        with open(fp, encoding="utf-8") as f:
+            return f.read()
+
+
+def merge_edited(embedded: dict, old: dict, parsed: dict, diffs: list) -> dict:
+    """手直し後のバッチ定義。埋め込みを元に、違いのあった区画だけ読み解いた形にする。
+
+    setup は、ページの URL とウィンドウサイズだけの違いならその値だけ直す
+    （ログインの入力やコメントを残すため）。クリックの違いがあれば読み解いた形に入れ替える。"""
+    out = json.loads(json.dumps(embedded))
+    for key in ("title", "originHint"):
+        if embedded.get(key, "") != parsed.get(key, ""):
+            if parsed.get(key):
+                out[key] = parsed[key]
+            else:
+                out.pop(key, None)
+    for key, name in _SEC_NAMES:
+        if not any(d.startswith(name + " ") or d.startswith(name + "：") for d in diffs):
+            continue
+        if key == "setup":
+            pe = [s for s in parsed.get("setup") or [] if s["type"] == "click"]
+            oe = [s for s in old.get("setup") or [] if s["type"] == "click"]
+            if pe == oe:
+                nav = next((s for s in parsed["setup"] if s["type"] == "navigate"), None)
+                vp = next((s for s in parsed["setup"] if s["type"] == "setViewport"), None)
+                for s in out.get("setup") or []:
+                    if s["type"] == "navigate" and nav:
+                        s["url"] = nav["url"]
+                    if s["type"] == "setViewport" and vp:
+                        s.update({k: vp[k] for k in ("width", "height") if k in vp})
+                continue
+        if parsed.get(key) or key in ("setup", "loop", "recover"):
+            out[key] = parsed.get(key) or []
+        else:
+            out.pop(key, None)
+    return out
+
+
+def robin_to_batch(text: str, use_embedded: bool = False):
     """Robin からバッチ定義を得る。埋め込みがあればそれを、無ければ読み解く。
 
-    戻り値は (batch, how, notes)。how は "embed"（埋め込み）/ "parse"（読み解き）/
-    ""（どちらもできなかった）。"""
+    埋め込みがあるときは、PAD で手直しされていないかを比べる。手直しがあれば
+    手直し後の形（違いのあった区画だけ読み解いたもの）を返し、notes に違いを並べる。
+    use_embedded=True なら、手直しがあっても埋め込み（直す前）をそのまま返す。
+
+    戻り値は (batch, how, notes)。how は "embed"（埋め込み）/ "edited"（埋め込みに
+    手直しを反映）/ "parse"（読み解き）/ ""（どちらもできなかった）。"""
     got, why = extract_batch_from_robin(text)
     if got is not None:
-        return got, "embed", []
+        parsed, _ = parse_robin(text)
+        popt = (parsed or {}).get("options") or {}
+        idc = popt.get("idCol") or (got.get("options") or {}).get("idCol") or "ID"
+        diffs, old, new = compare_embed(
+            text, _regenerate_robin(got, bool(popt.get("detailsFromResult")), idc,
+                                    "SET DetailsXlsx TO True" in text))
+        if not diffs:
+            return got, "embed", []
+        head = (f"この Robin は、変換したあとに PAD などで手直しされています（{len(diffs)} か所）。")
+        if use_embedded:
+            return got, "embed", [head + "埋め込み（手直しの前）を使いました"] + diffs
+        return (merge_edited(got, old, new, diffs), "edited",
+                [head + "手直しを反映しました（直す前を使うときは埋め込みを選んでください）"] + diffs)
     if "PADBATCH v1" in text:
         # 埋め込みはあるが壊れている。読み解きで代わりに組み立てる
         batch, notes = parse_robin(text)
@@ -3031,6 +3257,8 @@ def main() -> None:
     p.add_argument("--from-robin", default="",
                    help="この変換器で作った Robin から、埋め込まれたバッチ定義を取り出す"
                         "（埋め込みが無い古い Robin は読み解いて組み立てる）")
+    p.add_argument("--use-embedded", action="store_true",
+                   help="--from-robin で、PAD で手直しされていても埋め込み（手直しの前）をそのまま使う")
     p.add_argument("--save-batch", default="",
                    help="--from-robin で取り出したバッチ定義の保存先（既定: Robin と同じ名前の .batch.json）")
     p.add_argument("--values", help="共通値 JSON（任意）")
@@ -3094,15 +3322,20 @@ def main() -> None:
 
     if args.from_robin:
         with open(args.from_robin, encoding="utf-8-sig") as f:
-            got, how, notes = robin_to_batch(f.read())
+            got, how, notes = robin_to_batch(f.read(), use_embedded=args.use_embedded)
         if got is None:
             p.error(f"{args.from_robin}: " + " / ".join(notes))
         out = args.save_batch or re.sub(r"(\.robin)?\.txt$", "", args.from_robin) + ".batch.json"
         with open(out, "w", encoding="utf-8") as f:
             json.dump(got, f, ensure_ascii=False, indent=2)
             f.write("\n")
-        if how == "embed":
+        if how in ("embed", "edited"):
             print(f"📄 バッチ定義を取り出しました: {os.path.abspath(out)}")
+            # 手直しがあれば、どこが違うかを並べる（埋め込みと中身の比べ合わせ）
+            for n in notes:
+                print(f"  ・{n}")
+            if how == "edited":
+                print("  （手直しの前の形が要るときは --use-embedded を付けて取り出し直す）")
         else:
             print(f"📄 バッチ定義が埋め込まれていないので、Robin を読み解いて組み立てました: "
                   f"{os.path.abspath(out)}")
