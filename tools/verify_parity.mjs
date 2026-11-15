@@ -57,9 +57,10 @@ const cases = [
   // サイトの設定がバッチ定義の options に保存されているとき（どちらも指定しない）
   { batch: SITE_BATCH, idCol: "プロジェクト番号",
     details: "C:\\temp\\edi2_batch.csv", browser: "edge", label: "options のサイトの設定" },
-  // 明細が Excel のとき（「明細」シートを読み、最後に結果の Excel を作る）
+  // 明細が Excel のとき（「明細」シートを読み、最後に結果の Excel を作る）。
+  // パスは PC に無い場所にする（あると Python 版が中身を読みに行き、openpyxl の有無に左右される）
   { batch: "tests/fixtures/robin_parse_rich_batch.json", idCol: "番号",
-    details: "C:\\temp\\edi2_batch.xlsx", browser: "edge", label: "明細が Excel" },
+    details: "C:\\parity_no_such_dir\\edi2_batch.xlsx", browser: "edge", label: "明細が Excel" },
 ];
 
 let ng = 0;

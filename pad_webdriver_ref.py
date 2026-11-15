@@ -3115,7 +3115,18 @@ def main() -> None:
     batch = load_recording(args.batch)
     common = load_recording(args.values) if args.values else {}
     # Robin 生成のみの場合、--details は「会社 PC 側のパス」でよく、手元に実体が無くてよい
-    if args.robin and not os.path.exists(args.details):
+    # Excel の明細を読むには openpyxl が要る。Robin を作るだけなら中身は列名の確認にしか
+    # 使わないので、無ければ確認を飛ばす（Excel を読むのは PAD の側）。
+    _no_xlsx_reader = False
+    if details_is_xlsx(args.details) and os.path.exists(args.details):
+        try:
+            import openpyxl  # noqa: F401
+        except ImportError:
+            _no_xlsx_reader = True
+    if args.robin and (not os.path.exists(args.details) or _no_xlsx_reader):
+        if _no_xlsx_reader:
+            print("  ⚠ openpyxl が無いので、明細（Excel）の列名は確かめずに Robin を作ります"
+                  "（pip install openpyxl で確かめられます）")
         headers, rows = [args.id_column or "ID"], []
     else:
         headers, rows = load_details(args.details)

@@ -1297,3 +1297,26 @@ def test_load_details_prefers_details_sheet():
     headers, rows = load_details(os.path.join(_HERE, "tests", "fixtures", "details_sample.xlsx"))
     assert headers == ["プロジェクト番号", "発注番号", "納入日", "コード", "skip"]
     assert rows[0]["発注番号"] == "900000000001" and rows[0]["コード"] == "0012"
+
+
+def test_cli_xlsx_details_without_openpyxl(tmp_path):
+    """Robin を作るだけなら、openpyxl が無くても Excel の明細で変換できる。"""
+    import subprocess
+    import sys as _sys
+    det = tmp_path / "d.xlsx"
+    det.write_bytes(b"PK")          # 中身は読まない（置いてあるだけ）
+    code = ("import builtins,runpy,sys\n"
+            "real=builtins.__import__\n"
+            "def fake(n,*a,**k):\n"
+            "    if n=='openpyxl': raise ImportError('x')\n"
+            "    return real(n,*a,**k)\n"
+            "builtins.__import__=fake\n"
+            "sys.argv=['pad_webdriver_ref.py']+sys.argv[1:]\n"
+            "runpy.run_path('pad_webdriver_ref.py',run_name='__main__')\n")
+    r = subprocess.run([_sys.executable, "-c", code, "--batch", _RICH, "--details", str(det),
+                        "--id-column", "番号", "--robin", str(tmp_path / "o.robin.txt"),
+                        "--pad-out-dir", r"C:\temp"],
+                       capture_output=True, text=True, encoding="utf-8", cwd=_HERE)
+    assert r.returncode == 0, r.stderr
+    assert "openpyxl が無いので" in r.stdout
+    assert "Excel.ReadFromExcel.ReadAllCells" in open(tmp_path / "o.robin.txt", encoding="utf-8").read()
