@@ -78,6 +78,9 @@ from details_io import load_details
 #
 # **この中に // のコメントは書けない。** 1 行に連結して渡すので、それ以降が
 # すべてコメントになってしまう。
+# action の saveLink は「名前を付けてリンク先を保存」と同じ取り方。押すと同じファイルを
+# 2 回取りに行く画面（Oracle の要求の結果など）でも、リンク先を 1 回だけ受け取る。
+# 要素のリンク（祖先か子孫の a[href]）に download を付けた写しを作って押す。
 JS_ACT = r"""
 var PREFER = true, BLUR = true;
 var cands = arguments[0], action = arguments[1], value = arguments[2];
@@ -262,6 +265,18 @@ for (var i = 0; i < cands.length; i++) {
     el.dispatchEvent(new Event(`input`, { bubbles: true }));
     el.dispatchEvent(new Event(`change`, { bubbles: true }));
     if (BLUR) { try { el.blur(); } catch (e) {} }
+  } else if (action === `saveLink`) {
+    var a = el.closest ? el.closest(`a[href]`) : null;
+    if (!a && el.querySelector) { a = el.querySelector(`a[href]`); }
+    if (!a) { continue; }
+    var d = el.ownerDocument || document;
+    var t = d.createElement(`a`);
+    t.href = a.href;
+    t.setAttribute(`download`, ``);
+    t.style.display = `none`;
+    (d.body || d.documentElement).appendChild(t);
+    t.click();
+    t.remove();
   } else if (action === `text`) {
     var s = el.innerText || el.textContent || ``;
     return { ok: true, used: cands[i], text: s.trim() };
@@ -1023,7 +1038,7 @@ def _robin_capture(cands: list, var: str, indent: str, step_no: int,
 
 
 def _robin_download(cands: list, name: str, indent: str, step_no: int,
-                    cols: list, timeout: int = 60) -> list:
+                    cols: list, timeout: int = 60, save_link: bool = False) -> list:
     """クリックしてファイルが落ちてくるのを待ち、エビデンス名に付け替える。
 
     サーバーが付けるファイル名は事前に分からないので、押す前の数と比べて
@@ -1035,10 +1050,13 @@ def _robin_download(cands: list, name: str, indent: str, step_no: int,
         L.append(s)
     _dlnote = _to_robin_var(cands[0], cols) if cands else ""
     A(f"{indent}# [{step_no}] ダウンロード {_dlnote}")
+    if save_link:
+        A(f"{indent}# 押さずに「名前を付けてリンク先を保存」と同じ取り方をする"
+          "（押すと 2 回取りに行き、2 回目が認証エラーになる画面のため）")
     A(f"{indent}# 押す前の件数を数えておき、増えたぶんを新しいファイルとみなす。")
     A(f"{indent}" + _folder_get("DlDir", "$" + Q_ + "*.*" + Q_, "DlBefore"))
     A(f"{indent}SET DlCountBefore TO DlBefore.Count")
-    L.extend(_robin_act(cands, "click", "", indent,
+    L.extend(_robin_act(cands, "saveLink" if save_link else "click", "", indent,
                         f"download {cands[0] if cands else ''}", step_no, cols))
     A(f"{indent}IF RowError = " + _robin_str("") + " THEN")
     A(f"{indent}    SET DlWait TO 0")
@@ -1592,7 +1610,10 @@ def parse_robin(text: str):
                 st["name"] = extra.get("name", "取得値")
                 loop.append(st)
             elif pend == "download":
-                loop.append({"type": "download", "selectors": sels(cands)})
+                st = {"type": "download", "selectors": sels(cands)}
+                if act == "saveLink":
+                    st["saveLink"] = True
+                loop.append(st)
             elif pend == "assertText":
                 st = {"type": "assertText", "text": unvar(val)}
                 if extra.get("timeout"):
@@ -1822,7 +1843,7 @@ def _step_label(st: dict) -> str:
     if t == "scrollFind":
         return f"スクロールして探す「{st.get('text', '')}」"
     if t == "download":
-        return f"ダウンロード {sel}"
+        return f"ダウンロード {sel}" + ("（リンク先を保存）" if st.get("saveLink") else "")
     if t == "screenshot":
         return "エビデンス"
     if t == "comment":
@@ -1835,7 +1856,7 @@ def _step_detail(st: dict) -> str:
     parts = [_step_label(st).split(" ")[0]]
     if st.get("selectors"):
         parts.append(" / ".join(str((g or [""])[0]) for g in st["selectors"]))
-    for k in ("value", "text", "key", "name", "extract", "timeout", "tries", "url"):
+    for k in ("value", "text", "key", "name", "extract", "timeout", "tries", "url", "saveLink"):
         if k in st:
             parts.append(f"{k}={st[k]}")
     return " ".join(parts)
@@ -2936,7 +2957,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             A(f"{inner}# ダウンロードしたファイルをエビデンスにする。")
             A(f"{inner}# 画面に内容が出ず、Excel や PDF を受け取って初めて分かる業務向け。")
             L.extend(_robin_download(cands, st.get("name", "") or shot_name,
-                                     inner, m, cols))
+                                     inner, m, cols, save_link=bool(st.get("saveLink"))))
             L.extend(_robin_fail(inner, _cap_vals))
             A("")
             continue

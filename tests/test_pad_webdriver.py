@@ -1171,6 +1171,8 @@ def test_parse_robin_restores_step_details(tmp_path):
     assert loop[6] == {"type": "capture", "key": "要求IDは", "name": "要求"}
     assert loop[7]["extract"] == "digits" and loop[7]["key"] == "No."
     assert loop[10]["name"] == "{{番号}}_dl" and "name" not in loop[11]
+    # 押さずにリンク先を保存するダウンロードも戻る
+    assert loop[11].get("saveLink") is True and "saveLink" not in loop[10]
     o = got["options"]
     assert o["idCol"] == "番号" and o["stepWait"] == 30 and o["detailsFromResult"] is True
     assert o["preferClickable"] is False and o["blurAfterFill"] is False
@@ -1401,3 +1403,19 @@ def test_cli_from_robin_reports_edit_and_use_embedded(tmp_path):
         assert "手直しされています（1 か所）" in r.stdout
         got = json.load(open(tmp_path / "o.json", encoding="utf-8"))
         assert next(s for s in got["setup"] if s["type"] == "navigate")["url"] == url
+
+
+def test_download_save_link(tmp_path):
+    """saveLink のダウンロードは、押さずに「リンク先を保存」の取り方をする。"""
+    txt = _xlsx_robin(tmp_path, details=r"C:\temp\d.csv")
+    acts = [ln for ln in txt.split("\n") if "SET ActBody TO" in ln]
+    assert sum('"saveLink"' in ln for ln in acts) == 1      # 2 つのうち片方だけ
+    assert "名前を付けてリンク先を保存」と同じ取り方" in txt
+    assert "action === `saveLink`" in pad.JS_ACT
+    # 手直しの比べ合わせでは、取り方の違いも見える
+    plain = txt.replace('"saveLink"', '"click"')
+    lines = plain.split("\n")
+    k = next(i for i, ln in enumerate(lines) if ln.strip().startswith("# 押さずに「名前を付けて"))
+    plain = "\n".join(lines[:k] + lines[k + 1:])
+    _, how, notes = pad.robin_to_batch(plain)
+    assert how == "edited" and any("（リンク先を保存）」→「ダウンロード #xls2」" in n for n in notes)
