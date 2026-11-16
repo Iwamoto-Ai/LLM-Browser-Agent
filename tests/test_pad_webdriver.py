@@ -1419,3 +1419,52 @@ def test_download_save_link(tmp_path):
     plain = "\n".join(lines[:k] + lines[k + 1:])
     _, how, notes = pad.robin_to_batch(plain)
     assert how == "edited" and any("（リンク先を保存）」→「ダウンロード #xls2」" in n for n in notes)
+
+
+# ---------------------------------------------------------------- 開くページ（TargetUrl）
+def test_set_target_url():
+    """開くページは setup の最初の navigate。無ければウィンドウサイズの後ろに足す。"""
+    b = {"setup": [{"type": "setViewport", "width": 1, "height": 2},
+                   {"type": "navigate", "url": "https://a/OA.jsp?_ti=1&oas=x"},
+                   {"type": "navigate", "url": "https://b/"}], "loop": []}
+    assert pad.get_target_url(b) == "https://a/OA.jsp?_ti=1&oas=x"
+    got = pad.set_target_url(b, " https://edi.example.com/login ")
+    assert [s.get("url") for s in got["setup"]] == [None, "https://edi.example.com/login", "https://b/"]
+    assert b["setup"][1]["url"].startswith("https://a/")          # 元は変えない
+    assert pad.set_target_url(b, "") == b
+    none = pad.set_target_url({"setup": [{"type": "setViewport"}], "loop": []}, "https://x/")
+    assert [s["type"] for s in none["setup"]] == ["setViewport", "navigate"]
+    assert pad.set_target_url({"loop": []}, "https://x/")["setup"] == [{"type": "navigate", "url": "https://x/"}]
+
+
+def test_session_params_in_url():
+    """ログイン後の URL（その時だけ有効な値が付いたもの）を見分ける。"""
+    assert pad.session_params_in_url("https://e/OA_HTML/OA.jsp?OAFunc=X&_ti=12&oas=ab..") == ["_ti", "oas"]
+    assert pad.session_params_in_url("https://e/x;jsessionid=AB?Token=1") == ["jsessionid", "token"]
+    assert pad.session_params_in_url("https://e/OA_HTML/AppsLocalLogin.jsp") == []
+    assert pad.session_params_in_url("https://e/p#state=1") == []
+
+
+def test_cli_target_url(tmp_path):
+    """--target-url は Robin の TargetUrl と埋め込みに入り、--from-robin では取り出す定義に残る。"""
+    import subprocess
+    import sys as _sys
+    rob = tmp_path / "t.robin.txt"
+    url = "https://edi.example.com/OA_HTML/AppsLocalLogin.jsp"
+    r = subprocess.run([_sys.executable, os.path.join(_HERE, "pad_webdriver_ref.py"),
+                        "--batch", os.path.join(_HERE, "recordings", "edi2_accept_batch.json"),
+                        "--details", r"C:\temp\d.csv", "--id-column", "プロジェクト番号",
+                        "--robin", str(rob), "--target-url", url],
+                       capture_output=True, text=True, encoding="utf-8", cwd=_HERE)
+    assert r.returncode == 0, r.stderr
+    txt = rob.read_text(encoding="utf-8")
+    assert f"SET TargetUrl TO $'''{url}'''" in txt
+    got, how, _ = pad.robin_to_batch(txt)
+    assert how == "embed" and pad.get_target_url(got) == url
+    url2 = "https://edi.example.com/OA_HTML/OA.jsp?_ti=1&oas=x"
+    r = subprocess.run([_sys.executable, os.path.join(_HERE, "pad_webdriver_ref.py"),
+                        "--from-robin", str(rob), "--save-batch", str(tmp_path / "o.json"),
+                        "--target-url", url2],
+                       capture_output=True, text=True, encoding="utf-8", cwd=_HERE)
+    assert r.returncode == 0 and "ログイン後の URL のようです（_ti / oas" in r.stdout
+    assert pad.get_target_url(json.load(open(tmp_path / "o.json", encoding="utf-8"))) == url2
