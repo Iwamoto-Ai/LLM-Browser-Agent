@@ -150,4 +150,22 @@ for (const c of cases) {
     else { ng++; console.log("NG  Robin からの取り出しが不一致:", r.name + "\n  py: " + want.slice(0, 300) + "\n  js: " + got.slice(0, 300)); }
   }
 }
+// 開くページ（TargetUrl）の扱いも一致すること
+{
+  const urls = ["https://e/OA_HTML/OA.jsp?OAFunc=X&_ti=12&oas=ab..", "https://e/x;jsessionid=AB?Token=1",
+                "https://e/OA_HTML/AppsLocalLogin.jsp", "https://e/p#state=1", ""];
+  const batches = [{ setup: [{ type: "setViewport", width: 1, height: 2 }, { type: "navigate", url: "https://a/" }], loop: [] },
+                   { setup: [{ type: "setViewport", width: 1, height: 2 }], loop: [] }, { loop: [] }];
+  const js = JSON.stringify({
+    s: urls.map((u) => PadConvert.sessionParamsInUrl(u)),
+    t: batches.map((b) => PadConvert.setTargetUrl(b, " https://n/ ")),
+    g: batches.map((b) => PadConvert.getTargetUrl(b)) });
+  const py = execFileSync(PY, ["-c", "import sys,json;sys.path.insert(0,'.');import pad_webdriver_ref as P\n" +
+    "u=json.loads(sys.argv[1]);b=json.loads(sys.argv[2])\n" +
+    "print(json.dumps({'s':[P.session_params_in_url(x) for x in u],'t':[P.set_target_url(x,' https://n/ ') for x in b]," +
+    "'g':[P.get_target_url(x) for x in b]},ensure_ascii=False,separators=(',',':')))",
+    JSON.stringify(urls), JSON.stringify(batches)], { stdio: "pipe" }).toString().trim();
+  if (js === py) { console.log("OK  開くページ（TargetUrl）の扱いが一致"); }
+  else { ng++; console.log("NG  開くページ（TargetUrl）の扱いが不一致\n  py: " + py + "\n  js: " + js); }
+}
 process.exit(ng ? 1 : 0);

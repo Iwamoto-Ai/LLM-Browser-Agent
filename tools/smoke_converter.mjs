@@ -226,6 +226,48 @@ for (const key of ["setup", "loop", "recover"]) {
   }
 }
 
+// 開くページ（TargetUrl）: 録画の URL が欄に入り、直すとバッチ定義と Robin に入る
+{
+  d.getElementById("resetAll").click();
+  const rec = fs.readFileSync("tests/fixtures/oracle_asn_recording.json", "utf8");
+  const input = d.getElementById("batchFile");
+  Object.defineProperty(input, "files", { value: [new dom.window.File([rec], "rec.json")], configurable: true });
+  input.dispatchEvent(new dom.window.Event("change"));
+  await new Promise((res) => setTimeout(res, 300));
+  const f = d.getElementById("targetUrl");
+  if (f.value !== "https://edi.example.com/OA_HTML/OA.jsp?OAFunc=OANEWHOMEPAGE") {
+    errors.push("録画の URL が開くページの欄に入っていない: " + f.value);
+  }
+  // ログイン後の URL らしい値には注意が出る
+  f.value = "https://edi.example.com/OA_HTML/OA.jsp?_ti=1&oas=x";
+  f.dispatchEvent(new dom.window.Event("input"));
+  if (d.getElementById("targetUrlWarn").hidden) { errors.push("ログイン後の URL に注意が出ない"); }
+  f.value = "https://edi.example.com/OA_HTML/AppsLocalLogin.jsp";
+  f.dispatchEvent(new dom.window.Event("input"));
+  if (!d.getElementById("targetUrlWarn").hidden) { errors.push("入り口の URL なのに注意が出る"); }
+  // バッチ定義を読み込んだときも、その URL が欄に入る。直して変換すると Robin と埋め込みに入る
+  const bj = fs.readFileSync("recordings/edi2_accept_batch.json", "utf8");
+  Object.defineProperty(input, "files", { value: [new dom.window.File([bj], "accept.json")], configurable: true });
+  input.dispatchEvent(new dom.window.Event("change"));
+  await new Promise((res) => setTimeout(res, 300));
+  if (f.value !== "file:///C:/temp/index.html") { errors.push("バッチ定義の URL が欄に入っていない: " + f.value); }
+  f.value = "https://edi.example.com/OA_HTML/AppsLocalLogin.jsp";
+  f.dispatchEvent(new dom.window.Event("input"));
+  d.getElementById("idcol").value = "プロジェクト番号";
+  d.getElementById("run").click();
+  await new Promise((res) => setTimeout(res, 100));
+  const out = d.getElementById("out").value;
+  if (out.indexOf("SET TargetUrl TO $'''https://edi.example.com/OA_HTML/AppsLocalLogin.jsp'''") < 0) {
+    errors.push("直した開くページが Robin に入っていない: " + d.getElementById("msg").textContent.slice(0, 200) + " / " + d.getElementById("assignMsg").textContent.slice(0, 200));
+  }
+  const back = dom.window.PadConvert.extractBatchFromRobin(out).batch;
+  if (!back || dom.window.PadConvert.getTargetUrl(back) !== "https://edi.example.com/OA_HTML/AppsLocalLogin.jsp") {
+    errors.push("直した開くページが埋め込みのバッチ定義に入っていない");
+  }
+  d.getElementById("resetAll").click();
+  if (f.value !== "") { errors.push("最初からやり直しで開くページの欄が空にならない"); }
+}
+
 // 背景色を固定したメッセージ欄に文字色が付いているか（ダークモードで白文字になる事故の防止）
 const css = [...d.querySelectorAll("style")].map((s) => s.textContent).join("\n");
 for (const cls of [".warn", ".err", ".ok"]) {

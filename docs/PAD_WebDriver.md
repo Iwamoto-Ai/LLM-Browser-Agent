@@ -749,6 +749,9 @@ ID 列 (--id-column)： 　プロジェクト番号
 BaseDir (--pad-out-dir)：  C:\temp
 
 3. オプション
+開くページ（TargetUrl）(--target-url)：　https://edi.example.com/OA_HTML/AppsLocalLogin.jsp
+　　　　最初に開く URL。ログイン前の入り口の URL を入れる。録画や読み込んだバッチ定義の URL が
+　　　　入り、ここで直すとバッチ定義に保存される
 ブラウザー (--pad-browser)：  edge
 プロキシ自動切り替え：　☑ Windows のプロキシ設定に合わせる（--proxy-auto）
 ドライバー自動取得：　☑ ブラウザーに合わせて自動で取ってくる（--auto-driver）
@@ -1052,6 +1055,19 @@ Python 版なら `--use-embedded` を付ける。
 
 ブラウザ版の変換器は、読み込んだ録画にログイン情報が含まれているとその場で知らせる。
 含まれていても変換には使わない。
+
+### 開くページ（TargetUrl）はログイン前の入り口にする
+
+録画は「録画を始めたときの画面」の URL を持つ。ログインしてから録画すると、
+`OA.jsp?…&_ti=…&oas=…` のような**ログイン後の URL**になる。`_ti` や `oas` はその時だけ有効な値なので、
+次の実行ではこの URL を開けない。
+
+変換器の **「開くページ（TargetUrl）」** の欄（Python 版は `--target-url`）で、ログイン前の入り口の
+URL（ブックマークしている URL）に直す。直した URL はバッチ定義（setup の `navigate`）に保存され、
+次からは直す必要がない。欄の URL にその時だけ有効な値らしい項目（`_ti` / `oas` / `jsessionid` /
+`token` など）があると、注意を出す。
+
+URL にパスワードなどの秘密は入れない。入り口の URL は、ブックマークと同じく秘密ではない。
 
 ### 起点画面まではフローが進む
 
@@ -1894,6 +1910,7 @@ python pad_webdriver_ref.py --batch recordings/edi2_practice_batch.json `
 | `--from-robin` | この変換器で作った Robin から、埋め込まれたバッチ定義を取り出す。埋め込みが無い古い Robin は読み解いて組み立てる（`--batch` `--details` は不要） |
 | `--save-batch` | `--from-robin` で取り出したバッチ定義の保存先（既定: Robin と同じ名前の `.batch.json`） |
 | `--use-embedded` | `--from-robin` で、PAD で手直しされていても埋め込み（手直しの前）をそのまま使う |
+| `--target-url` | 開くページ（TargetUrl）。録画の URL の代わりに使う。`--from-robin` では取り出すバッチ定義に残す |
 
 `--details` と `--driver-dir` が `--pad-out-dir` の配下にある場合、生成される Robin は
 それらを `%BaseDir%` 相対で出力する。上の例なら次のようになり、**配布時に直すのは

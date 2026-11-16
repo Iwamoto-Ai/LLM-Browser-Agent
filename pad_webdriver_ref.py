@@ -2011,6 +2011,66 @@ def merge_edited(embedded: dict, old: dict, parsed: dict, diffs: list) -> dict:
     return out
 
 
+# ------------------------------------------------------------
+# 開くページ（TargetUrl）
+#
+# 録画は「録画を始めたときの画面」の URL を持つ。ログインしてから録画すると、
+# ログイン後の URL（その時だけ有効な値が付いたもの）になり、次の実行では開けない。
+# 変換器で入り口の URL に直せるようにし、バッチ定義（setup の navigate）に残す。
+# ------------------------------------------------------------
+# その時だけ有効な値によく使われる名前（Oracle EBS の oas / _ti、Java の jsessionid など）
+_SESSION_PARAMS = ("jsessionid", "oas", "_ti", "transactionid", "sessionid", "session",
+                   "sid", "token", "access_token", "code", "state", "ticket")
+
+
+def get_target_url(batch: dict) -> str:
+    """setup の最初の navigate の URL（無ければ空）。"""
+    for st in batch.get("setup") or []:
+        if st.get("type") == "navigate":
+            return str(st.get("url") or "")
+    return ""
+
+
+def set_target_url(batch: dict, url: str) -> dict:
+    """開くページを url にしたバッチ定義（写し）を返す。url が空なら変えない。
+
+    setup に navigate があれば最初のものを書き換え、無ければウィンドウサイズの後ろに足す。"""
+    url = str(url or "").strip()
+    out = json.loads(json.dumps(batch))
+    if not url:
+        return out
+    setup = out.setdefault("setup", [])
+    for st in setup:
+        if st.get("type") == "navigate":
+            st["url"] = url
+            return out
+    k = 0
+    while k < len(setup) and setup[k].get("type") == "setViewport":
+        k += 1
+    setup.insert(k, {"type": "navigate", "url": url})
+    return out
+
+
+def session_params_in_url(url: str) -> list:
+    """URL の中の、その時だけ有効な値らしい項目の名前（ログイン後の URL の見分け）。"""
+    q = str(url or "")
+    q = q.split("#", 1)[0]
+    found = []
+    for part in re.split(r"[?&;]", q)[1:]:
+        name = part.split("=", 1)[0].strip().lower()
+        if name in _SESSION_PARAMS and name not in found:
+            found.append(name)
+    return found
+
+
+def _warn_session_url(url: str) -> None:
+    """開くページがログイン後の URL らしければ知らせる（次の実行では開けないため）。"""
+    found = session_params_in_url(url)
+    if found:
+        print(f"  ⚠ 開くページ（TargetUrl）がログイン後の URL のようです（{' / '.join(found)} は"
+              "その時だけ有効な値）。ログイン前の入り口の URL を --target-url で指定してください")
+
+
 def robin_to_batch(text: str, use_embedded: bool = False):
     """Robin からバッチ定義を得る。埋め込みがあればそれを、無ければ読み解く。
 
@@ -3278,6 +3338,9 @@ def main() -> None:
     p.add_argument("--from-robin", default="",
                    help="この変換器で作った Robin から、埋め込まれたバッチ定義を取り出す"
                         "（埋め込みが無い古い Robin は読み解いて組み立てる）")
+    p.add_argument("--target-url", default="",
+                   help="開くページ（TargetUrl）。録画の URL の代わりに使う（--from-robin では取り出す"
+                        "バッチ定義に残す）。ログイン後の URL ではなく、ログイン前の入り口の URL を書く")
     p.add_argument("--use-embedded", action="store_true",
                    help="--from-robin で、PAD で手直しされていても埋め込み（手直しの前）をそのまま使う")
     p.add_argument("--save-batch", default="",
@@ -3346,6 +3409,8 @@ def main() -> None:
             got, how, notes = robin_to_batch(f.read(), use_embedded=args.use_embedded)
         if got is None:
             p.error(f"{args.from_robin}: " + " / ".join(notes))
+        got = set_target_url(got, args.target_url)
+        _warn_session_url(get_target_url(got))
         out = args.save_batch or re.sub(r"(\.robin)?\.txt$", "", args.from_robin) + ".batch.json"
         with open(out, "w", encoding="utf-8") as f:
             json.dump(got, f, ensure_ascii=False, indent=2)
@@ -3366,7 +3431,8 @@ def main() -> None:
     if not args.batch or not args.details:
         p.error("--batch と --details が必要です（Robin から取り出すときは --from-robin）")
 
-    batch = load_recording(args.batch)
+    batch = set_target_url(load_recording(args.batch), args.target_url)
+    _warn_session_url(get_target_url(batch))
     common = load_recording(args.values) if args.values else {}
     # Robin 生成のみの場合、--details は「会社 PC 側のパス」でよく、手元に実体が無くてよい
     # Excel の明細を読むには openpyxl が要る。Robin を作るだけなら中身は列名の確認にしか

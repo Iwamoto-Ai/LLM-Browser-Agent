@@ -127,6 +127,11 @@
 
 <fieldset>
   <legend>3. オプション</legend>
+  <div><label for="targetUrl">開くページ（TargetUrl）</label>
+    <input type="text" id="targetUrl" style="width: 42em; max-width: 100%" value="" placeholder="https://… （ログイン前の入り口の URL）">
+    <div class="hint">最初に開く URL。<strong>ログイン前の入り口の URL</strong>（ブックマークしている URL）を
+      入れてください。録画や読み込んだバッチ定義の URL が入ります。ここで直すとバッチ定義に保存されます。</div>
+    <div class="warn" id="targetUrlWarn" hidden></div></div>
   <div><label for="browser">ブラウザー (--pad-browser)</label>
     <select id="browser"><option value="edge">edge</option><option value="chrome">chrome</option></select></div>
   <div><label for="shotName">エビデンスのファイル名</label>
@@ -2810,6 +2815,46 @@ function detailsTemplateColumns(columns, detailsFromResult) {
   return out;
 }
 
+// ------------------------------------------------------------
+// 開くページ（TargetUrl）。pad_webdriver_ref.py の get/set_target_url と同じ。
+// 録画はログイン後の URL になりやすいので、入り口の URL に直してバッチ定義に残す。
+// ------------------------------------------------------------
+var SESSION_PARAMS = ["jsessionid", "oas", "_ti", "transactionid", "sessionid", "session",
+                      "sid", "token", "access_token", "code", "state", "ticket"];
+
+function getTargetUrl(batch) {
+  var setup = (batch && batch.setup) || [];
+  for (var i = 0; i < setup.length; i++) {
+    if (setup[i].type === "navigate") { return String(setup[i].url || ""); }
+  }
+  return "";
+}
+
+function setTargetUrl(batch, url) {
+  url = String(url || "").trim();
+  var out = JSON.parse(JSON.stringify(batch));
+  if (!url) { return out; }
+  out.setup = out.setup || [];
+  for (var i = 0; i < out.setup.length; i++) {
+    if (out.setup[i].type === "navigate") { out.setup[i].url = url; return out; }
+  }
+  var k = 0;
+  while (k < out.setup.length && out.setup[k].type === "setViewport") { k++; }
+  out.setup.splice(k, 0, { type: "navigate", url: url });
+  return out;
+}
+
+// URL の中の、その時だけ有効な値らしい項目の名前（ログイン後の URL の見分け）
+function sessionParamsInUrl(url) {
+  var q = String(url || "").split("#")[0];
+  var parts = q.split(/[?&;]/).slice(1), found = [];
+  parts.forEach(function (p) {
+    var name = p.split("=")[0].trim().toLowerCase();
+    if (SESSION_PARAMS.indexOf(name) >= 0 && found.indexOf(name) < 0) { found.push(name); }
+  });
+  return found;
+}
+
 function buildRobin(batch, opt) {
   var detailsPath = opt.detailsPath;
   var idCol = opt.idCol;
@@ -3847,6 +3892,9 @@ root.PadConvert = {
   batchEmbedLines: batchEmbedLines,
   extractBatchFromRobin: extractBatchFromRobin,
   detailsIsXlsx: detailsIsXlsx,
+  getTargetUrl: getTargetUrl,
+  setTargetUrl: setTargetUrl,
+  sessionParamsInUrl: sessionParamsInUrl,
   readXlsxDetails: readXlsxDetails,
   xlsxTemplate: xlsxTemplate,
   detailsTemplateColumns: detailsTemplateColumns,
@@ -3943,6 +3991,30 @@ root.PadConvert = {
     var win = PadConvert.windowSize(steps || []);
     if ($("winW")) { $("winW").value = win.w; }
     if ($("winH")) { $("winH").value = win.h; }
+  }
+
+  // 開くページ（TargetUrl）の欄。ログイン後の URL らしければ知らせる
+  function showTargetUrl(url) {
+    $("targetUrl").value = url || "";
+    checkTargetUrl();
+  }
+  function checkTargetUrl() {
+    var found = PadConvert.sessionParamsInUrl($("targetUrl").value);
+    var w = $("targetUrlWarn");
+    w.hidden = !found.length;
+    w.textContent = found.length ? "ログイン後の URL のようです（" + found.join(" / ") +
+      " はその時だけ有効な値で、次の実行では開けません）。ログイン前の入り口の URL に直してください。" : "";
+  }
+  // 欄の URL をバッチ定義へ入れる（変換・保存・コピーの前に呼ぶ）
+  function syncTargetUrl() {
+    var v = $("targetUrl").value.trim();
+    if (!batchText || !v) { return; }
+    var b;
+    try { b = PadConvert.loadRecording(batchText); } catch (e) { return; }
+    if (!b.setup && !b.loop) { return; }        // 録画（steps だけ）のままなら何もしない
+    if (PadConvert.getTargetUrl(b) !== v) {
+      batchText = JSON.stringify(PadConvert.setTargetUrl(b, v), null, 2);
+    }
   }
 
   // バッチ定義に入っていた設定を画面へ戻す
@@ -4050,6 +4122,8 @@ root.PadConvert = {
         recSteps = PadConvert.usableSteps(obj);
         recAssign = PadConvert.guessAssignments(recSteps);
         lastRec = obj;
+        // 録画の最初のページ。ログインしてから録画すると、ログイン後の URL になる
+        showTargetUrl(((obj.steps || []).filter(function (st) { return st.type === "navigate"; })[0] || {}).url || "");
         var aidNote = applyRecordingAids();
         renderAssign((obj.steps || []).length);
         if (aidNote) { $("assignMsg").innerHTML = '<div class="ok">' + aidNote + "</div>"; }
@@ -4075,6 +4149,7 @@ root.PadConvert = {
         batchReady = true;          // 読み込んだ時点で変換できる
         renderAssign(recSteps.length);
         var applied = applyBatchOptions(obj);
+        showTargetUrl(PadConvert.getTargetUrl(obj));
         var how = fromRobin === "edited" ? "Robin に埋め込まれたバッチ定義を取り出し、PAD での手直しを反映しました" :
                   fromRobin === "embed" && edited ? "Robin に埋め込まれたバッチ定義（手直しの前）を取り出しました" :
                   fromRobin === "embed" ? "Robin に埋め込まれたバッチ定義を取り出しました" :
@@ -4405,6 +4480,9 @@ root.PadConvert = {
     }
     var batch = PadConvert.buildBatch(recSteps, recAssign, recTitle,
                                       currentBatchOptions());
+    // 開くページは欄の値を使う（空なら録画の URL を欄に出す）
+    if ($("targetUrl").value.trim()) { batch = PadConvert.setTargetUrl(batch, $("targetUrl").value); }
+    else { showTargetUrl(PadConvert.getTargetUrl(batch)); }
     batchText = JSON.stringify(batch, null, 2);
     // 振り分け画面はそのまま残す。実行結果を見てから直して作り直せるように。
     batchReady = true;
@@ -4415,10 +4493,13 @@ root.PadConvert = {
       " / loop " + n("loop") + " / recover " + n("recover") + " / teardown " + n("teardown") +
       "）。下の「変換する」を押すと PADコードになります。</div>";
   });
-  $("copyBatch").addEventListener("click", function () { copyText(batchText, "バッチ定義"); });
+  $("copyBatch").addEventListener("click", function () { syncTargetUrl(); copyText(batchText, "バッチ定義"); });
   $("saveBatch").addEventListener("click", function () {
+    syncTargetUrl();
     saveText(batchText, "pad_batch.json");
   });
+
+  $("targetUrl").addEventListener("input", checkTargetUrl);
 
   $("run").addEventListener("click", function () {
     if (!batchText) { show("err", "録画 JSON を読み込んでください。"); return; }
@@ -4442,6 +4523,7 @@ root.PadConvert = {
       show("err", "ID 列 '" + idCol + "' が明細の列名にありません: " + detailHeaders.join(" / "));
       return;
     }
+    syncTargetUrl();
     var batch;
     try { batch = PadConvert.loadRecording(batchText); }
     catch (err) { show("err", "録画 JSON を読めません: " + err.message); return; }
@@ -4509,6 +4591,7 @@ root.PadConvert = {
     recSteps = null; recAssign = null; recTitle = ""; detailHeaders = null;
     batchReady = false;
     applyViewport([]);     // ウィンドウサイズは録画に付くものなので既定に戻す
+    showTargetUrl("");     // 開くページも業務ごとのもの
     $("batchFile").value = ""; $("detailsFile").value = "";
     $("batchInfo").textContent = ""; $("detailsInfo").textContent = "";
     $("assignBox").hidden = true; $("assignTable").innerHTML = "";
