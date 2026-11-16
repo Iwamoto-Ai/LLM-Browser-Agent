@@ -82,6 +82,25 @@ const dup = '<div id="PosCreateAsnLink"><table><tr><td>' +
   check(r.ids[0] === "b1", "先頭のボタンではなく " + r.ids[0] + " を押した");
 }
 {
+  // リンク先を保存: 押さずに、包んでいるリンクの写し（download 付き）を 1 回だけ押す
+  const body = '<a id="res" href="OA.jsp?_rc=FNDCPREQUESTVIEWPAGE&amp;OUTPUT=Y"><img id="icon" src="r.gif"></a>';
+  const dom = new JSDOM("<!doctype html><body>" + body + "</body>", { runScripts: "outside-only", url: "https://edi.example.com/OA_HTML/x.jsp" });
+  const w = dom.window, got = [];
+  w.document.addEventListener("click", (e) => {
+    got.push({ id: e.target.id, dl: e.target.getAttribute("download"), href: e.target.href });
+    e.preventDefault();
+  }, true);
+  const fn = w.eval("(function () { return function () { " + P.jsActOneline(true, true) + " }; })()");
+  const res = fn(["#icon"], "saveLink", "");
+  check(res.ok, "リンク先を保存が失敗した");
+  check(got.length === 1 && got[0].dl === "" && got[0].id === "", "リンクの写しを 1 回だけ押していない: " + JSON.stringify(got));
+  check(got[0] && got[0].href === "https://edi.example.com/OA_HTML/OA.jsp?_rc=FNDCPREQUESTVIEWPAGE&OUTPUT=Y",
+        "リンク先が違う: " + (got[0] && got[0].href));
+  check(!w.document.querySelector("a[download]"), "リンクの写しが残っている");
+  const none = fn(["#nolink"], "saveLink", "");
+  check(!none.ok, "リンクが無いのに成功した");
+}
+{
   // 入力のあとフォーカスを外す
   const body = '<input id="f"><input id="g">';
   const on = runAct(body, ["#f"], "fill", "abc");
@@ -209,4 +228,4 @@ if (errors.length) {
   console.log("NG  録画の下ごしらえ\n  " + errors.join("\n  "));
   process.exit(1);
 }
-console.log("OK  録画の下ごしらえ: 押せる要素の優先 / フォーカス外し / Win+Shift+S / 列の自動割り当て / バッチ定義の埋め込み / Robin の読み解き / Excel の明細");
+console.log("OK  録画の下ごしらえ: 押せる要素の優先 / フォーカス外し / Win+Shift+S / 列の自動割り当て / バッチ定義の埋め込み / Robin の読み解き / Excel の明細 / リンク先を保存");

@@ -119,6 +119,8 @@
           "#xls2"
         ]
       ]
+    ,
+      "saveLink": true
     },
     {
       "type": "screenshot"

@@ -404,6 +404,18 @@ var JS_ACT = [
 "    el.dispatchEvent(new Event(`input`, { bubbles: true }));",
 "    el.dispatchEvent(new Event(`change`, { bubbles: true }));",
 "    if (BLUR) { try { el.blur(); } catch (e) {} }",
+"  } else if (action === `saveLink`) {",
+"    var a = el.closest ? el.closest(`a[href]`) : null;",
+"    if (!a && el.querySelector) { a = el.querySelector(`a[href]`); }",
+"    if (!a) { continue; }",
+"    var d = el.ownerDocument || document;",
+"    var t = d.createElement(`a`);",
+"    t.href = a.href;",
+"    t.setAttribute(`download`, ``);",
+"    t.style.display = `none`;",
+"    (d.body || d.documentElement).appendChild(t);",
+"    t.click();",
+"    t.remove();",
 "  } else if (action === `text`) {",
 "    var s = el.innerText || el.textContent || ``;",
 "    return { ok: true, used: cands[i], text: s.trim() };",
@@ -851,16 +863,20 @@ function robinCapture(cands, varName, indent, stepNo, note, cols, extract, key) 
   return out;
 }
 
-function robinDownload(cands, name, indent, stepNo, cols, timeout) {
+function robinDownload(cands, name, indent, stepNo, cols, timeout, saveLink) {
   timeout = timeout || 60;
   var L = [];
   var A = function (s) { L.push(s); };
   A(indent + "# [" + stepNo + "] ダウンロード " +
     (cands[0] ? toRobinVar(cands[0], cols) : ""));
+  if (saveLink) {
+    A(indent + "# 押さずに「名前を付けてリンク先を保存」と同じ取り方をする" +
+      "（押すと 2 回取りに行き、2 回目が認証エラーになる画面のため）");
+  }
   A(indent + "# 押す前の件数を数えておき、増えたぶんを新しいファイルとみなす。");
   A(indent + folderGet("DlDir", "$" + Q_ + "*.*" + Q_, "DlBefore"));
   A(indent + "SET DlCountBefore TO DlBefore.Count");
-  L = L.concat(robinAct(cands, "click", "", indent,
+  L = L.concat(robinAct(cands, saveLink ? "saveLink" : "click", "", indent,
                         "download " + (cands[0] || ""), stepNo, cols));
   A(indent + "IF RowError = " + robinStr("") + " THEN");
   A(indent + "    SET DlWait TO 0");
@@ -1277,6 +1293,7 @@ function batchToSteps(batch) {
     var as = { sec: sec, secret: "", varCol: "", selLit: "", shot: false,
                shotName: "", dl: st.type === "download",
                dlName: st.type === "download" ? (st.name || "") : "",
+               dlLink: st.type === "download" && !!st.saveLink,
                cap: st.type === "capture",
                capName: st.type === "capture" ? (st.name || "") : "",
                capDigits: st.type === "capture" && st.extract === "digits",
@@ -1616,6 +1633,8 @@ function buildBatch(steps, assigns, title, options) {
       if (as.dl) {
         copy.type = "download";
         if (as.dlName) { copy.name = as.dlName; }
+        // 押すと 2 回取りに行く画面向けに、リンク先を 1 回だけ保存する
+        if (as.dlLink) { copy.saveLink = true; } else { delete copy.saveLink; }
       }
       // 値を記録する行。押さずに文字だけ読むので click ではなくなる。
       if (as.cap) {
@@ -2099,7 +2118,9 @@ function parseRobin(text) {
         st.name = has(extra, "name") ? extra.name : "取得値";
         loop.push(st);
       } else if (pend === "download") {
-        loop.push({ type: "download", selectors: sels(cands) });
+        st = { type: "download", selectors: sels(cands) };
+        if (act === "saveLink") { st.saveLink = true; }
+        loop.push(st);
       } else if (pend === "assertText") {
         st = { type: "assertText", text: unvar(val) };
         if (extra.timeout) { st.timeout = extra.timeout; }
@@ -2194,7 +2215,7 @@ function stepLabel(st) {
   }
   if (t === "capture") { return "読み取り「" + g("name") + "」"; }
   if (t === "scrollFind") { return "スクロールして探す「" + g("text") + "」"; }
-  if (t === "download") { return "ダウンロード " + sel; }
+  if (t === "download") { return "ダウンロード " + sel + (st.saveLink ? "（リンク先を保存）" : ""); }
   if (t === "screenshot") { return "エビデンス"; }
   if (t === "comment") { return "コメント「" + g("text") + "」"; }
   return t;
@@ -2206,7 +2227,7 @@ function stepDetail(st) {
   if (st.selectors && st.selectors.length) {
     parts.push(st.selectors.map(function (g) { return String((g || [""])[0]); }).join(" / "));
   }
-  ["value", "text", "key", "name", "extract", "timeout", "tries", "url"].forEach(function (k) {
+  ["value", "text", "key", "name", "extract", "timeout", "tries", "url", "saveLink"].forEach(function (k) {
     if (Object.prototype.hasOwnProperty.call(st, k)) { parts.push(k + "=" + pyStr(st[k])); }
   });
   return parts.join(" ");
@@ -3649,7 +3670,7 @@ function buildRobin(batch, opt) {
       var dc = robinFilterCandidates(candidates(lst));
       A(inner + "# ダウンロードしたファイルをエビデンスにする。");
       A(inner + "# 画面に内容が出ず、Excel や PDF を受け取って初めて分かる業務向け。");
-      L = L.concat(robinDownload(dc, lst.name || shotName, inner, m, cols));
+      L = L.concat(robinDownload(dc, lst.name || shotName, inner, m, cols, undefined, !!lst.saveLink));
       L = L.concat(robinFail(inner, capVals));
       A("");
       continue;
@@ -4091,7 +4112,7 @@ root.PadConvert = {
              // 読み込んだバッチ定義を下の表から作り直すと、起点の目印や recover だけの
              // 手順などが落ちる。表は確かめる用として、直すときは元からやり直してもらう
              "振り分けを直す場合は、バッチ定義（元の録画 JSON）からやり直してください。" +
-             "下の表から作り直すと、起点の目印や recover の手順などが失われます。");
+             "「1-2. 操作の振り分け」の表から作り直すと、起点の目印や recover の手順などが失われます。");
       } else {
         show("warn", "JSON は読めましたが、録画（steps）でもバッチ定義（setup / loop）でも" +
              "ありません。ファイルを確かめてください。");
@@ -4185,7 +4206,12 @@ root.PadConvert = {
              ' <input type="text" class="dlTxt" data-i="' + i + '" size="28"' +
              ' placeholder="空ならエビデンス名と同じ"' +
              ' value="' + (as.dlName || "") + '"' + off +
-             (as.dl ? "" : " hidden") + ">";
+             (as.dl ? "" : " hidden") + ">" +
+             '<label class="dlLink" data-i="' + i + '"' + (as.dl ? "" : " hidden") +
+             ' style="font-weight:normal" title="押すとファイルが 2 つ落ちる・認証エラーの' +
+             'ファイルが落ちる画面では、こちらにする（右クリックの「名前を付けてリンク先を保存」と同じ）">' +
+             '<input type="checkbox" class="dlLinkChk" data-i="' + i + '"' + off +
+             (as.dlLink ? " checked" : "") + "> リンク先を保存</label>";
       }
       var mark = i === origin
         ? '<td class="mark">▶ 起点</td>'
@@ -4260,6 +4286,14 @@ root.PadConvert = {
         recAssign[i].dl = el.checked;
         var txt = $("assignTable").querySelector('.dlTxt[data-i="' + i + '"]');
         if (txt) { txt.hidden = !el.checked; }
+        var lk = $("assignTable").querySelector('.dlLink[data-i="' + i + '"]');
+        if (lk) { lk.hidden = !el.checked; }
+        batchReady = false;
+      });
+    });
+    Array.prototype.forEach.call(q(".dlLinkChk"), function (el) {
+      el.addEventListener("change", function () {
+        recAssign[+el.dataset.i].dlLink = el.checked;
         batchReady = false;
       });
     });
