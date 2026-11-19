@@ -82,23 +82,103 @@ const dup = '<div id="PosCreateAsnLink"><table><tr><td>' +
   check(r.ids[0] === "b1", "先頭のボタンではなく " + r.ids[0] + " を押した");
 }
 {
-  // リンク先を保存: 押さずに、包んでいるリンクの写し（download 付き）を 1 回だけ押す
+  // リンク先を保存: 押さずに、包んでいるリンクの先を fetch で受け取り、pad_download.拡張子 で保存する
+  // （実機の Oracle EBS では、リンクの写しを押すと認証エラー、fetch なら Excel が取れた）
   const body = '<a id="res" href="OA.jsp?_rc=FNDCPREQUESTVIEWPAGE&amp;OUTPUT=Y"><img id="icon" src="r.gif"></a>';
-  const dom = new JSDOM("<!doctype html><body>" + body + "</body>", { runScripts: "outside-only", url: "https://edi.example.com/OA_HTML/x.jsp" });
-  const w = dom.window, got = [];
-  w.document.addEventListener("click", (e) => {
-    got.push({ id: e.target.id, dl: e.target.getAttribute("download"), href: e.target.href });
-    e.preventDefault();
-  }, true);
-  const fn = w.eval("(function () { return function () { " + P.jsActOneline(true, true) + " }; })()");
-  const res = fn(["#icon"], "saveLink", "");
+  const make = (resp) => {
+    const dom = new JSDOM("<!doctype html><body>" + body + "</body>",
+                          { runScripts: "outside-only", url: "https://edi.example.com/OA_HTML/x.jsp" });
+    const w = dom.window, st = { fetched: [], saved: [] };
+    w.fetch = (url, opt) => { st.fetched.push({ url, cred: opt && opt.credentials }); return Promise.resolve(resp); };
+    w.URL.createObjectURL = () => "blob:x";
+    w.URL.revokeObjectURL = () => {};
+    w.document.addEventListener("click", (e) => {
+      st.saved.push({ id: e.target.id, dl: e.target.download, href: e.target.href });
+      e.preventDefault();
+    }, true);
+    const fn = w.eval("(function () { return function () { " + P.jsActOneline(true, true) + " }; })()");
+    return { w, st, fn };
+  };
+  const reply = (type, disp, text, size) => ({
+    headers: { get: (k) => (k === "content-type" ? type : k === "content-disposition" ? disp : null) },
+    blob: () => Promise.resolve({ size: size, text: () => Promise.resolve(text) })
+  });
+  const tick = () => new Promise((r) => setTimeout(r, 20));
+  // Excel（日本語の名前は Shift-JIS のまま来て文字化けしても、拡張子は取れる）
+  let m = make(reply("application/vnd.ms-excel", "inline; filename =\"XXPO_\u00fb\u00f3_191126.xls\"", "", 43008));
+  let res = m.fn(["#icon"], "saveLink", "");
+  await tick();
   check(res.ok, "リンク先を保存が失敗した");
-  check(got.length === 1 && got[0].dl === "" && got[0].id === "", "リンクの写しを 1 回だけ押していない: " + JSON.stringify(got));
-  check(got[0] && got[0].href === "https://edi.example.com/OA_HTML/OA.jsp?_rc=FNDCPREQUESTVIEWPAGE&OUTPUT=Y",
-        "リンク先が違う: " + (got[0] && got[0].href));
-  check(!w.document.querySelector("a[download]"), "リンクの写しが残っている");
-  const none = fn(["#nolink"], "saveLink", "");
-  check(!none.ok, "リンクが無いのに成功した");
+  check(m.st.fetched.length === 1 && m.st.fetched[0].cred === "include" &&
+        m.st.fetched[0].url === "https://edi.example.com/OA_HTML/OA.jsp?_rc=FNDCPREQUESTVIEWPAGE&OUTPUT=Y",
+        "リンク先をログイン状態で 1 回だけ取りに行っていない: " + JSON.stringify(m.st.fetched));
+  check(m.st.saved.length === 1 && m.st.saved[0].dl === "pad_download.xls",
+        "受け取った中身を pad_download.xls で保存していない: " + JSON.stringify(m.st.saved));
+  check(!m.w.document.querySelector("a[download]"), "保存用のリンクが残っている");
+  // 名前が無ければ種類から
+  m = make(reply("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", null, "", 9000));
+  m.fn(["#icon"], "saveLink", "");
+  await tick();
+  check(m.st.saved.length === 1 && m.st.saved[0].dl === "pad_download.xlsx", "種類から拡張子を決めていない");
+  // 認証エラーの文字だけなら保存しない（ダウンロードが来ないので、その件は失敗になる）
+  m = make(reply("text/plain", null, "Authentication failed.\n", 23));
+  m.fn(["#icon"], "saveLink", "");
+  await tick();
+  check(m.st.saved.length === 0 && m.w.__padDlError === "Authentication failed.",
+        "認証エラーの文字を保存してしまった: " + JSON.stringify(m.st.saved));
+  // リンクが無ければ失敗
+  check(!make(reply("", null, "", 0)).fn(["#nolink"], "saveLink", "").ok, "リンクが無いのに成功した");
+}
+{
+  // ウィンドウが前面で操作中でないと、focus() / blur() を呼んでも合図が出ない。
+  // 実 EDI1 の年月の欄は、外れた合図で 202610 を 2026-10 に整える。合図が出なかったときは
+  // こちらから出して、整える仕掛けを動かす（出たときは二重に出さない）
+  const field = '<input name="yyyymm" maxlength="7" onfocus="this.dataset.f=(+(this.dataset.f||0)+1)" ' +
+    'onblur="this.dataset.b=(+(this.dataset.b||0)+1);if(this.value.length===6){this.value=this.value.slice(0,4)+String.fromCharCode(45)+this.value.slice(4)}">';
+  const run = (silent) => {
+    const dom = new JSDOM("<!doctype html><body>" + field + "</body>", { runScripts: "dangerously" });
+    const w = dom.window;
+    if (silent) {   // 合図が出ない状態をまねる
+      w.HTMLElement.prototype.focus = function () {};
+      w.HTMLElement.prototype.blur = function () {};
+    }
+    const fn = w.eval("(function () { return function () { " + P.jsActOneline(true, true) + " }; })()");
+    const res = fn(["[name=yyyymm]"], "fill", "202610");
+    const el = w.document.querySelector("[name=yyyymm]");
+    return { res, v: el.value, f: el.dataset.f, b: el.dataset.b };
+  };
+  const quiet = run(true);
+  check(quiet.res.ok && quiet.v === "2026-10", "合図が出ないとき、年月が整わない: " + quiet.v);
+  check(quiet.f === "1" && quiet.b === "1", "合図が出ないとき、こちらから 1 回ずつ出していない: " + JSON.stringify(quiet));
+  const normal = run(false);
+  check(normal.v === "2026-10" && normal.f === "1" && normal.b === "1",
+        "合図が出るときに二重に出している: " + JSON.stringify(normal));
+}
+{
+  // 画面が落ち着くまで待つ（idle）: 少しあとに動く予約（setTimeout）・押した直後を「忙しい」と見る。
+  // 実 EDI1 の年月の欄は、値が変わると 1 秒後に自動で送信する（その間に検索を押すと消される）
+  const page = '<input name="ym" onchange="setTimeout(String.fromCharCode(119,105,110,100,111,119,46,115,101,110,116,61,49),300)">' +
+               '<button id="go">検索</button>';
+  const dom = new JSDOM("<!doctype html><body>" + page + "</body>", { runScripts: "dangerously" });
+  const w = dom.window;
+  const fn = w.eval("(function () { return function () { " + P.jsActOneline(true, true) + " }; })()");
+  // 読み込み中は「忙しい」と見る（正しい）。読み終わってから試す
+  check(w.document.readyState === "complete" || !fn([], "idle", "").ok, "読み込み中を忙しいと見ていない");
+  while (w.document.readyState !== "complete") { await new Promise((r) => setTimeout(r, 10)); }
+  const first = fn([], "idle", "");
+  check(first.ok, "何もしていないのに忙しいと言う: " + first.text);
+  fn(["[name=ym]"], "fill", "202610");
+  const busy = fn([], "idle", "");
+  check(!busy.ok && /予約1/.test(busy.text), "自動送信の予約を数えていない: " + JSON.stringify(busy));
+  await new Promise((r) => setTimeout(r, 400));
+  check(w.sent === 1, "予約していた処理が動いていない（仕掛けが文字の setTimeout を壊した）");
+  const calm = fn([], "idle", "");
+  check(calm.ok, "予約が動いたあとも忙しいと言う: " + calm.text);
+  fn(["#go"], "click", "");
+  const justClicked = fn([], "idle", "");
+  check(!justClicked.ok && /押した直後/.test(justClicked.text), "押した直後を忙しいと見ていない: " + justClicked.text);
+  await new Promise((r) => setTimeout(r, 750));
+  check(fn([], "idle", "").ok, "押してしばらくたっても忙しいと言う");
 }
 {
   // 入力のあとフォーカスを外す
@@ -228,4 +308,4 @@ if (errors.length) {
   console.log("NG  録画の下ごしらえ\n  " + errors.join("\n  "));
   process.exit(1);
 }
-console.log("OK  録画の下ごしらえ: 押せる要素の優先 / フォーカス外し / Win+Shift+S / 列の自動割り当て / バッチ定義の埋め込み / Robin の読み解き / Excel の明細 / リンク先を保存");
+console.log("OK  録画の下ごしらえ: 押せる要素の優先 / フォーカス外し / Win+Shift+S / 列の自動割り当て / バッチ定義の埋め込み / Robin の読み解き / Excel の明細 / リンク先を保存 / 合図の出ない入力欄 / 画面が落ち着くまで待つ");

@@ -173,7 +173,7 @@
      エビデンスはページ全体を撮るので、縦を小さめにしても写る範囲は切れない。</div>
   <div class="subhead">サイトの設定（バッチ定義に保存）</div>
   <div class="hint">サイトに合わせる設定。バッチ定義に保存され、次に読み込んだときに戻る。
-     既定はすべてオン。合わないサイトだけ外す。</div>
+     既定は「画面が落ち着くまで待つ」だけオフで、ほかはオン。合わないサイトだけ変える。</div>
   <div><label for="stepWait">要素が見つかるまで待つ</label>
     最大 <input type="number" id="stepWait" value="15" min="1" step="1"> 秒
     <span class="hint">画面の切り替わりが遅いサイトは増やす</span></div>
@@ -183,6 +183,10 @@
   <div><label for="blurAfterFill">入力のあと</label>
     <label class="inline"><input type="checkbox" id="blurAfterFill" checked>
       フォーカスを外す（Oracle など、外したときに確定するサイト向け）</label></div>
+  <div><label for="waitIdle">操作の前に</label>
+    <label class="inline"><input type="checkbox" id="waitIdle">
+      画面が落ち着くまで待つ（値を入れると少しあとに自動で送信する EDI 向け）</label>
+    <span class="hint">自動送信の予約・通信・読み込みが終わってから次の操作に進む。既定はオフ</span></div>
   <div><label for="shotFromKeys">録画の Win+Shift+S</label>
     <label class="inline"><input type="checkbox" id="shotFromKeys" checked>
       エビデンス撮影に置き換える（録画を読み込むときに働く）</label></div>
@@ -388,6 +392,63 @@ var JS_ACT = [
 "  if (!out) { return { ok: false, used: null }; }",
 "  return { ok: true, used: null, text: out };",
 "}",
+"if (action === `idle`) {",
+"  var why = ``;",
+"  var arm = function (win) {",
+"    if (!win || win.__padIdle) { return; }",
+"    var st = win.setTimeout, ct = win.clearTimeout, pend = {}, box = { timers: pend, xhr: 0, nav: false };",
+"    win.__padIdle = box;",
+"    win.setTimeout = function (fn, ms) {",
+"      var rest = Array.prototype.slice.call(arguments, 2);",
+"      var delay = Number(ms) || 0;",
+"      if (delay > 3000) { return st.apply(win, arguments); }",
+"      var id = st.call(win, function () {",
+"        delete pend[id];",
+"        if (typeof fn === `function`) { return fn.apply(win, rest); }",
+"        return win.eval(String(fn));",
+"      }, delay);",
+"      pend[id] = true;",
+"      return id;",
+"    };",
+"    win.clearTimeout = function (id) { delete pend[id]; return ct.call(win, id); };",
+"    try {",
+"      var send = win.XMLHttpRequest.prototype.send;",
+"      win.XMLHttpRequest.prototype.send = function () {",
+"        box.xhr = box.xhr + 1;",
+"        this.addEventListener(`loadend`, function () { box.xhr = Math.max(0, box.xhr - 1); });",
+"        return send.apply(this, arguments);",
+"      };",
+"    } catch (e) {}",
+"    try {",
+"      if (win.fetch) {",
+"        var f0 = win.fetch;",
+"        win.fetch = function () {",
+"          box.xhr = box.xhr + 1;",
+"          var done = function () { box.xhr = Math.max(0, box.xhr - 1); };",
+"          var pr = f0.apply(win, arguments);",
+"          pr.then(done, done);",
+"          return pr;",
+"        };",
+"      }",
+"    } catch (e) {}",
+"    try { win.addEventListener(`beforeunload`, function () { box.nav = true; }); } catch (e) {}",
+"  };",
+"  var idocs = allDocs();",
+"  for (var j = 0; j < idocs.length; j++) {",
+"    var dv = idocs[j].defaultView;",
+"    if (idocs[j].readyState !== `complete`) { why = why + j + `:読込中 `; }",
+"    arm(dv);",
+"    var bx = dv && dv.__padIdle;",
+"    if (bx) {",
+"      var n = Object.keys(bx.timers).length;",
+"      if (n) { why = why + j + `:予約` + n + ` `; }",
+"      if (bx.xhr) { why = why + j + `:通信` + bx.xhr + ` `; }",
+"      if (bx.nav) { why = why + j + `:移動中 `; }",
+"    }",
+"  }",
+"  if (window.__padClickAt && Date.now() - window.__padClickAt < 700) { why = why + `押した直後 `; }",
+"  return { ok: !why, used: null, text: why.trim() };",
+"}",
 "if (action === `exists`) {",
 "  var docs = allDocs();",
 "  var txt = ``;",
@@ -402,25 +463,65 @@ var JS_ACT = [
 "  if (!el) { continue; }",
 "  if (action === `click`) {",
 "    try { el.scrollIntoView({ block: `center` }); } catch (e) {}",
+"    window.__padClickAt = Date.now();",
 "    el.click();",
 "  } else if (action === `fill`) {",
+"    var gotF = false, gotB = false;",
+"    var onF = function () { gotF = true; };",
+"    var onB = function () { gotB = true; };",
+"    el.addEventListener(`focus`, onF);",
+"    el.addEventListener(`blur`, onB);",
 "    el.focus();",
+"    if (!gotF) { try { el.dispatchEvent(new FocusEvent(`focus`)); } catch (e) {} }",
 "    el.value = value;",
 "    el.dispatchEvent(new Event(`input`, { bubbles: true }));",
 "    el.dispatchEvent(new Event(`change`, { bubbles: true }));",
-"    if (BLUR) { try { el.blur(); } catch (e) {} }",
+"    if (BLUR) {",
+"      try { el.blur(); } catch (e) {}",
+"      if (!gotB) { try { el.dispatchEvent(new FocusEvent(`blur`)); } catch (e) {} }",
+"    }",
+"    el.removeEventListener(`focus`, onF);",
+"    el.removeEventListener(`blur`, onB);",
 "  } else if (action === `saveLink`) {",
 "    var a = el.closest ? el.closest(`a[href]`) : null;",
 "    if (!a && el.querySelector) { a = el.querySelector(`a[href]`); }",
 "    if (!a) { continue; }",
 "    var d = el.ownerDocument || document;",
-"    var t = d.createElement(`a`);",
-"    t.href = a.href;",
-"    t.setAttribute(`download`, ``);",
-"    t.style.display = `none`;",
-"    (d.body || d.documentElement).appendChild(t);",
-"    t.click();",
-"    t.remove();",
+"    var w = d.defaultView || window;",
+"    w.__padDlError = ``;",
+"    w.fetch(a.href, { credentials: `include` }).then(function (r) {",
+"      var ct = (r.headers.get(`content-type`) || ``).toLowerCase();",
+"      var cd = r.headers.get(`content-disposition`) || ``;",
+"      return r.blob().then(function (b) {",
+"        var head = ct.indexOf(`text/`) === 0 && b.size < 2000 ? b.text() : Promise.resolve(``);",
+"        return head.then(function (tx) {",
+"          if (tx.indexOf(`Authentication failed`) >= 0) { w.__padDlError = tx.trim(); return; }",
+"          var ext = ``;",
+"          var k = cd.toLowerCase().indexOf(`filename`);",
+"          if (k >= 0) {",
+"            var nm = cd.slice(k);",
+"            var p = nm.lastIndexOf(`.`);",
+"            for (var j = p + 1; p >= 0 && j < nm.length; j++) {",
+"              var ch = nm.charAt(j);",
+"              if ((ch >= `a` && ch <= `z`) || (ch >= `A` && ch <= `Z`) || (ch >= `0` && ch <= `9`)) { ext += ch; } else { break; }",
+"            }",
+"          }",
+"          if (!ext) {",
+"            ext = ct.indexOf(`spreadsheetml`) >= 0 ? `xlsx` : ct.indexOf(`ms-excel`) >= 0 ? `xls` :",
+"              ct.indexOf(`pdf`) >= 0 ? `pdf` : ct.indexOf(`csv`) >= 0 ? `csv` :",
+"              ct.indexOf(`zip`) >= 0 ? `zip` : ct.indexOf(`html`) >= 0 ? `html` : `bin`;",
+"          }",
+"          var t = d.createElement(`a`);",
+"          t.href = w.URL.createObjectURL(b);",
+"          t.download = `pad_download.` + ext.toLowerCase();",
+"          t.style.display = `none`;",
+"          (d.body || d.documentElement).appendChild(t);",
+"          t.click();",
+"          t.remove();",
+"          w.setTimeout(function () { w.URL.revokeObjectURL(t.href); }, 60000);",
+"        });",
+"      });",
+"    }).catch(function (e) { w.__padDlError = String(e); });",
 "  } else if (action === `text`) {",
 "    var s = el.innerText || el.textContent || ``;",
 "    return { ok: true, used: cands[i], text: s.trim() };",
@@ -553,15 +654,16 @@ function toRobinVar(text, cols) {
 var STEP_WAIT = 15;
 
 // サイトの設定（バッチ定義の options に保存する。PC ではなくサイトに紐づく）
-var SITE_DEFAULTS = { stepWait: STEP_WAIT, preferClickable: true, blurAfterFill: true };
+var SITE_DEFAULTS = { stepWait: STEP_WAIT, preferClickable: true, blurAfterFill: true, waitIdle: false };
 
 // サイトの設定を決める。指定 → バッチ定義の options → 既定 の順（Python 版と同じ）。
-function siteSettings(batch, stepWait, preferClickable, blurAfterFill) {
+function siteSettings(batch, stepWait, preferClickable, blurAfterFill, waitIdle) {
   var opts = (batch && batch.options) || {};
   var out = { stepWait: SITE_DEFAULTS.stepWait, preferClickable: SITE_DEFAULTS.preferClickable,
-              blurAfterFill: SITE_DEFAULTS.blurAfterFill };
-  var given = { stepWait: stepWait, preferClickable: preferClickable, blurAfterFill: blurAfterFill };
-  ["stepWait", "preferClickable", "blurAfterFill"].forEach(function (k) {
+              blurAfterFill: SITE_DEFAULTS.blurAfterFill, waitIdle: SITE_DEFAULTS.waitIdle };
+  var given = { stepWait: stepWait, preferClickable: preferClickable, blurAfterFill: blurAfterFill,
+                waitIdle: waitIdle };
+  ["stepWait", "preferClickable", "blurAfterFill", "waitIdle"].forEach(function (k) {
     var v = (given[k] !== undefined && given[k] !== null) ? given[k] : opts[k];
     if (v === undefined || v === null || v === "") { return; }
     if (k === "stepWait") {
@@ -876,11 +978,14 @@ function robinDownload(cands, name, indent, stepNo, cols, timeout, saveLink) {
     (cands[0] ? toRobinVar(cands[0], cols) : ""));
   if (saveLink) {
     A(indent + "# 押さずに「名前を付けてリンク先を保存」と同じ取り方をする" +
-      "（押すと 2 回取りに行き、2 回目が認証エラーになる画面のため）");
+      "（押すと認証エラーになる画面のため。裏でリンク先を受け取って保存する）");
   }
   A(indent + "# 押す前の件数を数えておき、増えたぶんを新しいファイルとみなす。");
   A(indent + folderGet("DlDir", "$" + Q_ + "*.*" + Q_, "DlBefore"));
   A(indent + "SET DlCountBefore TO DlBefore.Count");
+  A(indent + "# Oracle EBS は、結果ファイルを渡せないとき FNDWRR.txt（中身は Authentication failed.）を返す。");
+  A(indent + "# それが増えたら、エビデンスにせず失敗にする（認証エラーの文字を「成功」にしないため）。");
+  A(indent + folderGet("DlDir", "$" + Q_ + "FNDWRR*.txt" + Q_, "DlErrBefore"));
   L = L.concat(robinAct(cands, saveLink ? "saveLink" : "click", "", indent,
                         "download " + (cands[0] || ""), stepNo, cols));
   A(indent + "IF RowError = " + robinStr("") + " THEN");
@@ -901,7 +1006,13 @@ function robinDownload(cands, name, indent, stepNo, cols, timeout, saveLink) {
   A(indent + "        END");
   A(indent + "    END");
   A(indent + "    " + folderGet("DlDir", "$" + Q_ + "*.*" + Q_, "DlAfter"));
-  A(indent + "    IF DlAfter.Count > DlCountBefore THEN");
+  A(indent + "    " + folderGet("DlDir", "$" + Q_ + "FNDWRR*.txt" + Q_, "DlErrAfter"));
+  var authErr = "ステップ" + stepNo + "（ダウンロード）で落ちてきたのは認証エラーのファイル（FNDWRR.txt）でした。" +
+    "エビデンスにしていません" + (saveLink ? "" : "。このダウンロードを「リンク先を保存」にしてください");
+  A(indent + "    IF DlErrAfter.Count > DlErrBefore.Count THEN");
+  A(indent + "        SET RowError TO " + robinStr(authErr));
+  A(indent + "    END");
+  A(indent + "    IF DlAfter.Count > DlCountBefore AND DlErrAfter.Count = DlErrBefore.Count THEN");
   A(indent + "        # 一番新しいものが今回落ちてきたファイル");
   A(indent + "        " + folderGetSorted("DlDir", "$" + Q_ + "*.*" + Q_, "DlSorted"));
   A(indent + "        SET DlFile TO DlSorted[0]");
@@ -914,7 +1025,8 @@ function robinDownload(cands, name, indent, stepNo, cols, timeout, saveLink) {
   A(indent + "    IF DlAfter.Count = DlCountBefore THEN");
   A(indent + "        SET RowError TO " +
     robinStr("ステップ" + stepNo + "（ダウンロード）でファイルが落ちてきませんでした" +
-             "（" + timeout + " 秒待機）"));
+             "（" + timeout + " 秒待機）" +
+             (saveLink ? "。リンク先の中身が認証エラーだったときも、保存しないのでこうなります" : "")));
   A(indent + "    END");
   A(indent + "END");
   return L;
@@ -1113,6 +1225,36 @@ function cleanNote(note, cols) {
   return toRobinVar(note, cols).split("'").join("").split("[").join("").split("]").join("");
 }
 
+// 生成中の設定（buildRobin が決める）。idle: 画面が落ち着くまで待つ
+var GEN = { idle: false };
+
+// 画面が落ち着くまで待つ（最大 StepWait 秒）。サイトの設定でオンのときだけ入る。
+// pad_webdriver_ref.py の _robin_wait_idle と同じ行を書く。
+function robinWaitIdle(indent) {
+  if (!GEN.idle) { return []; }
+  var i2 = indent + "    ";
+  var body = "{\"script\": \"%JsAct%\", \"args\": " + pyJson([[], "idle", ""]) + "}";
+  return [
+    indent + "# 画面が落ち着くまで待つ（予約・通信・読み込み中が無くなるまで。最大 StepWait 秒）",
+    indent + "SET IdleBody TO $'''" + body + "'''",
+    indent + "SET IdleOk TO False",
+    indent + "SET IdleWaited TO 0",
+    indent + "LOOP WHILE IdleOk = False AND IdleWaited < StepWait",
+    web("ExecUrl", "Post", "IdleBody", "IdleResp", "IdleStatus", i2),
+    i2 + "IF IdleStatus = 200 THEN",
+    i2 + "    Variables.ConvertJsonToCustomObject Json: IdleResp CustomObject=> IdleObj",
+    i2 + "    IF IdleObj['value']['ok'] = True THEN",
+    i2 + "        SET IdleOk TO True",
+    i2 + "    END",
+    i2 + "END",
+    i2 + "IF IdleOk = False THEN",
+    i2 + "    WAIT 1",
+    i2 + "    SET IdleWaited TO IdleWaited + 1",
+    i2 + "END",
+    indent + "END"
+  ];
+}
+
 function robinAct(cands, action, value, indent, note, stepNo, cols) {
   var cs = robinFilterCandidates(cands).map(function (c) { return toRobinVar(c, cols); });
   var v = toRobinVar(value, cols);
@@ -1120,10 +1262,11 @@ function robinAct(cands, action, value, indent, note, stepNo, cols) {
   var bodyArgs = pyJson([cs, action, v]);
   var why = action === "exists" ? "画面に文字列がありません" : "で要素が見つかりません";
   var reason = "ステップ" + stepNo + "（" + nt + "）" + why;
-  var head = [
+  // 待ちは「# [番号] …」の行より前に置く（読み解きで、その行と ActBody を続けて見るため）
+  var head = robinWaitIdle(indent).concat([
     indent + "# [" + stepNo + "] " + nt,
     indent + "SET ActBody TO $'''{\"script\": \"%JsAct%\", \"args\": " + bodyArgs + "}'''"
-  ];
+  ]);
   // 完了確認は「今この画面に出ているか」を 1 回だけ見る（待つときは timeout を使う）
   var call = action === "exists"
     ? [web("ExecUrl", "Post", "ActBody", "ActResp", "ActStatus", indent)]
@@ -1341,7 +1484,7 @@ function batchToSteps(batch) {
 // サイトの設定（stepWait 以下）もサイトに紐づくのでここに入れる。
 var BATCH_OPTION_KEYS = ["idCol", "browser", "shotName", "downloadName",
                          "detailsFromResult", "stepWait", "preferClickable",
-                         "blurAfterFill", "shotFromKeys", "autoColumns"];
+                         "blurAfterFill", "waitIdle", "shotFromKeys", "autoColumns"];
 
 // バッチ定義から設定を読む。無ければ空。
 function batchOptions(batch) {
@@ -2031,6 +2174,7 @@ function parseRobin(text) {
   for (var h = 0; h < lines.length; h++) { if (startsWith(lines[h], "SET JsAct TO $" + Q3)) { jsHead = lines[h]; break; } }
   if (jsHead.indexOf("PREFER = false") >= 0) { opts.preferClickable = false; }
   if (jsHead.indexOf("BLUR = false") >= 0) { opts.blurAfterFill = false; }
+  if (lines.some(function (l) { return startsWith(l, "# 画面が落ち着くまで待つ"); })) { opts.waitIdle = true; }
 
   // ---- setup
   var s0 = find(function (l) { return startsWith(l, "# ================= セットアップ"); });
@@ -2336,8 +2480,9 @@ function compareEmbed(text, regenerated) {
   return { diffs: out, old: oldB, new: newB };
 }
 
-function regenerateRobin(batch, detailsFromResult, idCol, xlsx) {
+function regenerateRobin(batch, detailsFromResult, idCol, xlsx, waitIdle) {
   return buildRobin(batch, {
+    waitIdle: !!waitIdle,
     detailsPath: xlsx ? "C:\\temp\\details.xlsx" : "C:\\temp\\details.csv", idCol: idCol, detailsFromResult: detailsFromResult,
     driverExe: "C:\\temp\\msedgedriver.exe", outDir: "C:\\temp", proxy: "", autoDriver: false,
     browser: "edge", proxyAuto: true, maxItems: 1, today: { y: 2026, m: 1, d: 1 }
@@ -2387,7 +2532,7 @@ function robinToBatch(text, useEmbedded) {
     var popt = (parsed && parsed.options) || {};
     var idc = popt.idCol || (got.batch.options || {}).idCol || "ID";
     var c = compareEmbed(text, regenerateRobin(got.batch, !!popt.detailsFromResult, idc,
-      String(text).indexOf("SET DetailsXlsx TO True") >= 0));
+      String(text).indexOf("SET DetailsXlsx TO True") >= 0, !!popt.waitIdle));
     if (!c.diffs.length) { return { batch: got.batch, how: "embed", notes: [], embedded: got.batch }; }
     var head = "この Robin は、変換したあとに PAD などで手直しされています（" + c.diffs.length + " か所）。";
     if (useEmbedded) {
@@ -2871,7 +3016,9 @@ function buildRobin(batch, opt) {
 
   // 埋め込みは、生成の途中で batch に手が入る前の形で作っておく
   var embed = batchEmbedLines(batch);
-  var site = siteSettings(batch, opt.stepWait, opt.preferClickable, opt.blurAfterFill);
+  var site = siteSettings(batch, opt.stepWait, opt.preferClickable, opt.blurAfterFill, opt.waitIdle);
+  // 画面が落ち着くまで待つ（オンのときだけ、各操作の前に待ちを入れる。既定はオフ）
+  GEN.idle = !!site.waitIdle;
   var jsOne = jsActOneline(site.preferClickable, site.blurAfterFill);
   var cols = [idCol];
   var L = [];
@@ -2938,7 +3085,8 @@ function buildRobin(batch, opt) {
     " ／ ドライバー置き場所=" + drvDir);
   A("#       サイトの設定: 待つ上限=" + site.stepWait + " 秒" +
     " ／ 押せる要素を優先=" + (site.preferClickable ? "有効" : "無効") +
-    " ／ 入力後にフォーカスを外す=" + (site.blurAfterFill ? "有効" : "無効"));
+    " ／ 入力後にフォーカスを外す=" + (site.blurAfterFill ? "有効" : "無効") +
+    (site.waitIdle ? " ／ 画面が落ち着くまで待つ=有効" : ""));
   A("# ============================================================");
   A("# LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai");
   A("# Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).");
@@ -3681,7 +3829,8 @@ function buildRobin(batch, opt) {
     var lst = loopSteps[li], lt = lst.type;
     if (lt === "comment") { A(inner + "# 💬 " + safeComment(lst.text || "", cols)); continue; }
     if (lt === "screenshot") {
-            A(inner + "# エビデンス保存（名前は冒頭の ShotNameFmt で決まる）");
+      L = L.concat(robinWaitIdle(inner));
+      A(inner + "# エビデンス保存（名前は冒頭の ShotNameFmt で決まる）");
       A(inner + "# WebDriver に撮らせるとページの表示領域だけが写る。");
       A(inner + "# デスクトップや他ウィンドウは写らず、フォーカスにも依存しない。");
       A(inner + "# 逆にスクロールしないと見えない範囲は写らない点に注意。");
@@ -3703,6 +3852,7 @@ function buildRobin(batch, opt) {
       var cnm = String(lst.name || "").trim() || "取得値";
       A(inner + "# 画面に出た値を読み取って、結果 CSV の「" + cnm + "」列に残す。");
       A(inner + "# 次のバッチはこの CSV をそのまま明細として読める。");
+      L = L.concat(robinWaitIdle(inner));
       L = L.concat(robinCapture(candidates(lst), "Cap" + (caps.indexOf(cnm) + 1),
                                 inner, m, "capture " + cnm, cols,
                                 String(lst.extract || ""), String(lst.key || "")));
@@ -4043,12 +4193,13 @@ root.PadConvert = {
       stepWait: $("stepWait") ? $("stepWait").value.trim() : "",
       preferClickable: $("preferClickable") ? $("preferClickable").checked : true,
       blurAfterFill: $("blurAfterFill") ? $("blurAfterFill").checked : true,
+      waitIdle: $("waitIdle") ? $("waitIdle").checked : false,
       shotFromKeys: $("shotFromKeys") ? $("shotFromKeys").checked : true,
       autoColumns: $("autoColumns") ? $("autoColumns").checked : true
     };
   }
 
-  var SITE_CHECKS = ["preferClickable", "blurAfterFill", "shotFromKeys", "autoColumns"];
+  var SITE_CHECKS = ["preferClickable", "blurAfterFill", "waitIdle", "shotFromKeys", "autoColumns"];
 
   // 録画を読み込んだとき・明細 CSV を選んだときに、振り分けの下ごしらえをする。
   // 録画（steps だけの JSON）にだけ働く。バッチ定義は保存した内容を尊重する。
@@ -4543,6 +4694,7 @@ root.PadConvert = {
         stepWait: $("stepWait").value,
         preferClickable: $("preferClickable").checked,
         blurAfterFill: $("blurAfterFill").checked,
+        waitIdle: $("waitIdle").checked,
         maxItems: $("maxItems").value,
         winW: $("winW").value,
         winH: $("winH").value,

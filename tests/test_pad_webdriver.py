@@ -1032,12 +1032,13 @@ def test_element_steps_retry_until_found(tmp_path):
 def test_site_settings_precedence():
     """サイトの設定は 指定 → バッチ定義の options → 既定 の順で決まる。"""
     assert pad.site_settings({}) == {"stepWait": 15, "preferClickable": True,
-                                     "blurAfterFill": True}
-    b = {"options": {"stepWait": 25, "preferClickable": False, "blurAfterFill": False}}
+                                     "blurAfterFill": True, "waitIdle": False}
+    b = {"options": {"stepWait": 25, "preferClickable": False, "blurAfterFill": False,
+                     "waitIdle": True}}
     assert pad.site_settings(b) == {"stepWait": 25, "preferClickable": False,
-                                    "blurAfterFill": False}
-    assert pad.site_settings(b, 9, True, None) == {"stepWait": 9, "preferClickable": True,
-                                                   "blurAfterFill": False}
+                                    "blurAfterFill": False, "waitIdle": True}
+    assert pad.site_settings(b, 9, True, None, False) == {"stepWait": 9, "preferClickable": True,
+                                                          "blurAfterFill": False, "waitIdle": False}
     # 数字でない・0 以下の待ち時間は既定に戻す
     assert pad.site_settings({"options": {"stepWait": "x"}})["stepWait"] == 15
     assert pad.site_settings({"options": {"stepWait": 0}})["stepWait"] == 15
@@ -1346,7 +1347,7 @@ def test_compare_embed_no_false_alarm(tmp_path):
     for p in _all_batches() + [_RICH]:
         b = load_recording(p)
         for kw in ({}, {"details_from_result": True, "browser": "chrome", "max_items": 5},
-                   {"step_wait": 30, "prefer_clickable": False}):
+                   {"step_wait": 30, "prefer_clickable": False, "wait_idle": True}):
             for det, idc in ((r"C:\x\d.csv", "ID"), (r"C:\x\d.xlsx", "番号")):
                 out = pad.write_robin(b, det, idc, str(tmp_path / "n.robin.txt"), **kw)
                 got, how, notes = pad.robin_to_batch(open(out, encoding="utf-8").read())
@@ -1412,6 +1413,15 @@ def test_download_save_link(tmp_path):
     assert sum('"saveLink"' in ln for ln in acts) == 1      # 2 つのうち片方だけ
     assert "名前を付けてリンク先を保存」と同じ取り方" in txt
     assert "action === `saveLink`" in pad.JS_ACT
+    # 押さずに、裏でリンク先を受け取る（実機で、写しを押す取り方は認証エラーだった）
+    assert "w.fetch(a.href, { credentials: `include` })" in pad.JS_ACT
+    # 認証エラーのファイル（FNDWRR.txt）が落ちてきたら、エビデンスにせず失敗にする
+    lines = [ln.strip() for ln in txt.split("\n")]
+    assert sum(ln.startswith("Folder.GetFiles Folder: DlDir FileFilter: $\'\'\'FNDWRR*.txt") for ln in lines) == 4
+    assert lines.count("IF DlAfter.Count > DlCountBefore AND DlErrAfter.Count = DlErrBefore.Count THEN") == 2
+    errs = [ln for ln in lines if "認証エラーのファイル（FNDWRR.txt）でした" in ln]
+    assert len(errs) == 2
+    assert sum("このダウンロードを「リンク先を保存」にしてください" in ln for ln in errs) == 1  # 押す方だけ
     # 手直しの比べ合わせでは、取り方の違いも見える
     plain = txt.replace('"saveLink"', '"click"')
     lines = plain.split("\n")
@@ -1468,3 +1478,32 @@ def test_cli_target_url(tmp_path):
                        capture_output=True, text=True, encoding="utf-8", cwd=_HERE)
     assert r.returncode == 0 and "ログイン後の URL のようです（_ti / oas" in r.stdout
     assert pad.get_target_url(json.load(open(tmp_path / "o.json", encoding="utf-8"))) == url2
+
+
+# ---------------------------------------------------------------- 画面が落ち着くまで待つ
+def test_wait_idle_blocks(tmp_path):
+    """オンのときだけ、各操作とエビデンスの前に「落ち着くまで待つ」が入る。読み解きでも戻る。"""
+    b = load_recording(_RICH)
+    off = _robin_no_embed(b, tmp_path)
+    assert "IdleBody" not in off and "画面が落ち着くまで待つ" not in off       # 既定は今までどおり
+    on = _robin_no_embed(b, tmp_path, wait_idle=True)
+    lines = [ln.strip() for ln in on.split("\n")]
+    n_wait = lines.count("LOOP WHILE IdleOk = False AND IdleWaited < StepWait")
+    # 繰り返しの操作（「# [番号] …」の直後の ActBody）ごと + エビデンス 1 つ。
+    # 「# [番号] …」と ActBody は続いたまま（待ちはその前に入る）
+    steps = [i for i, ln in enumerate(lines)
+             if ln.startswith("SET ActBody TO") and lines[i - 1].startswith("# [")]
+    assert n_wait == len(steps) + 1 and len(steps) >= 9     # 読み取り（capture）にも入る
+    for i in steps:
+        assert lines[i - 2] == "END" and "IdleWaited + 1" in lines[i - 4], lines[i - 4:i]
+    k = lines.index("# エビデンス保存（名前は冒頭の ShotNameFmt で決まる）")
+    assert lines[k - 1] == "END" and "IdleWaited + 1" in lines[k - 3]
+    assert "画面が落ち着くまで待つ=有効" in on
+    got, _ = pad.parse_robin(on)
+    assert got["options"]["waitIdle"] is True
+    assert _robin_no_embed(got, tmp_path) == on
+    # options に入れても同じ
+    b2 = json.loads(json.dumps(b))
+    b2["options"]["waitIdle"] = True
+    assert _robin_no_embed(b2, tmp_path) == on
+    assert "action === `idle`" in pad.JS_ACT

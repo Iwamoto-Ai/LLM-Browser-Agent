@@ -78,9 +78,18 @@ from details_io import load_details
 #
 # **この中に // のコメントは書けない。** 1 行に連結して渡すので、それ以降が
 # すべてコメントになってしまう。
-# action の saveLink は「名前を付けてリンク先を保存」と同じ取り方。押すと同じファイルを
-# 2 回取りに行く画面（Oracle の要求の結果など）でも、リンク先を 1 回だけ受け取る。
-# 要素のリンク（祖先か子孫の a[href]）に download を付けた写しを作って押す。
+# action の fill は、入れたあとフォーカスを外す（BLUR）。ブラウザーのウィンドウが前面で
+# 操作中でないと、focus() / blur() を呼んでもフォーカスの合図（focus / blur の出来事）が
+# 出ないことがある。合図で書式を整える欄（年月の 202610 を 2026-10 にするなど）は、
+# 合図が出ないと整わないまま送られて無効になる（実 EDI1 の年月で確認）。そこで、合図が
+# 出なかったときだけ、こちらから focus / blur の合図を出す。出たときは何もしない。
+# action の saveLink は「名前を付けてリンク先を保存」と同じく、押さずにリンク先を受け取る。
+# 押すと認証エラー（FNDWRR の Authentication failed.）になる画面（Oracle の要求の結果など）向け。
+# 要素のリンク（祖先か子孫の a[href]）を、画面の中から fetch で裏で取りに行き（ログイン状態の
+# クッキー付き）、受け取った中身を pad_download.拡張子 として保存する。拡張子は
+# Content-Disposition の名前から（日本語の名前は文字化けしても、拡張子は取れる）、無ければ種類から。
+# 中身が認証エラーの文字だけなら保存しない（ダウンロードが来ないので、その件は失敗になる）。
+# 実機（Edge・Oracle EBS）で、リンクの写しを押す取り方は認証エラー、fetch は Excel が取れた。
 JS_ACT = r"""
 var PREFER = true, BLUR = true;
 var cands = arguments[0], action = arguments[1], value = arguments[2];
@@ -244,6 +253,63 @@ if (action === `after` || action === `afterDigits`) {
   if (!out) { return { ok: false, used: null }; }
   return { ok: true, used: null, text: out };
 }
+if (action === `idle`) {
+  var why = ``;
+  var arm = function (win) {
+    if (!win || win.__padIdle) { return; }
+    var st = win.setTimeout, ct = win.clearTimeout, pend = {}, box = { timers: pend, xhr: 0, nav: false };
+    win.__padIdle = box;
+    win.setTimeout = function (fn, ms) {
+      var rest = Array.prototype.slice.call(arguments, 2);
+      var delay = Number(ms) || 0;
+      if (delay > 3000) { return st.apply(win, arguments); }
+      var id = st.call(win, function () {
+        delete pend[id];
+        if (typeof fn === `function`) { return fn.apply(win, rest); }
+        return win.eval(String(fn));
+      }, delay);
+      pend[id] = true;
+      return id;
+    };
+    win.clearTimeout = function (id) { delete pend[id]; return ct.call(win, id); };
+    try {
+      var send = win.XMLHttpRequest.prototype.send;
+      win.XMLHttpRequest.prototype.send = function () {
+        box.xhr = box.xhr + 1;
+        this.addEventListener(`loadend`, function () { box.xhr = Math.max(0, box.xhr - 1); });
+        return send.apply(this, arguments);
+      };
+    } catch (e) {}
+    try {
+      if (win.fetch) {
+        var f0 = win.fetch;
+        win.fetch = function () {
+          box.xhr = box.xhr + 1;
+          var done = function () { box.xhr = Math.max(0, box.xhr - 1); };
+          var pr = f0.apply(win, arguments);
+          pr.then(done, done);
+          return pr;
+        };
+      }
+    } catch (e) {}
+    try { win.addEventListener(`beforeunload`, function () { box.nav = true; }); } catch (e) {}
+  };
+  var idocs = allDocs();
+  for (var j = 0; j < idocs.length; j++) {
+    var dv = idocs[j].defaultView;
+    if (idocs[j].readyState !== `complete`) { why = why + j + `:読込中 `; }
+    arm(dv);
+    var bx = dv && dv.__padIdle;
+    if (bx) {
+      var n = Object.keys(bx.timers).length;
+      if (n) { why = why + j + `:予約` + n + ` `; }
+      if (bx.xhr) { why = why + j + `:通信` + bx.xhr + ` `; }
+      if (bx.nav) { why = why + j + `:移動中 `; }
+    }
+  }
+  if (window.__padClickAt && Date.now() - window.__padClickAt < 700) { why = why + `押した直後 `; }
+  return { ok: !why, used: null, text: why.trim() };
+}
 if (action === `exists`) {
   var docs = allDocs();
   var txt = ``;
@@ -258,25 +324,65 @@ for (var i = 0; i < cands.length; i++) {
   if (!el) { continue; }
   if (action === `click`) {
     try { el.scrollIntoView({ block: `center` }); } catch (e) {}
+    window.__padClickAt = Date.now();
     el.click();
   } else if (action === `fill`) {
+    var gotF = false, gotB = false;
+    var onF = function () { gotF = true; };
+    var onB = function () { gotB = true; };
+    el.addEventListener(`focus`, onF);
+    el.addEventListener(`blur`, onB);
     el.focus();
+    if (!gotF) { try { el.dispatchEvent(new FocusEvent(`focus`)); } catch (e) {} }
     el.value = value;
     el.dispatchEvent(new Event(`input`, { bubbles: true }));
     el.dispatchEvent(new Event(`change`, { bubbles: true }));
-    if (BLUR) { try { el.blur(); } catch (e) {} }
+    if (BLUR) {
+      try { el.blur(); } catch (e) {}
+      if (!gotB) { try { el.dispatchEvent(new FocusEvent(`blur`)); } catch (e) {} }
+    }
+    el.removeEventListener(`focus`, onF);
+    el.removeEventListener(`blur`, onB);
   } else if (action === `saveLink`) {
     var a = el.closest ? el.closest(`a[href]`) : null;
     if (!a && el.querySelector) { a = el.querySelector(`a[href]`); }
     if (!a) { continue; }
     var d = el.ownerDocument || document;
-    var t = d.createElement(`a`);
-    t.href = a.href;
-    t.setAttribute(`download`, ``);
-    t.style.display = `none`;
-    (d.body || d.documentElement).appendChild(t);
-    t.click();
-    t.remove();
+    var w = d.defaultView || window;
+    w.__padDlError = ``;
+    w.fetch(a.href, { credentials: `include` }).then(function (r) {
+      var ct = (r.headers.get(`content-type`) || ``).toLowerCase();
+      var cd = r.headers.get(`content-disposition`) || ``;
+      return r.blob().then(function (b) {
+        var head = ct.indexOf(`text/`) === 0 && b.size < 2000 ? b.text() : Promise.resolve(``);
+        return head.then(function (tx) {
+          if (tx.indexOf(`Authentication failed`) >= 0) { w.__padDlError = tx.trim(); return; }
+          var ext = ``;
+          var k = cd.toLowerCase().indexOf(`filename`);
+          if (k >= 0) {
+            var nm = cd.slice(k);
+            var p = nm.lastIndexOf(`.`);
+            for (var j = p + 1; p >= 0 && j < nm.length; j++) {
+              var ch = nm.charAt(j);
+              if ((ch >= `a` && ch <= `z`) || (ch >= `A` && ch <= `Z`) || (ch >= `0` && ch <= `9`)) { ext += ch; } else { break; }
+            }
+          }
+          if (!ext) {
+            ext = ct.indexOf(`spreadsheetml`) >= 0 ? `xlsx` : ct.indexOf(`ms-excel`) >= 0 ? `xls` :
+              ct.indexOf(`pdf`) >= 0 ? `pdf` : ct.indexOf(`csv`) >= 0 ? `csv` :
+              ct.indexOf(`zip`) >= 0 ? `zip` : ct.indexOf(`html`) >= 0 ? `html` : `bin`;
+          }
+          var t = d.createElement(`a`);
+          t.href = w.URL.createObjectURL(b);
+          t.download = `pad_download.` + ext.toLowerCase();
+          t.style.display = `none`;
+          (d.body || d.documentElement).appendChild(t);
+          t.click();
+          t.remove();
+          w.setTimeout(function () { w.URL.revokeObjectURL(t.href); }, 60000);
+        });
+      });
+    }).catch(function (e) { w.__padDlError = String(e); });
   } else if (action === `text`) {
     var s = el.innerText || el.textContent || ``;
     return { ok: true, used: cands[i], text: s.trim() };
@@ -721,16 +827,17 @@ def _json_path(base: str) -> str:
 STEP_WAIT = 15
 
 # サイトの設定（バッチ定義の options に保存する。PC ではなくサイトに紐づく）
-SITE_DEFAULTS = {"stepWait": STEP_WAIT, "preferClickable": True, "blurAfterFill": True}
+SITE_DEFAULTS = {"stepWait": STEP_WAIT, "preferClickable": True, "blurAfterFill": True,
+                 "waitIdle": False}
 
 
 def site_settings(batch: dict, step_wait=None, prefer_clickable=None,
-                  blur_after_fill=None) -> dict:
+                  blur_after_fill=None, wait_idle=None) -> dict:
     """サイトの設定を決める。指定 → バッチ定義の options → 既定 の順。"""
     opts = (batch or {}).get("options") or {}
     out = dict(SITE_DEFAULTS)
     for key, given in (("stepWait", step_wait), ("preferClickable", prefer_clickable),
-                       ("blurAfterFill", blur_after_fill)):
+                       ("blurAfterFill", blur_after_fill), ("waitIdle", wait_idle)):
         v = given if given is not None else opts.get(key)
         if v is None or v == "":
             continue
@@ -1052,10 +1159,13 @@ def _robin_download(cands: list, name: str, indent: str, step_no: int,
     A(f"{indent}# [{step_no}] ダウンロード {_dlnote}")
     if save_link:
         A(f"{indent}# 押さずに「名前を付けてリンク先を保存」と同じ取り方をする"
-          "（押すと 2 回取りに行き、2 回目が認証エラーになる画面のため）")
+          "（押すと認証エラーになる画面のため。裏でリンク先を受け取って保存する）")
     A(f"{indent}# 押す前の件数を数えておき、増えたぶんを新しいファイルとみなす。")
     A(f"{indent}" + _folder_get("DlDir", "$" + Q_ + "*.*" + Q_, "DlBefore"))
     A(f"{indent}SET DlCountBefore TO DlBefore.Count")
+    A(f"{indent}# Oracle EBS は、結果ファイルを渡せないとき FNDWRR.txt（中身は Authentication failed.）を返す。")
+    A(f"{indent}# それが増えたら、エビデンスにせず失敗にする（認証エラーの文字を「成功」にしないため）。")
+    A(f"{indent}" + _folder_get("DlDir", "$" + Q_ + "FNDWRR*.txt" + Q_, "DlErrBefore"))
     L.extend(_robin_act(cands, "saveLink" if save_link else "click", "", indent,
                         f"download {cands[0] if cands else ''}", step_no, cols))
     A(f"{indent}IF RowError = " + _robin_str("") + " THEN")
@@ -1076,7 +1186,15 @@ def _robin_download(cands: list, name: str, indent: str, step_no: int,
     A(f"{indent}        END")
     A(f"{indent}    END")
     A(f"{indent}    " + _folder_get("DlDir", "$" + Q_ + "*.*" + Q_, "DlAfter"))
-    A(f"{indent}    IF DlAfter.Count > DlCountBefore THEN")
+    A(f"{indent}    " + _folder_get("DlDir", "$" + Q_ + "FNDWRR*.txt" + Q_, "DlErrAfter"))
+    _autherr = ("ステップ%d（ダウンロード）で落ちてきたのは認証エラーのファイル（FNDWRR.txt）でした。"
+                "エビデンスにしていません" % step_no)
+    if not save_link:
+        _autherr += "。このダウンロードを「リンク先を保存」にしてください"
+    A(f"{indent}    IF DlErrAfter.Count > DlErrBefore.Count THEN")
+    A(f"{indent}        SET RowError TO {_robin_str(_autherr)}")
+    A(f"{indent}    END")
+    A(f"{indent}    IF DlAfter.Count > DlCountBefore AND DlErrAfter.Count = DlErrBefore.Count THEN")
     A(f"{indent}        # 一番新しいものが今回落ちてきたファイル")
     A(f"{indent}        " + _folder_get_sorted("DlDir", "$" + Q_ + "*.*" + Q_, "DlSorted"))
     A(f"{indent}        SET DlFile TO DlSorted[0]")
@@ -1090,6 +1208,8 @@ def _robin_download(cands: list, name: str, indent: str, step_no: int,
     A(f"{indent}    IF DlAfter.Count = DlCountBefore THEN")
     _dlerr = ("ステップ%d（ダウンロード）でファイルが落ちてきませんでした"
               "（%d 秒待機）" % (step_no, timeout))
+    if save_link:
+        _dlerr += "。リンク先の中身が認証エラーだったときも、保存しないのでこうなります"
     A(f"{indent}        SET RowError TO {_robin_str(_dlerr)}")
     A(f"{indent}    END")
     A(f"{indent}END")
@@ -1133,7 +1253,8 @@ def _robin_act(cands: list, action: str, value: str, indent: str, note: str,
     why = "画面に文字列がありません" if action == "exists" else "で要素が見つかりません"
     reason = (f"ステップ{step_no}（{note}）{why}" if action == "exists"
               else f"ステップ{step_no}（{note}）{why}")
-    head = [
+    # 待ちは「# [番号] …」の行より前に置く（読み解きで、その行と ActBody を続けて見るため）
+    head = _robin_wait_idle(indent) + [
         f"{indent}# [{step_no}] {note}",
         f"{indent}SET ActBody TO $'''{{\"script\": \"%JsAct%\", \"args\": {body_args}}}'''",
     ]
@@ -1155,6 +1276,42 @@ def _robin_act(cands: list, action: str, value: str, indent: str, note: str,
         f"{indent}    IF ActObj['value']['ok'] <> True THEN",
         f"{indent}        SET RowError TO $'''{reason}'''",
         f"{indent}    END",
+        f"{indent}END",
+    ]
+
+
+# 生成中の設定（write_robin が決める）。idle: 画面が落ち着くまで待つ
+_GEN = {"idle": False}
+
+
+def _robin_wait_idle(indent: str) -> list:
+    """画面が落ち着くまで待つ（最大 StepWait 秒）。サイトの設定でオンのときだけ入る。
+
+    「少しあとに動く予約」（setTimeout の 3 秒以内）・通信・読み込み中・押した直後が
+    無くなるまで、1 秒おきに見る。実 EDI1 の年月の欄は、値が変わると 1 秒後に自動で
+    送信する。その間に「検索」を押すと、あとから動いた自動送信に検索が消された。
+    落ち着かないまま上限が来たら、そのまま次の操作に進む（今までと同じ動き）。"""
+    if not _GEN["idle"]:
+        return []
+    i2 = indent + "    "
+    body = json.dumps({"script": "%JsAct%", "args": [[], "idle", ""]}, ensure_ascii=False)
+    return [
+        f"{indent}# 画面が落ち着くまで待つ（予約・通信・読み込み中が無くなるまで。最大 StepWait 秒）",
+        f"{indent}SET IdleBody TO $'''{body}'''",
+        f"{indent}SET IdleOk TO False",
+        f"{indent}SET IdleWaited TO 0",
+        f"{indent}LOOP WHILE IdleOk = False AND IdleWaited < StepWait",
+        _web("ExecUrl", "Post", "IdleBody", "IdleResp", "IdleStatus", i2),
+        f"{i2}IF IdleStatus = 200 THEN",
+        f"{i2}    Variables.ConvertJsonToCustomObject Json: IdleResp CustomObject=> IdleObj",
+        f"{i2}    IF IdleObj['value']['ok'] = True THEN",
+        f"{i2}        SET IdleOk TO True",
+        f"{i2}    END",
+        f"{i2}END",
+        f"{i2}IF IdleOk = False THEN",
+        f"{i2}    WAIT 1",
+        f"{i2}    SET IdleWaited TO IdleWaited + 1",
+        f"{i2}END",
         f"{indent}END",
     ]
 
@@ -1513,6 +1670,8 @@ def parse_robin(text: str):
         opts["preferClickable"] = False
     if "BLUR = false" in js_head:
         opts["blurAfterFill"] = False
+    if any(ln.startswith("# 画面が落ち着くまで待つ") for ln in lines):
+        opts["waitIdle"] = True
 
     # ---- setup
     s0 = find(lambda ln: ln.startswith("# ================= セットアップ"))
@@ -1963,7 +2122,7 @@ def compare_embed(text: str, regenerated: str):
 
 
 def _regenerate_robin(batch: dict, details_from_result: bool, id_col: str,
-                      xlsx: bool = False) -> str:
+                      xlsx: bool = False, wait_idle=None) -> str:
     """埋め込みのバッチ定義から、比べるための Robin を作り直す（中身だけ見る）。
 
     ID 列は実際の Robin と同じにする（列の番号 %Col1% などがそろうように）。"""
@@ -1972,7 +2131,7 @@ def _regenerate_robin(batch: dict, details_from_result: bool, id_col: str,
         fp = os.path.join(td, "regen.robin.txt")
         write_robin(batch, r"C:\temp\details.xlsx" if xlsx else r"C:\temp\details.csv",
                     id_col, fp,
-                    details_from_result=details_from_result)
+                    details_from_result=details_from_result, wait_idle=wait_idle)
         with open(fp, encoding="utf-8") as f:
             return f.read()
 
@@ -2087,7 +2246,8 @@ def robin_to_batch(text: str, use_embedded: bool = False):
         idc = popt.get("idCol") or (got.get("options") or {}).get("idCol") or "ID"
         diffs, old, new = compare_embed(
             text, _regenerate_robin(got, bool(popt.get("detailsFromResult")), idc,
-                                    "SET DetailsXlsx TO True" in text))
+                                    "SET DetailsXlsx TO True" in text,
+                                    bool(popt.get("waitIdle"))))
         if not diffs:
             return got, "embed", []
         head = (f"この Robin は、変換したあとに PAD などで手直しされています（{len(diffs)} か所）。")
@@ -2122,7 +2282,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
                 driver_dir: str = "",
                 step_wait=None,
                 prefer_clickable=None,
-                blur_after_fill=None) -> str:
+                blur_after_fill=None,
+                wait_idle=None) -> str:
     """PAD に貼り付けられる Robin コードを生成する。
 
     PAD のフローデザイナーはアクションのコピー＆ペーストにテキスト（Robin）を使うため、
@@ -2140,7 +2301,9 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     """
     # 埋め込みは、生成の途中で batch に手が入る前の形で作っておく
     embed = batch_embed_lines(batch)
-    site = site_settings(batch, step_wait, prefer_clickable, blur_after_fill)
+    site = site_settings(batch, step_wait, prefer_clickable, blur_after_fill, wait_idle)
+    # 画面が落ち着くまで待つ（オンのときだけ、各操作の前に待ちを入れる。既定はオフ）
+    _GEN["idle"] = bool(site["waitIdle"])
     js_one = js_act_oneline(site["preferClickable"], site["blurAfterFill"])
     drv_dir = _driver_dir(driver_dir, driver_exe)
     max_items = _clamp_max_items(max_items)
@@ -2211,7 +2374,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
       f" ／ ドライバー置き場所={drv_dir}")
     A(f"#       サイトの設定: 待つ上限={site['stepWait']} 秒"
       f" ／ 押せる要素を優先={'有効' if site['preferClickable'] else '無効'}"
-      f" ／ 入力後にフォーカスを外す={'有効' if site['blurAfterFill'] else '無効'}")
+      f" ／ 入力後にフォーカスを外す={'有効' if site['blurAfterFill'] else '無効'}"
+      + (" ／ 画面が落ち着くまで待つ=有効" if site["waitIdle"] else ""))
     A("# ============================================================")
     A("# LLM-Browser-Agent　PAD版　https://github.com/Iwamoto-Ai")
     A("# Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).")
@@ -2982,6 +3146,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             A(f"{inner}# 💬 {_safe_comment(st.get('text', ''), cols)}")
             continue
         if t == "screenshot":
+            L.extend(_robin_wait_idle(inner))
             A(f"{inner}# エビデンス保存（名前は冒頭の ShotNameFmt で決まる）")
             A(f"{inner}# WebDriver に撮らせるとページの表示領域だけが写る。")
             A(f"{inner}# デスクトップや他ウィンドウは写らず、フォーカスにも依存しない。")
@@ -3004,6 +3169,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             cands = _robin_filter_candidates(_candidates(st))
             A(f"{inner}# 画面に出た値を読み取って、結果 CSV の「{nm}」列に残す。")
             A(f"{inner}# 次のバッチはこの CSV をそのまま明細として読める。")
+            L.extend(_robin_wait_idle(inner))
             L.extend(_robin_capture(cands, f"Cap{caps.index(nm) + 1}", inner, m,
                                     f"capture {nm}", cols,
                                     str(st.get("extract", "")),
@@ -3391,6 +3557,9 @@ def main() -> None:
                         "（既定はバッチ定義の options、無ければオン）")
     p.add_argument("--blur-after-fill", action=argparse.BooleanOptionalAction, default=None,
                    help="入力のあとフォーカスを外す（既定はバッチ定義の options、無ければオン）")
+    p.add_argument("--wait-idle", action=argparse.BooleanOptionalAction, default=None,
+                   help="各操作の前に、画面が落ち着く（自動送信の予約・通信・読み込みが終わる）まで待つ"
+                        "（既定はバッチ定義の options、無ければオフ）")
     p.add_argument("--win-w", type=int, default=0,
                    help="ブラウザーの幅（既定: 録画の setViewport、無ければ 1250）")
     p.add_argument("--win-h", type=int, default=0,
@@ -3470,7 +3639,8 @@ def main() -> None:
                           driver_dir=args.driver_dir,
                           step_wait=args.step_wait,
                           prefer_clickable=args.prefer_clickable,
-                          blur_after_fill=args.blur_after_fill)
+                          blur_after_fill=args.blur_after_fill,
+                          wait_idle=args.wait_idle)
         js_out = out[:-len(".robin.txt")] + ".jsact.js" if out.endswith(".robin.txt") \
             else os.path.splitext(out)[0] + ".jsact.js"
         print(f"📄 PAD 用 Robin コード: {out}")
