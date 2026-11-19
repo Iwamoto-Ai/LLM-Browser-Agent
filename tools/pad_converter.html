@@ -414,13 +414,41 @@ var JS_ACT = [
 "    if (!a && el.querySelector) { a = el.querySelector(`a[href]`); }",
 "    if (!a) { continue; }",
 "    var d = el.ownerDocument || document;",
-"    var t = d.createElement(`a`);",
-"    t.href = a.href;",
-"    t.setAttribute(`download`, ``);",
-"    t.style.display = `none`;",
-"    (d.body || d.documentElement).appendChild(t);",
-"    t.click();",
-"    t.remove();",
+"    var w = d.defaultView || window;",
+"    w.__padDlError = ``;",
+"    w.fetch(a.href, { credentials: `include` }).then(function (r) {",
+"      var ct = (r.headers.get(`content-type`) || ``).toLowerCase();",
+"      var cd = r.headers.get(`content-disposition`) || ``;",
+"      return r.blob().then(function (b) {",
+"        var head = ct.indexOf(`text/`) === 0 && b.size < 2000 ? b.text() : Promise.resolve(``);",
+"        return head.then(function (tx) {",
+"          if (tx.indexOf(`Authentication failed`) >= 0) { w.__padDlError = tx.trim(); return; }",
+"          var ext = ``;",
+"          var k = cd.toLowerCase().indexOf(`filename`);",
+"          if (k >= 0) {",
+"            var nm = cd.slice(k);",
+"            var p = nm.lastIndexOf(`.`);",
+"            for (var j = p + 1; p >= 0 && j < nm.length; j++) {",
+"              var ch = nm.charAt(j);",
+"              if ((ch >= `a` && ch <= `z`) || (ch >= `A` && ch <= `Z`) || (ch >= `0` && ch <= `9`)) { ext += ch; } else { break; }",
+"            }",
+"          }",
+"          if (!ext) {",
+"            ext = ct.indexOf(`spreadsheetml`) >= 0 ? `xlsx` : ct.indexOf(`ms-excel`) >= 0 ? `xls` :",
+"              ct.indexOf(`pdf`) >= 0 ? `pdf` : ct.indexOf(`csv`) >= 0 ? `csv` :",
+"              ct.indexOf(`zip`) >= 0 ? `zip` : ct.indexOf(`html`) >= 0 ? `html` : `bin`;",
+"          }",
+"          var t = d.createElement(`a`);",
+"          t.href = w.URL.createObjectURL(b);",
+"          t.download = `pad_download.` + ext.toLowerCase();",
+"          t.style.display = `none`;",
+"          (d.body || d.documentElement).appendChild(t);",
+"          t.click();",
+"          t.remove();",
+"          w.setTimeout(function () { w.URL.revokeObjectURL(t.href); }, 60000);",
+"        });",
+"      });",
+"    }).catch(function (e) { w.__padDlError = String(e); });",
 "  } else if (action === `text`) {",
 "    var s = el.innerText || el.textContent || ``;",
 "    return { ok: true, used: cands[i], text: s.trim() };",
@@ -876,11 +904,14 @@ function robinDownload(cands, name, indent, stepNo, cols, timeout, saveLink) {
     (cands[0] ? toRobinVar(cands[0], cols) : ""));
   if (saveLink) {
     A(indent + "# 押さずに「名前を付けてリンク先を保存」と同じ取り方をする" +
-      "（押すと 2 回取りに行き、2 回目が認証エラーになる画面のため）");
+      "（押すと認証エラーになる画面のため。裏でリンク先を受け取って保存する）");
   }
   A(indent + "# 押す前の件数を数えておき、増えたぶんを新しいファイルとみなす。");
   A(indent + folderGet("DlDir", "$" + Q_ + "*.*" + Q_, "DlBefore"));
   A(indent + "SET DlCountBefore TO DlBefore.Count");
+  A(indent + "# Oracle EBS は、結果ファイルを渡せないとき FNDWRR.txt（中身は Authentication failed.）を返す。");
+  A(indent + "# それが増えたら、エビデンスにせず失敗にする（認証エラーの文字を「成功」にしないため）。");
+  A(indent + folderGet("DlDir", "$" + Q_ + "FNDWRR*.txt" + Q_, "DlErrBefore"));
   L = L.concat(robinAct(cands, saveLink ? "saveLink" : "click", "", indent,
                         "download " + (cands[0] || ""), stepNo, cols));
   A(indent + "IF RowError = " + robinStr("") + " THEN");
@@ -901,7 +932,13 @@ function robinDownload(cands, name, indent, stepNo, cols, timeout, saveLink) {
   A(indent + "        END");
   A(indent + "    END");
   A(indent + "    " + folderGet("DlDir", "$" + Q_ + "*.*" + Q_, "DlAfter"));
-  A(indent + "    IF DlAfter.Count > DlCountBefore THEN");
+  A(indent + "    " + folderGet("DlDir", "$" + Q_ + "FNDWRR*.txt" + Q_, "DlErrAfter"));
+  var authErr = "ステップ" + stepNo + "（ダウンロード）で落ちてきたのは認証エラーのファイル（FNDWRR.txt）でした。" +
+    "エビデンスにしていません" + (saveLink ? "" : "。このダウンロードを「リンク先を保存」にしてください");
+  A(indent + "    IF DlErrAfter.Count > DlErrBefore.Count THEN");
+  A(indent + "        SET RowError TO " + robinStr(authErr));
+  A(indent + "    END");
+  A(indent + "    IF DlAfter.Count > DlCountBefore AND DlErrAfter.Count = DlErrBefore.Count THEN");
   A(indent + "        # 一番新しいものが今回落ちてきたファイル");
   A(indent + "        " + folderGetSorted("DlDir", "$" + Q_ + "*.*" + Q_, "DlSorted"));
   A(indent + "        SET DlFile TO DlSorted[0]");
@@ -914,7 +951,8 @@ function robinDownload(cands, name, indent, stepNo, cols, timeout, saveLink) {
   A(indent + "    IF DlAfter.Count = DlCountBefore THEN");
   A(indent + "        SET RowError TO " +
     robinStr("ステップ" + stepNo + "（ダウンロード）でファイルが落ちてきませんでした" +
-             "（" + timeout + " 秒待機）"));
+             "（" + timeout + " 秒待機）" +
+             (saveLink ? "。リンク先の中身が認証エラーだったときも、保存しないのでこうなります" : "")));
   A(indent + "    END");
   A(indent + "END");
   return L;

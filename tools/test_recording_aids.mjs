@@ -82,23 +82,52 @@ const dup = '<div id="PosCreateAsnLink"><table><tr><td>' +
   check(r.ids[0] === "b1", "先頭のボタンではなく " + r.ids[0] + " を押した");
 }
 {
-  // リンク先を保存: 押さずに、包んでいるリンクの写し（download 付き）を 1 回だけ押す
+  // リンク先を保存: 押さずに、包んでいるリンクの先を fetch で受け取り、pad_download.拡張子 で保存する
+  // （実機の Oracle EBS では、リンクの写しを押すと認証エラー、fetch なら Excel が取れた）
   const body = '<a id="res" href="OA.jsp?_rc=FNDCPREQUESTVIEWPAGE&amp;OUTPUT=Y"><img id="icon" src="r.gif"></a>';
-  const dom = new JSDOM("<!doctype html><body>" + body + "</body>", { runScripts: "outside-only", url: "https://edi.example.com/OA_HTML/x.jsp" });
-  const w = dom.window, got = [];
-  w.document.addEventListener("click", (e) => {
-    got.push({ id: e.target.id, dl: e.target.getAttribute("download"), href: e.target.href });
-    e.preventDefault();
-  }, true);
-  const fn = w.eval("(function () { return function () { " + P.jsActOneline(true, true) + " }; })()");
-  const res = fn(["#icon"], "saveLink", "");
+  const make = (resp) => {
+    const dom = new JSDOM("<!doctype html><body>" + body + "</body>",
+                          { runScripts: "outside-only", url: "https://edi.example.com/OA_HTML/x.jsp" });
+    const w = dom.window, st = { fetched: [], saved: [] };
+    w.fetch = (url, opt) => { st.fetched.push({ url, cred: opt && opt.credentials }); return Promise.resolve(resp); };
+    w.URL.createObjectURL = () => "blob:x";
+    w.URL.revokeObjectURL = () => {};
+    w.document.addEventListener("click", (e) => {
+      st.saved.push({ id: e.target.id, dl: e.target.download, href: e.target.href });
+      e.preventDefault();
+    }, true);
+    const fn = w.eval("(function () { return function () { " + P.jsActOneline(true, true) + " }; })()");
+    return { w, st, fn };
+  };
+  const reply = (type, disp, text, size) => ({
+    headers: { get: (k) => (k === "content-type" ? type : k === "content-disposition" ? disp : null) },
+    blob: () => Promise.resolve({ size: size, text: () => Promise.resolve(text) })
+  });
+  const tick = () => new Promise((r) => setTimeout(r, 20));
+  // Excel（日本語の名前は Shift-JIS のまま来て文字化けしても、拡張子は取れる）
+  let m = make(reply("application/vnd.ms-excel", "inline; filename =\"XXPO_\u00fb\u00f3_191126.xls\"", "", 43008));
+  let res = m.fn(["#icon"], "saveLink", "");
+  await tick();
   check(res.ok, "リンク先を保存が失敗した");
-  check(got.length === 1 && got[0].dl === "" && got[0].id === "", "リンクの写しを 1 回だけ押していない: " + JSON.stringify(got));
-  check(got[0] && got[0].href === "https://edi.example.com/OA_HTML/OA.jsp?_rc=FNDCPREQUESTVIEWPAGE&OUTPUT=Y",
-        "リンク先が違う: " + (got[0] && got[0].href));
-  check(!w.document.querySelector("a[download]"), "リンクの写しが残っている");
-  const none = fn(["#nolink"], "saveLink", "");
-  check(!none.ok, "リンクが無いのに成功した");
+  check(m.st.fetched.length === 1 && m.st.fetched[0].cred === "include" &&
+        m.st.fetched[0].url === "https://edi.example.com/OA_HTML/OA.jsp?_rc=FNDCPREQUESTVIEWPAGE&OUTPUT=Y",
+        "リンク先をログイン状態で 1 回だけ取りに行っていない: " + JSON.stringify(m.st.fetched));
+  check(m.st.saved.length === 1 && m.st.saved[0].dl === "pad_download.xls",
+        "受け取った中身を pad_download.xls で保存していない: " + JSON.stringify(m.st.saved));
+  check(!m.w.document.querySelector("a[download]"), "保存用のリンクが残っている");
+  // 名前が無ければ種類から
+  m = make(reply("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", null, "", 9000));
+  m.fn(["#icon"], "saveLink", "");
+  await tick();
+  check(m.st.saved.length === 1 && m.st.saved[0].dl === "pad_download.xlsx", "種類から拡張子を決めていない");
+  // 認証エラーの文字だけなら保存しない（ダウンロードが来ないので、その件は失敗になる）
+  m = make(reply("text/plain", null, "Authentication failed.\n", 23));
+  m.fn(["#icon"], "saveLink", "");
+  await tick();
+  check(m.st.saved.length === 0 && m.w.__padDlError === "Authentication failed.",
+        "認証エラーの文字を保存してしまった: " + JSON.stringify(m.st.saved));
+  // リンクが無ければ失敗
+  check(!make(reply("", null, "", 0)).fn(["#nolink"], "saveLink", "").ok, "リンクが無いのに成功した");
 }
 {
   // 入力のあとフォーカスを外す

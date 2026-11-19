@@ -1412,6 +1412,15 @@ def test_download_save_link(tmp_path):
     assert sum('"saveLink"' in ln for ln in acts) == 1      # 2 つのうち片方だけ
     assert "名前を付けてリンク先を保存」と同じ取り方" in txt
     assert "action === `saveLink`" in pad.JS_ACT
+    # 押さずに、裏でリンク先を受け取る（実機で、写しを押す取り方は認証エラーだった）
+    assert "w.fetch(a.href, { credentials: `include` })" in pad.JS_ACT
+    # 認証エラーのファイル（FNDWRR.txt）が落ちてきたら、エビデンスにせず失敗にする
+    lines = [ln.strip() for ln in txt.split("\n")]
+    assert sum(ln.startswith("Folder.GetFiles Folder: DlDir FileFilter: $\'\'\'FNDWRR*.txt") for ln in lines) == 4
+    assert lines.count("IF DlAfter.Count > DlCountBefore AND DlErrAfter.Count = DlErrBefore.Count THEN") == 2
+    errs = [ln for ln in lines if "認証エラーのファイル（FNDWRR.txt）でした" in ln]
+    assert len(errs) == 2
+    assert sum("このダウンロードを「リンク先を保存」にしてください" in ln for ln in errs) == 1  # 押す方だけ
     # 手直しの比べ合わせでは、取り方の違いも見える
     plain = txt.replace('"saveLink"', '"click"')
     lines = plain.split("\n")

@@ -78,9 +78,13 @@ from details_io import load_details
 #
 # **この中に // のコメントは書けない。** 1 行に連結して渡すので、それ以降が
 # すべてコメントになってしまう。
-# action の saveLink は「名前を付けてリンク先を保存」と同じ取り方。押すと同じファイルを
-# 2 回取りに行く画面（Oracle の要求の結果など）でも、リンク先を 1 回だけ受け取る。
-# 要素のリンク（祖先か子孫の a[href]）に download を付けた写しを作って押す。
+# action の saveLink は「名前を付けてリンク先を保存」と同じく、押さずにリンク先を受け取る。
+# 押すと認証エラー（FNDWRR の Authentication failed.）になる画面（Oracle の要求の結果など）向け。
+# 要素のリンク（祖先か子孫の a[href]）を、画面の中から fetch で裏で取りに行き（ログイン状態の
+# クッキー付き）、受け取った中身を pad_download.拡張子 として保存する。拡張子は
+# Content-Disposition の名前から（日本語の名前は文字化けしても、拡張子は取れる）、無ければ種類から。
+# 中身が認証エラーの文字だけなら保存しない（ダウンロードが来ないので、その件は失敗になる）。
+# 実機（Edge・Oracle EBS）で、リンクの写しを押す取り方は認証エラー、fetch は Excel が取れた。
 JS_ACT = r"""
 var PREFER = true, BLUR = true;
 var cands = arguments[0], action = arguments[1], value = arguments[2];
@@ -270,13 +274,41 @@ for (var i = 0; i < cands.length; i++) {
     if (!a && el.querySelector) { a = el.querySelector(`a[href]`); }
     if (!a) { continue; }
     var d = el.ownerDocument || document;
-    var t = d.createElement(`a`);
-    t.href = a.href;
-    t.setAttribute(`download`, ``);
-    t.style.display = `none`;
-    (d.body || d.documentElement).appendChild(t);
-    t.click();
-    t.remove();
+    var w = d.defaultView || window;
+    w.__padDlError = ``;
+    w.fetch(a.href, { credentials: `include` }).then(function (r) {
+      var ct = (r.headers.get(`content-type`) || ``).toLowerCase();
+      var cd = r.headers.get(`content-disposition`) || ``;
+      return r.blob().then(function (b) {
+        var head = ct.indexOf(`text/`) === 0 && b.size < 2000 ? b.text() : Promise.resolve(``);
+        return head.then(function (tx) {
+          if (tx.indexOf(`Authentication failed`) >= 0) { w.__padDlError = tx.trim(); return; }
+          var ext = ``;
+          var k = cd.toLowerCase().indexOf(`filename`);
+          if (k >= 0) {
+            var nm = cd.slice(k);
+            var p = nm.lastIndexOf(`.`);
+            for (var j = p + 1; p >= 0 && j < nm.length; j++) {
+              var ch = nm.charAt(j);
+              if ((ch >= `a` && ch <= `z`) || (ch >= `A` && ch <= `Z`) || (ch >= `0` && ch <= `9`)) { ext += ch; } else { break; }
+            }
+          }
+          if (!ext) {
+            ext = ct.indexOf(`spreadsheetml`) >= 0 ? `xlsx` : ct.indexOf(`ms-excel`) >= 0 ? `xls` :
+              ct.indexOf(`pdf`) >= 0 ? `pdf` : ct.indexOf(`csv`) >= 0 ? `csv` :
+              ct.indexOf(`zip`) >= 0 ? `zip` : ct.indexOf(`html`) >= 0 ? `html` : `bin`;
+          }
+          var t = d.createElement(`a`);
+          t.href = w.URL.createObjectURL(b);
+          t.download = `pad_download.` + ext.toLowerCase();
+          t.style.display = `none`;
+          (d.body || d.documentElement).appendChild(t);
+          t.click();
+          t.remove();
+          w.setTimeout(function () { w.URL.revokeObjectURL(t.href); }, 60000);
+        });
+      });
+    }).catch(function (e) { w.__padDlError = String(e); });
   } else if (action === `text`) {
     var s = el.innerText || el.textContent || ``;
     return { ok: true, used: cands[i], text: s.trim() };
@@ -1052,10 +1084,13 @@ def _robin_download(cands: list, name: str, indent: str, step_no: int,
     A(f"{indent}# [{step_no}] ダウンロード {_dlnote}")
     if save_link:
         A(f"{indent}# 押さずに「名前を付けてリンク先を保存」と同じ取り方をする"
-          "（押すと 2 回取りに行き、2 回目が認証エラーになる画面のため）")
+          "（押すと認証エラーになる画面のため。裏でリンク先を受け取って保存する）")
     A(f"{indent}# 押す前の件数を数えておき、増えたぶんを新しいファイルとみなす。")
     A(f"{indent}" + _folder_get("DlDir", "$" + Q_ + "*.*" + Q_, "DlBefore"))
     A(f"{indent}SET DlCountBefore TO DlBefore.Count")
+    A(f"{indent}# Oracle EBS は、結果ファイルを渡せないとき FNDWRR.txt（中身は Authentication failed.）を返す。")
+    A(f"{indent}# それが増えたら、エビデンスにせず失敗にする（認証エラーの文字を「成功」にしないため）。")
+    A(f"{indent}" + _folder_get("DlDir", "$" + Q_ + "FNDWRR*.txt" + Q_, "DlErrBefore"))
     L.extend(_robin_act(cands, "saveLink" if save_link else "click", "", indent,
                         f"download {cands[0] if cands else ''}", step_no, cols))
     A(f"{indent}IF RowError = " + _robin_str("") + " THEN")
@@ -1076,7 +1111,15 @@ def _robin_download(cands: list, name: str, indent: str, step_no: int,
     A(f"{indent}        END")
     A(f"{indent}    END")
     A(f"{indent}    " + _folder_get("DlDir", "$" + Q_ + "*.*" + Q_, "DlAfter"))
-    A(f"{indent}    IF DlAfter.Count > DlCountBefore THEN")
+    A(f"{indent}    " + _folder_get("DlDir", "$" + Q_ + "FNDWRR*.txt" + Q_, "DlErrAfter"))
+    _autherr = ("ステップ%d（ダウンロード）で落ちてきたのは認証エラーのファイル（FNDWRR.txt）でした。"
+                "エビデンスにしていません" % step_no)
+    if not save_link:
+        _autherr += "。このダウンロードを「リンク先を保存」にしてください"
+    A(f"{indent}    IF DlErrAfter.Count > DlErrBefore.Count THEN")
+    A(f"{indent}        SET RowError TO {_robin_str(_autherr)}")
+    A(f"{indent}    END")
+    A(f"{indent}    IF DlAfter.Count > DlCountBefore AND DlErrAfter.Count = DlErrBefore.Count THEN")
     A(f"{indent}        # 一番新しいものが今回落ちてきたファイル")
     A(f"{indent}        " + _folder_get_sorted("DlDir", "$" + Q_ + "*.*" + Q_, "DlSorted"))
     A(f"{indent}        SET DlFile TO DlSorted[0]")
@@ -1090,6 +1133,8 @@ def _robin_download(cands: list, name: str, indent: str, step_no: int,
     A(f"{indent}    IF DlAfter.Count = DlCountBefore THEN")
     _dlerr = ("ステップ%d（ダウンロード）でファイルが落ちてきませんでした"
               "（%d 秒待機）" % (step_no, timeout))
+    if save_link:
+        _dlerr += "。リンク先の中身が認証エラーだったときも、保存しないのでこうなります"
     A(f"{indent}        SET RowError TO {_robin_str(_dlerr)}")
     A(f"{indent}    END")
     A(f"{indent}END")
