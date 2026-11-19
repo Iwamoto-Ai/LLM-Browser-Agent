@@ -130,6 +130,31 @@ const dup = '<div id="PosCreateAsnLink"><table><tr><td>' +
   check(!make(reply("", null, "", 0)).fn(["#nolink"], "saveLink", "").ok, "リンクが無いのに成功した");
 }
 {
+  // ウィンドウが前面で操作中でないと、focus() / blur() を呼んでも合図が出ない。
+  // 実 EDI1 の年月の欄は、外れた合図で 202610 を 2026-10 に整える。合図が出なかったときは
+  // こちらから出して、整える仕掛けを動かす（出たときは二重に出さない）
+  const field = '<input name="yyyymm" maxlength="7" onfocus="this.dataset.f=(+(this.dataset.f||0)+1)" ' +
+    'onblur="this.dataset.b=(+(this.dataset.b||0)+1);if(this.value.length===6){this.value=this.value.slice(0,4)+String.fromCharCode(45)+this.value.slice(4)}">';
+  const run = (silent) => {
+    const dom = new JSDOM("<!doctype html><body>" + field + "</body>", { runScripts: "dangerously" });
+    const w = dom.window;
+    if (silent) {   // 合図が出ない状態をまねる
+      w.HTMLElement.prototype.focus = function () {};
+      w.HTMLElement.prototype.blur = function () {};
+    }
+    const fn = w.eval("(function () { return function () { " + P.jsActOneline(true, true) + " }; })()");
+    const res = fn(["[name=yyyymm]"], "fill", "202610");
+    const el = w.document.querySelector("[name=yyyymm]");
+    return { res, v: el.value, f: el.dataset.f, b: el.dataset.b };
+  };
+  const quiet = run(true);
+  check(quiet.res.ok && quiet.v === "2026-10", "合図が出ないとき、年月が整わない: " + quiet.v);
+  check(quiet.f === "1" && quiet.b === "1", "合図が出ないとき、こちらから 1 回ずつ出していない: " + JSON.stringify(quiet));
+  const normal = run(false);
+  check(normal.v === "2026-10" && normal.f === "1" && normal.b === "1",
+        "合図が出るときに二重に出している: " + JSON.stringify(normal));
+}
+{
   // 入力のあとフォーカスを外す
   const body = '<input id="f"><input id="g">';
   const on = runAct(body, ["#f"], "fill", "abc");
@@ -257,4 +282,4 @@ if (errors.length) {
   console.log("NG  録画の下ごしらえ\n  " + errors.join("\n  "));
   process.exit(1);
 }
-console.log("OK  録画の下ごしらえ: 押せる要素の優先 / フォーカス外し / Win+Shift+S / 列の自動割り当て / バッチ定義の埋め込み / Robin の読み解き / Excel の明細 / リンク先を保存");
+console.log("OK  録画の下ごしらえ: 押せる要素の優先 / フォーカス外し / Win+Shift+S / 列の自動割り当て / バッチ定義の埋め込み / Robin の読み解き / Excel の明細 / リンク先を保存 / 合図の出ない入力欄");

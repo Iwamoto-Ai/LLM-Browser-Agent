@@ -78,6 +78,11 @@ from details_io import load_details
 #
 # **この中に // のコメントは書けない。** 1 行に連結して渡すので、それ以降が
 # すべてコメントになってしまう。
+# action の fill は、入れたあとフォーカスを外す（BLUR）。ブラウザーのウィンドウが前面で
+# 操作中でないと、focus() / blur() を呼んでもフォーカスの合図（focus / blur の出来事）が
+# 出ないことがある。合図で書式を整える欄（年月の 202610 を 2026-10 にするなど）は、
+# 合図が出ないと整わないまま送られて無効になる（実 EDI1 の年月で確認）。そこで、合図が
+# 出なかったときだけ、こちらから focus / blur の合図を出す。出たときは何もしない。
 # action の saveLink は「名前を付けてリンク先を保存」と同じく、押さずにリンク先を受け取る。
 # 押すと認証エラー（FNDWRR の Authentication failed.）になる画面（Oracle の要求の結果など）向け。
 # 要素のリンク（祖先か子孫の a[href]）を、画面の中から fetch で裏で取りに行き（ログイン状態の
@@ -264,11 +269,22 @@ for (var i = 0; i < cands.length; i++) {
     try { el.scrollIntoView({ block: `center` }); } catch (e) {}
     el.click();
   } else if (action === `fill`) {
+    var gotF = false, gotB = false;
+    var onF = function () { gotF = true; };
+    var onB = function () { gotB = true; };
+    el.addEventListener(`focus`, onF);
+    el.addEventListener(`blur`, onB);
     el.focus();
+    if (!gotF) { try { el.dispatchEvent(new FocusEvent(`focus`)); } catch (e) {} }
     el.value = value;
     el.dispatchEvent(new Event(`input`, { bubbles: true }));
     el.dispatchEvent(new Event(`change`, { bubbles: true }));
-    if (BLUR) { try { el.blur(); } catch (e) {} }
+    if (BLUR) {
+      try { el.blur(); } catch (e) {}
+      if (!gotB) { try { el.dispatchEvent(new FocusEvent(`blur`)); } catch (e) {} }
+    }
+    el.removeEventListener(`focus`, onF);
+    el.removeEventListener(`blur`, onB);
   } else if (action === `saveLink`) {
     var a = el.closest ? el.closest(`a[href]`) : null;
     if (!a && el.querySelector) { a = el.querySelector(`a[href]`); }
