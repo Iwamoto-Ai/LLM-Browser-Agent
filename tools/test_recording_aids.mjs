@@ -155,6 +155,32 @@ const dup = '<div id="PosCreateAsnLink"><table><tr><td>' +
         "合図が出るときに二重に出している: " + JSON.stringify(normal));
 }
 {
+  // 画面が落ち着くまで待つ（idle）: 少しあとに動く予約（setTimeout）・押した直後を「忙しい」と見る。
+  // 実 EDI1 の年月の欄は、値が変わると 1 秒後に自動で送信する（その間に検索を押すと消される）
+  const page = '<input name="ym" onchange="setTimeout(String.fromCharCode(119,105,110,100,111,119,46,115,101,110,116,61,49),300)">' +
+               '<button id="go">検索</button>';
+  const dom = new JSDOM("<!doctype html><body>" + page + "</body>", { runScripts: "dangerously" });
+  const w = dom.window;
+  const fn = w.eval("(function () { return function () { " + P.jsActOneline(true, true) + " }; })()");
+  // 読み込み中は「忙しい」と見る（正しい）。読み終わってから試す
+  check(w.document.readyState === "complete" || !fn([], "idle", "").ok, "読み込み中を忙しいと見ていない");
+  while (w.document.readyState !== "complete") { await new Promise((r) => setTimeout(r, 10)); }
+  const first = fn([], "idle", "");
+  check(first.ok, "何もしていないのに忙しいと言う: " + first.text);
+  fn(["[name=ym]"], "fill", "202610");
+  const busy = fn([], "idle", "");
+  check(!busy.ok && /予約1/.test(busy.text), "自動送信の予約を数えていない: " + JSON.stringify(busy));
+  await new Promise((r) => setTimeout(r, 400));
+  check(w.sent === 1, "予約していた処理が動いていない（仕掛けが文字の setTimeout を壊した）");
+  const calm = fn([], "idle", "");
+  check(calm.ok, "予約が動いたあとも忙しいと言う: " + calm.text);
+  fn(["#go"], "click", "");
+  const justClicked = fn([], "idle", "");
+  check(!justClicked.ok && /押した直後/.test(justClicked.text), "押した直後を忙しいと見ていない: " + justClicked.text);
+  await new Promise((r) => setTimeout(r, 750));
+  check(fn([], "idle", "").ok, "押してしばらくたっても忙しいと言う");
+}
+{
   // 入力のあとフォーカスを外す
   const body = '<input id="f"><input id="g">';
   const on = runAct(body, ["#f"], "fill", "abc");
@@ -282,4 +308,4 @@ if (errors.length) {
   console.log("NG  録画の下ごしらえ\n  " + errors.join("\n  "));
   process.exit(1);
 }
-console.log("OK  録画の下ごしらえ: 押せる要素の優先 / フォーカス外し / Win+Shift+S / 列の自動割り当て / バッチ定義の埋め込み / Robin の読み解き / Excel の明細 / リンク先を保存 / 合図の出ない入力欄");
+console.log("OK  録画の下ごしらえ: 押せる要素の優先 / フォーカス外し / Win+Shift+S / 列の自動割り当て / バッチ定義の埋め込み / Robin の読み解き / Excel の明細 / リンク先を保存 / 合図の出ない入力欄 / 画面が落ち着くまで待つ");
