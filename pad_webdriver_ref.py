@@ -2350,7 +2350,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
                 step_wait=None,
                 prefer_clickable=None,
                 blur_after_fill=None,
-                wait_idle=None) -> str:
+                wait_idle=None,
+                show_driver_info: bool = True) -> str:
     """PAD に貼り付けられる Robin コードを生成する。
 
     PAD のフローデザイナーはアクションのコピー＆ペーストにテキスト（Robin）を使うため、
@@ -2439,7 +2440,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
       f" ／ プロキシ自動={'有効' if proxy_auto else '無効'}"
       f" ／ プロキシ={proxy or '未使用'}")
     A(f"#       MaxItems={max_items} ／ ウィンドウ={win_w}×{win_h}"
-      f" ／ ドライバー置き場所={drv_dir}")
+      f" ／ ドライバー置き場所={drv_dir}"
+      + ("" if show_driver_info else " ／ ドライバー確認=出さない"))
     A(f"#       サイトの設定: 待つ上限={site['stepWait']} 秒"
       f" ／ 押せる要素を優先={'有効' if site['preferClickable'] else '無効'}"
       f" ／ 入力後にフォーカスを外す={'有効' if site['blurAfterFill'] else '無効'}"
@@ -2507,8 +2509,9 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("# 遅いサイトで「要素が見つかりません」が続くときは増やす。")
     A(f"SET StepWait TO {site['stepWait']}")
     A("# 起動したブラウザーとドライバーの種類・バージョンをダイアログで出す")
-    A("# False にしてもログ（pad_progress.log）には必ず 1 行残る")
-    A("SET ShowDriverInfo TO True")
+    A("# False にしてもログ（pad_progress.log）には必ず 1 行残る。")
+    A("# False でも、バージョンが合わないときと、取得・起動に失敗したときは必ず出る")
+    A(f"SET ShowDriverInfo TO {'True' if show_driver_info else 'False'}")
     A("# 失敗分だけを再実行するとき True（読み込み元と出力先が自動で切り替わる）")
     A("SET RetryMode TO False")
     A("")
@@ -2894,6 +2897,10 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"SET VerJudge TO {_robin_str('不一致（ブラウザー更新の可能性あり）')}")
     A("IF VerObj['value']['match'] = True THEN")
     A(f"    SET VerJudge TO {_robin_str('一致')}")
+    A("END")
+    A("# 合わないときは、ShowDriverInfo が False でも必ず出す（気づかないまま進まないように）")
+    A(f"IF VerJudge <> {_robin_str('一致')} THEN")
+    A("    SET ShowDriverInfo TO True")
     A("END")
     _di = _robin_str("ブラウザー=%Browser% %BrowserVer% / WebDriver=%DriverProc% "
                      "%DriverVer% / メジャー判定=%VerJudge% / 取得方法=%DriverSrc% / "
@@ -3622,6 +3629,9 @@ def main() -> None:
                         "ログを拾って付け替えてしまうので、専用のフォルダにする")
     p.add_argument("--auto-driver", action=argparse.BooleanOptionalAction, default=True,
                    help="ドライバーを自動取得する（既定オン。外すときは --no-auto-driver）")
+    p.add_argument("--show-driver-info", action=argparse.BooleanOptionalAction, default=True,
+                   help="起動時にドライバー確認のダイアログを出す（既定オン。外すときは "
+                        "--no-show-driver-info。バージョンが合わないときと失敗したときは必ず出る）")
     p.add_argument("--proxy-auto", action=argparse.BooleanOptionalAction, default=True,
                    help="Windows のプロキシ設定に合わせて直結／プロキシを切り替える"
                         "（既定オン。外すときは --no-proxy-auto）")
@@ -3716,7 +3726,8 @@ def main() -> None:
                           step_wait=args.step_wait,
                           prefer_clickable=args.prefer_clickable,
                           blur_after_fill=args.blur_after_fill,
-                          wait_idle=args.wait_idle)
+                          wait_idle=args.wait_idle,
+                          show_driver_info=args.show_driver_info)
         js_out = out[:-len(".robin.txt")] + ".jsact.js" if out.endswith(".robin.txt") \
             else os.path.splitext(out)[0] + ".jsact.js"
         print(f"📄 PAD 用 Robin コード: {out}")
