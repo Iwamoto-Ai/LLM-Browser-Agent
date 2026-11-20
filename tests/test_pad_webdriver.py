@@ -1526,3 +1526,23 @@ def test_frame_from_recording(tmp_path):
     assert "function hiddenEl" in pad.JS_ACT and "arguments[3]" in pad.JS_ACT
     # 空の記録（トップの文書）は付けない
     assert pad._frame_of({"frame": []}) is None and pad._frame_of({"frame": ""}) is None
+
+
+def test_show_driver_info_switch(tmp_path):
+    """起動時のドライバー確認ダイアログは既定で出る。外しても、バージョンが合わないとき・失敗したときは出る。"""
+    b = load_recording(_RICH)
+    on = _robin_no_embed(b, tmp_path)
+    off = _robin_no_embed(b, tmp_path, show_driver_info=False)
+    assert "SET ShowDriverInfo TO True" in on and "ドライバー確認=出さない" not in on
+    assert "SET ShowDriverInfo TO False" in off and "ドライバー確認=出さない" in off
+    for t in (on, off):
+        lines = [ln.strip() for ln in t.split("\n")]
+        k = lines.index("IF VerJudge <> $'''一致''' THEN")
+        assert lines[k + 1] == "SET ShowDriverInfo TO True"
+        assert lines.index("IF ShowDriverInfo THEN") > k
+        # 失敗のダイアログは ShowDriverInfo に関係なく出る（IF ShowDriverInfo の中に無い）
+        for title in ("セッション作成に失敗", "ブラウザーの取り違え", "ドライバー取得に失敗"):
+            i = next(i for i, ln in enumerate(lines) if title in ln and "ShowMessage" in ln)
+            assert lines[i - 1] != "IF ShowDriverInfo THEN"
+    # 業務の設定ではない（PC ごとの設定）ので、読み解きの結果は同じ
+    assert pad.parse_robin(on)[0] == pad.parse_robin(off)[0]

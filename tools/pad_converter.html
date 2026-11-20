@@ -151,6 +151,10 @@
   <div><label for="autodrv">ドライバー自動取得</label>
     <label class="inline"><input type="checkbox" id="autodrv" checked>
       ブラウザーに合わせて自動で取ってくる（--auto-driver）</label></div>
+  <div><label for="showDrvInfo">ドライバー確認のダイアログ</label>
+    <label class="inline"><input type="checkbox" id="showDrvInfo" checked>
+      起動時に出す（--show-driver-info）</label>
+    <span class="hint">取得・更新が順調なら外してよい。バージョンが合わないときと失敗したときは、外していても出る</span></div>
   <div class="hint">どちらも既定はオン。社内ではプロキシ、テレワークでは直結のように
      場所で切り替わる PC でも、書き換えずに動く。</div>
   <div><label for="proxy" id="proxyLabel">プロキシ (--proxy)</label>
@@ -3071,6 +3075,7 @@ function buildRobin(batch, opt) {
   var outDir = opt.outDir || "C:\\temp";
   var proxy = opt.proxy || "";
   var autoDriver = !!opt.autoDriver;
+  var showDriverInfo = opt.showDriverInfo === undefined ? true : !!opt.showDriverInfo;
   var browser = opt.browser || "edge";
   var today = opt.today;
   var shotName = opt.shotName || "@ID@__@KEY@__@STAMP@";   // {y,m,d}（テスト用に固定できるようにする）
@@ -3144,7 +3149,8 @@ function buildRobin(batch, opt) {
     " ／ プロキシ自動=" + (proxyAuto ? "有効" : "無効") +
     " ／ プロキシ=" + (proxy || "未使用"));
   A("#       MaxItems=" + maxItems + " ／ ウィンドウ=" + win.w + "×" + win.h +
-    " ／ ドライバー置き場所=" + drvDir);
+    " ／ ドライバー置き場所=" + drvDir +
+    (showDriverInfo ? "" : " ／ ドライバー確認=出さない"));
   A("#       サイトの設定: 待つ上限=" + site.stepWait + " 秒" +
     " ／ 押せる要素を優先=" + (site.preferClickable ? "有効" : "無効") +
     " ／ 入力後にフォーカスを外す=" + (site.blurAfterFill ? "有効" : "無効") +
@@ -3213,8 +3219,9 @@ function buildRobin(batch, opt) {
   A("# 遅いサイトで「要素が見つかりません」が続くときは増やす。");
   A("SET StepWait TO " + site.stepWait);
   A("# 起動したブラウザーとドライバーの種類・バージョンをダイアログで出す");
-  A("# False にしてもログ（pad_progress.log）には必ず 1 行残る");
-  A("SET ShowDriverInfo TO True");
+  A("# False にしてもログ（pad_progress.log）には必ず 1 行残る。");
+  A("# False でも、バージョンが合わないときと、取得・起動に失敗したときは必ず出る");
+  A("SET ShowDriverInfo TO " + (showDriverInfo ? "True" : "False"));
   A("# 失敗分だけを再実行するとき True（読み込み元と出力先が自動で切り替わる）");
   A("SET RetryMode TO False");
   A("");
@@ -3585,6 +3592,10 @@ function buildRobin(batch, opt) {
   A("SET VerJudge TO " + robinStr("不一致（ブラウザー更新の可能性あり）"));
   A("IF VerObj['value']['match'] = True THEN");
   A("    SET VerJudge TO " + robinStr("一致"));
+  A("END");
+  A("# 合わないときは、ShowDriverInfo が False でも必ず出す（気づかないまま進まないように）");
+  A("IF VerJudge <> " + robinStr("一致") + " THEN");
+  A("    SET ShowDriverInfo TO True");
   A("END");
   A("SET DriverInfo TO " + robinStr("ブラウザー=%Browser% %BrowserVer% / WebDriver=%DriverProc% " +
     "%DriverVer% / メジャー判定=%VerJudge% / 取得方法=%DriverSrc% / パス=%DriverExe%"));
@@ -4154,7 +4165,7 @@ root.PadConvert = {
   // 混ぜると、配ったときに人のフォルダが混ざって毎回消すことになる。
   var PC_KEYS = ["details", "driverDir", "outdir", "downloadDir", "proxy"];
   // PC に紐づくチェック（場所によって変わりうるので PC 側で覚える）
-  var PC_CHECKS = ["autodrv", "proxyAuto"];
+  var PC_CHECKS = ["autodrv", "proxyAuto", "showDrvInfo"];
   var PC_STORE = "pad_converter_paths";
 
   function loadPcSettings() {
@@ -4760,6 +4771,7 @@ root.PadConvert = {
         detailsFromResult: $("detailsFromResult").checked,
         proxy: $("proxy").value.trim(),
         autoDriver: $("autodrv").checked,
+        showDriverInfo: $("showDrvInfo").checked,
         proxyAuto: $("proxyAuto").checked,
         stepWait: $("stepWait").value,
         preferClickable: $("preferClickable").checked,

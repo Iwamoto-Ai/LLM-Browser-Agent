@@ -20,7 +20,7 @@ for (const id of ["run", "copy", "save", "copyJs", "saveTemplate", "batchFile", 
   if (!d.getElementById(id)) { errors.push("要素が無い: #" + id); }
 }
 // 3. オプションの欄（ドライバーはフォルダで受け取る。exe のパス欄は残さない）
-for (const id of ["driverDir", "proxyAuto", "autodrv", "maxItems", "winW", "winH",
+for (const id of ["driverDir", "proxyAuto", "autodrv", "showDrvInfo", "maxItems", "winW", "winH",
                   "stepWait", "preferClickable", "blurAfterFill", "shotFromKeys", "autoColumns"]) {
   if (!d.getElementById(id)) { errors.push("要素が無い: #" + id); }
 }
@@ -35,7 +35,7 @@ for (const id of ["driverDir", "proxyAuto", "autodrv", "maxItems", "winW", "winH
   }
 }
 if (d.getElementById("driver")) { errors.push("ドライバーの exe パス欄が残っている: #driver"); }
-for (const id of ["proxyAuto", "autodrv", "preferClickable", "blurAfterFill",
+for (const id of ["proxyAuto", "autodrv", "showDrvInfo", "preferClickable", "blurAfterFill",
                   "shotFromKeys", "autoColumns"]) {
   if (d.getElementById(id) && !d.getElementById(id).checked) {
     errors.push("既定でオンになっていない: #" + id);

@@ -49,9 +49,9 @@ const cases = [
   { batch: "recordings/edi2_practice_batch.json", idCol: "プロジェクト番号",
     details: "C:\\temp\\edi2_batch.csv", browser: "chrome", label: "既定外の設定",
     py: ["--driver-dir", "D:\\drivers", "--no-auto-driver", "--no-proxy-auto",
-         "--max-items", "5", "--win-w", "1024", "--win-h", "768"],
+         "--max-items", "5", "--win-w", "1024", "--win-h", "768", "--no-show-driver-info"],
     js: { driverDir: "D:\\drivers", autoDriver: false, proxyAuto: false,
-          maxItems: "5", winW: "1024", winH: "768" } },
+          maxItems: "5", winW: "1024", winH: "768", showDriverInfo: false } },
   // サイトの設定を画面（CLI）で指定したとき
   { batch: "recordings/edi2_practice_batch.json", idCol: "プロジェクト番号",
     details: "C:\\temp\\edi2_batch.csv", browser: "edge", label: "サイトの設定を指定",
