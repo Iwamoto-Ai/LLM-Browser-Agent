@@ -46,6 +46,10 @@
         [
           "text/納入"
         ]
+      ],
+      "frame": [
+        1,
+        0
       ]
     },
     {
@@ -58,7 +62,8 @@
         [
           "#po"
         ]
-      ]
+      ],
+      "frame": "content"
     },
     {
       "type": "scrollFind",
@@ -118,8 +123,7 @@
         [
           "#xls2"
         ]
-      ]
-    ,
+      ],
       "saveLink": true
     },
     {

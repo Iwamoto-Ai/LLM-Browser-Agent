@@ -40,6 +40,9 @@ const SITE_BATCH = path.join(os.tmpdir(), "parity_site_batch.json");
 const cases = [
   { batch: "examples/pad/pad_sample_batch.json", idCol: "ID",
     details: "C:\\temp\\sample_batch.csv", browser: "edge" },
+  // フレーム型の画面（録画の frame を、そのフレームの中だけで探すのに使う）
+  { batch: "recordings/edi_practice_batch.json", idCol: "ID",
+    details: "C:\\temp\\edi_batch.csv", browser: "edge", label: "フレーム型" },
   { batch: "recordings/edi2_practice_batch.json", idCol: "プロジェクト番号",
     details: "C:\\temp\\edi2_batch.csv", browser: "chrome" },
   // 既定から外した設定でも一致すること（チェックを外す・件数・大きさ・置き場所）
@@ -118,7 +121,7 @@ for (const c of cases) {
   const robins = [];
   const py = path.join(os.tmpdir(), "py.robin.txt");
   for (const b of ["recordings/edi2_practice_batch.json", "tests/fixtures/robin_parse_rich_batch.json",
-                   SITE_BATCH]) {
+                   SITE_BATCH, "recordings/edi_practice_batch.json"]) {
     execFileSync(PY, ["pad_webdriver_ref.py", "--batch", b, "--details", "C:\\temp\\d.csv",
       "--id-column", (PadConvert.loadRecording(fs.readFileSync(b, "utf8")).options || {}).idCol || "ID", "--robin", py,
       "--pad-out-dir", "C:\\temp"], { stdio: "pipe" });

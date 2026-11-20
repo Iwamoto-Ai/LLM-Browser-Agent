@@ -66,7 +66,11 @@ from details_io import load_details
 
 # ---------------------------------------------------------------------------
 # 要素の特定と操作をまとめて行う JavaScript。
-# 引数: arguments[0]=セレクタ候補の配列, arguments[1]=操作, arguments[2]=値
+# 引数: arguments[0]=セレクタ候補の配列, arguments[1]=操作, arguments[2]=値,
+#       arguments[3]=フレーム（録画の "frame"。番号の並び [1] か名前。無ければ全部のフレームを探す）
+# 押す・入れる相手は、見えない要素（type=hidden や display:none）にはしない。フレーム型の
+# 画面で、位置で決めた目印（form > input:nth-of-type(1)）が先に見た別のフレームの隠れた
+# 入力欄に当たり、押せたことになって何も起きなかった（実 EDI1 の「検索」）。
 # 戻り値: {"ok": true/false, "used": 実際に一致したセレクタ}
 # PAD へはこの文字列を 1 行にして貼り付ける（--trace の出力にそのまま含まれる）。
 # ---------------------------------------------------------------------------
@@ -92,7 +96,7 @@ from details_io import load_details
 # 実機（Edge・Oracle EBS）で、リンクの写しを押す取り方は認証エラー、fetch は Excel が取れた。
 JS_ACT = r"""
 var PREFER = true, BLUR = true;
-var cands = arguments[0], action = arguments[1], value = arguments[2];
+var cands = arguments[0], action = arguments[1], value = arguments[2], frame = arguments[3];
 var Q = String.fromCharCode(39), DQ = String.fromCharCode(34);
 function lit(s) { if (s.indexOf(Q) < 0) { return Q + s + Q; } return DQ + s + DQ; }
 function docsOf(root, out) {
@@ -106,8 +110,39 @@ function docsOf(root, out) {
   }
   return out;
 }
+function frameDoc() {
+  if (!frame || (frame.length !== undefined && !frame.length)) { return null; }
+  try {
+    if (typeof frame === `string`) {
+      var all = docsOf(document, []);
+      for (var q = 0; q < all.length; q++) {
+        var fe = all[q].querySelectorAll(`iframe, frame`);
+        for (var r = 0; r < fe.length; r++) {
+          if ((fe[r].name === frame || fe[r].id === frame) && fe[r].contentDocument) { return fe[r].contentDocument; }
+        }
+      }
+      return null;
+    }
+    var w = window;
+    for (var s = 0; s < frame.length; s++) { w = w.frames[frame[s]]; }
+    return w.document;
+  } catch (e) { return null; }
+}
 function allDocs() {
+  var fd = frameDoc();
+  if (fd) { return docsOf(fd, []); }
   try { return docsOf(document, []); } catch (e) { return [document]; }
+}
+function hiddenEl(el) {
+  if (String(el.tagName || ``).toLowerCase() === `input` && String(el.type || ``).toLowerCase() === `hidden`) { return true; }
+  try {
+    var v = el.ownerDocument.defaultView;
+    for (var p = el; p && p.nodeType === 1; p = p.parentElement) {
+      var cs = v.getComputedStyle(p);
+      if (cs && (cs.display === `none` || cs.visibility === `hidden`)) { return true; }
+    }
+  } catch (e) { return false; }
+  return false;
 }
 function qs(doc, sel) {
   try { return doc.querySelector(sel); } catch (e) { return null; }
@@ -147,6 +182,12 @@ function inClickable(el) {
 }
 function pickEl(list) {
   if (!list || !list.length) { return null; }
+  if (action === `click` || action === `fill`) {
+    var vis = [];
+    for (var h = 0; h < list.length; h++) { if (!hiddenEl(list[h])) { vis.push(list[h]); } }
+    if (!vis.length) { return null; }
+    list = vis;
+  }
   if (list.length === 1 || !PREFER || action !== `click`) { return list[0]; }
   if (inClickable(list[0])) { return list[0]; }
   for (var a = 0; a < list.length; a++) {
@@ -197,6 +238,7 @@ function find(sel) {
   var docs = allDocs();
   for (var j = 0; j < docs.length; j++) {
     var hit = findIn(docs[j], sel);
+    if (hit && (action === `click` || action === `fill`) && hiddenEl(hit)) { hit = null; }
     if (hit) { return hit; }
   }
   return null;
@@ -1104,9 +1146,9 @@ def _robin_capture(cands: list, var: str, indent: str, step_no: int,
     note = _to_robin_var(note, cols).replace("'", "").replace("[", "").replace("]", "")
     if key:
         act = "afterDigits" if extract == "digits" else "after"
-        body_args = json.dumps([[], act, _to_robin_var(key, cols)], ensure_ascii=False)
+        body_args = _act_json([], act, _to_robin_var(key, cols))
     else:
-        body_args = json.dumps([cands, "text", ""], ensure_ascii=False)
+        body_args = _act_json(cands, "text", "")
     _err_http = _robin_str("ステップ%d（%s）で WebDriver がエラーを返しました"
                            "（HTTP %%ActStatus%%）" % (step_no, note))
     _err_find = _robin_str(("ステップ%d（%s）で「%s」の後に読み取る文字がありません"
@@ -1247,7 +1289,7 @@ def _robin_act(cands: list, action: str, value: str, indent: str, note: str,
     value = _to_robin_var(value, cols)
     # 注記はリテラルに入るため、単引用符を含めない形に整える
     note = _to_robin_var(note, cols).replace("'", "").replace("[", "").replace("]", "")
-    body_args = json.dumps([cands, action, value], ensure_ascii=False)
+    body_args = _act_json(cands, action, value)
     # %JsAct% は Robin 側で展開させたいので、文字列のまま残す
     # exists は「文字列が見つからない」、click/fill は「要素が見つからない」
     why = "画面に文字列がありません" if action == "exists" else "で要素が見つかりません"
@@ -1281,7 +1323,26 @@ def _robin_act(cands: list, action: str, value: str, indent: str, note: str,
 
 
 # 生成中の設定（write_robin が決める）。idle: 画面が落ち着くまで待つ
-_GEN = {"idle": False}
+# frame: いま書いているステップの録画の "frame"（そのフレームの中だけで目印を探す）
+_GEN = {"idle": False, "frame": None}
+
+
+def _frame_of(st: dict):
+    """録画の "frame"（番号の並び [1, 0] か、フレームの名前）。一番上の画面なら None。"""
+    f = st.get("frame")
+    if isinstance(f, list) and f and all(isinstance(x, int) and not isinstance(x, bool) for x in f):
+        return f
+    if isinstance(f, str) and f.strip():
+        return f.strip()
+    return None
+
+
+def _act_json(cands, action: str, value) -> str:
+    """共通 JS に渡す args。録画にフレームがあれば 4 つ目に付ける。"""
+    args = [cands, action, value]
+    if _GEN["frame"] is not None:
+        args.append(_GEN["frame"])
+    return json.dumps(args, ensure_ascii=False)
 
 
 def _robin_wait_idle(indent: str) -> list:
@@ -1349,7 +1410,7 @@ def _robin_act_best_effort(cands: list, action: str, value: str, indent: str,
     cands = [_to_robin_var(c, cols) for c in _robin_filter_candidates(cands)]
     value = _to_robin_var(value, cols)
     note = _to_robin_var(note, cols).replace("'", "").replace("[", "").replace("]", "")
-    body_args = json.dumps([cands, action, value], ensure_ascii=False)
+    body_args = _act_json(cands, action, value)
     return [
         f"{indent}# {note}",
         f"{indent}SET ActBody TO $'''{{\"script\": \"%JsAct%\", \"args\": {body_args}}}'''",
@@ -1617,6 +1678,12 @@ def parse_robin(text: str):
     def sels(cands):
         return [[unvar(c)] for c in cands]
 
+    def framed(st, a):
+        """ActBody の 4 つ目（録画のフレーム）があれば、ステップに戻す。"""
+        if a is not None and len(a) > 3 and a[3] not in (None, "", []):
+            st["frame"] = a[3]
+        return st
+
     def act_at(i):
         """i 行目の操作。目印の候補は直前のコメントで録画の並びに戻す。"""
         a = _act_args(lines[i])
@@ -1640,9 +1707,9 @@ def parse_robin(text: str):
                 continue
             a = act_at(i)
             if a and a[1] == "fill":
-                out.append({"type": "change", "value": unvar(a[2]), "selectors": sels(a[0])})
+                out.append(framed({"type": "change", "value": unvar(a[2]), "selectors": sels(a[0])}, a))
             elif a and a[1] == "click":
-                out.append({"type": "click", "selectors": sels(a[0])})
+                out.append(framed({"type": "click", "selectors": sels(a[0])}, a))
         return out
 
     batch = {}
@@ -1702,7 +1769,7 @@ def parse_robin(text: str):
             moving = False
             origin = a[0]
         elif a and moving and a[1] == "click":
-            setup.append({"type": "click", "selectors": sels(a[0])})
+            setup.append(framed({"type": "click", "selectors": sels(a[0])}, a))
     if origin is not None:
         derived = ""
         for c in origin:
@@ -1767,21 +1834,21 @@ def parse_robin(text: str):
                 if act in ("after", "afterDigits"):
                     st["key"] = unvar(val)
                 st["name"] = extra.get("name", "取得値")
-                loop.append(st)
+                loop.append(framed(st, a))
             elif pend == "download":
                 st = {"type": "download", "selectors": sels(cands)}
                 if act == "saveLink":
                     st["saveLink"] = True
-                loop.append(st)
+                loop.append(framed(st, a))
             elif pend == "assertText":
                 st = {"type": "assertText", "text": unvar(val)}
                 if extra.get("timeout"):
                     st["timeout"] = extra["timeout"]
                 loop.append(st)
             elif act == "fill":
-                loop.append({"type": "change", "value": unvar(val), "selectors": sels(cands)})
+                loop.append(framed({"type": "change", "value": unvar(val), "selectors": sels(cands)}, a))
             elif act == "click":
-                loop.append({"type": "click", "selectors": sels(cands)})
+                loop.append(framed({"type": "click", "selectors": sels(cands)}, a))
             else:
                 notes.append(f"読めない操作を飛ばしました: {act}")
             pend, extra = None, {}
@@ -2304,6 +2371,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     site = site_settings(batch, step_wait, prefer_clickable, blur_after_fill, wait_idle)
     # 画面が落ち着くまで待つ（オンのときだけ、各操作の前に待ちを入れる。既定はオフ）
     _GEN["idle"] = bool(site["waitIdle"])
+    _GEN["frame"] = None
     js_one = js_act_oneline(site["preferClickable"], site["blurAfterFill"])
     drv_dir = _driver_dir(driver_dir, driver_exe)
     max_items = _clamp_max_items(max_items)
@@ -2912,12 +2980,14 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
         失敗しても止めない。すでに起点にいる場合はメニューが無くて空振りする
         だけで、それで構わない。着いたかどうかは直後の確認で見る。"""
         for st in move:
+            _GEN["frame"] = _frame_of(st)
             cands = _candidates(st)
             if not _robin_filter_candidates(cands):
                 continue
             for ln in _robin_act_best_effort(cands, "click", "", indent,
                                              f"click {cands[0]}", cols):
                 A(ln)
+        _GEN["frame"] = None
 
     A("")
     # ---- 起点画面の確認 ----
@@ -3090,6 +3160,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A(f"{inner}IF PrevFailed THEN")
     if recover:
         for st in recover:
+            _GEN["frame"] = _frame_of(st)
             t = st.get("type")
             if t == "comment":
                 A(f"{inner}    # 💬 {_safe_comment(st.get('text', ''), cols)}")
@@ -3103,6 +3174,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
                 A(f"{inner}    SET UrlBody TO $'''{{\"url\": \"%TargetUrl%\"}}'''")
                 A(_web("GoUrl", "Post", "UrlBody", "UrlResp", "UrlStatus", inner + "    "))
                 A(f"{inner}    WAIT 2")
+        _GEN["frame"] = None
     elif start_url:
         A(f"{inner}    # batch に recover が無いので、開始 URL を開き直して復帰する。")
         A(f"{inner}    # ログインが必要なサイトではセッションが切れる可能性があるため、")
@@ -3141,6 +3213,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
 
     m = 0
     for st in loop_steps:
+        _GEN["frame"] = _frame_of(st)
         t = st.get("type")
         if t == "comment":
             A(f"{inner}# 💬 {_safe_comment(st.get('text', ''), cols)}")
@@ -3211,6 +3284,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             A(f"{inner}WAIT 1")
             A("")
             continue
+    _GEN["frame"] = None
 
     A(f"{inner}# ここまで来たら成功")
     A(f"{inner}SET PrevFailed TO False")
@@ -3229,6 +3303,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     if teardown:
         A("# ================= 後処理（batch の teardown）=================")
         for st in teardown:
+            _GEN["frame"] = _frame_of(st)
             t = st.get("type")
             if t == "comment":
                 A(f"# 💬 {_safe_comment(st.get('text', ''), cols)}")
@@ -3238,6 +3313,7 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
                 L.extend(_robin_act_best_effort(
                     cands, act, st.get("value", ""), "",
                     f"後処理: {act} {cands[0] if cands else ''}", cols))
+        _GEN["frame"] = None
         A("")
 
     if xlsx:
