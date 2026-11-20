@@ -1507,3 +1507,22 @@ def test_wait_idle_blocks(tmp_path):
     b2["options"]["waitIdle"] = True
     assert _robin_no_embed(b2, tmp_path) == on
     assert "action === `idle`" in pad.JS_ACT
+
+
+def test_frame_from_recording(tmp_path):
+    """録画のフレームの記録（番号の並び・名前）が、その操作の ActBody の 4 つ目に入り、読み解きで戻る。
+    記録の無い操作は今までどおり 3 つのまま。見えない要素を押さない決まりも JsAct に入っている。"""
+    b = load_recording(_RICH)
+    txt = _robin_no_embed(b, tmp_path)
+    assert '"click", "", [1, 0]]}' in txt
+    assert ', "content"]}' in txt
+    plain = [ln for ln in txt.split("\n") if "SET ActBody TO" in ln and '"click", ""]}' in ln]
+    assert plain                                         # フレームの無い操作は 3 つのまま
+    got, _ = pad.parse_robin(txt)
+    loop = got["loop"]
+    assert loop[1]["frame"] == [1, 0] and loop[2]["frame"] == "content"
+    assert "frame" not in loop[4]
+    assert _robin_no_embed(got, tmp_path) == txt
+    assert "function hiddenEl" in pad.JS_ACT and "arguments[3]" in pad.JS_ACT
+    # 空の記録（トップの文書）は付けない
+    assert pad._frame_of({"frame": []}) is None and pad._frame_of({"frame": ""}) is None

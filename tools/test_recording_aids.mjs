@@ -181,6 +181,34 @@ const dup = '<div id="PosCreateAsnLink"><table><tr><td>' +
   check(fn([], "idle", "").ok, "押してしばらくたっても忙しいと言う");
 }
 {
+  // フレーム型の画面: 位置で決めた目印（form > input:nth-of-type(1)）が、先に見た別のフレームの
+  // 隠れた入力欄に当たっていた（実 EDI1 の「検索」）。見えない要素は押さず、録画のフレームがあれば
+  // そのフレームの中だけで探す
+  const dom = new JSDOM('<!doctype html><body><iframe name="fr_dmy"></iframe><iframe name="fr_main"></iframe></body>',
+                        { runScripts: "outside-only" });
+  const w = dom.window;
+  const put = (name, html) => { const d = w.frames[name] ? w.frames[name].document : null;
+                                d.open(); d.write("<!doctype html><body>" + html + "</body>"); d.close(); return d; };
+  const dmy = put("fr_dmy", '<form><input type="hidden" name="pageno" value="1462"></form>');
+  const main = put("fr_main", '<form><input type="submit" name="btn_submit" value="検  索"></form>');
+  let hit = [];
+  dmy.querySelector("input").addEventListener("click", () => hit.push("dmy"));
+  main.querySelector("input").addEventListener("click", (e) => { hit.push("main"); e.preventDefault(); });
+  const fn = w.eval("(function () { return function () { " + P.jsActOneline(true, true) + " }; })()");
+  const sel = ["form > input:nth-of-type(1)"];
+  let r = fn(sel, "click", "");
+  check(r.ok && hit.join() === "main", "隠れた入力欄を押した（フレームの記録なし）: " + hit.join());
+  hit = [];
+  r = fn(sel, "click", "", [1]);
+  check(r.ok && hit.join() === "main", "録画のフレーム [1] の中で探していない: " + hit.join());
+  hit = [];
+  r = fn(sel, "click", "", "fr_main");
+  check(r.ok && hit.join() === "main", "フレームの名前で探していない: " + hit.join());
+  hit = [];
+  r = fn(sel, "click", "", [0]);
+  check(!r.ok && hit.length === 0, "見えない要素しか無いのに押せたことになった: " + JSON.stringify(r));
+}
+{
   // 入力のあとフォーカスを外す
   const body = '<input id="f"><input id="g">';
   const on = runAct(body, ["#f"], "fill", "abc");
@@ -308,4 +336,4 @@ if (errors.length) {
   console.log("NG  録画の下ごしらえ\n  " + errors.join("\n  "));
   process.exit(1);
 }
-console.log("OK  録画の下ごしらえ: 押せる要素の優先 / フォーカス外し / Win+Shift+S / 列の自動割り当て / バッチ定義の埋め込み / Robin の読み解き / Excel の明細 / リンク先を保存 / 合図の出ない入力欄 / 画面が落ち着くまで待つ");
+console.log("OK  録画の下ごしらえ: 押せる要素の優先 / フォーカス外し / Win+Shift+S / 列の自動割り当て / バッチ定義の埋め込み / Robin の読み解き / Excel の明細 / リンク先を保存 / 合図の出ない入力欄 / 画面が落ち着くまで待つ / フレームと見えない要素");

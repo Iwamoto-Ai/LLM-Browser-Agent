@@ -231,7 +231,7 @@ Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).<br>
 // ---------------------------------------------------------------- 共通 JS
 var JS_ACT = [
 "var PREFER = true, BLUR = true;",
-"var cands = arguments[0], action = arguments[1], value = arguments[2];",
+"var cands = arguments[0], action = arguments[1], value = arguments[2], frame = arguments[3];",
 "var Q = String.fromCharCode(39), DQ = String.fromCharCode(34);",
 "function lit(s) { if (s.indexOf(Q) < 0) { return Q + s + Q; } return DQ + s + DQ; }",
 "function docsOf(root, out) {",
@@ -245,8 +245,39 @@ var JS_ACT = [
 "  }",
 "  return out;",
 "}",
+"function frameDoc() {",
+"  if (!frame || (frame.length !== undefined && !frame.length)) { return null; }",
+"  try {",
+"    if (typeof frame === `string`) {",
+"      var all = docsOf(document, []);",
+"      for (var q = 0; q < all.length; q++) {",
+"        var fe = all[q].querySelectorAll(`iframe, frame`);",
+"        for (var r = 0; r < fe.length; r++) {",
+"          if ((fe[r].name === frame || fe[r].id === frame) && fe[r].contentDocument) { return fe[r].contentDocument; }",
+"        }",
+"      }",
+"      return null;",
+"    }",
+"    var w = window;",
+"    for (var s = 0; s < frame.length; s++) { w = w.frames[frame[s]]; }",
+"    return w.document;",
+"  } catch (e) { return null; }",
+"}",
 "function allDocs() {",
+"  var fd = frameDoc();",
+"  if (fd) { return docsOf(fd, []); }",
 "  try { return docsOf(document, []); } catch (e) { return [document]; }",
+"}",
+"function hiddenEl(el) {",
+"  if (String(el.tagName || ``).toLowerCase() === `input` && String(el.type || ``).toLowerCase() === `hidden`) { return true; }",
+"  try {",
+"    var v = el.ownerDocument.defaultView;",
+"    for (var p = el; p && p.nodeType === 1; p = p.parentElement) {",
+"      var cs = v.getComputedStyle(p);",
+"      if (cs && (cs.display === `none` || cs.visibility === `hidden`)) { return true; }",
+"    }",
+"  } catch (e) { return false; }",
+"  return false;",
 "}",
 "function qs(doc, sel) {",
 "  try { return doc.querySelector(sel); } catch (e) { return null; }",
@@ -286,6 +317,12 @@ var JS_ACT = [
 "}",
 "function pickEl(list) {",
 "  if (!list || !list.length) { return null; }",
+"  if (action === `click` || action === `fill`) {",
+"    var vis = [];",
+"    for (var h = 0; h < list.length; h++) { if (!hiddenEl(list[h])) { vis.push(list[h]); } }",
+"    if (!vis.length) { return null; }",
+"    list = vis;",
+"  }",
 "  if (list.length === 1 || !PREFER || action !== `click`) { return list[0]; }",
 "  if (inClickable(list[0])) { return list[0]; }",
 "  for (var a = 0; a < list.length; a++) {",
@@ -336,6 +373,7 @@ var JS_ACT = [
 "  var docs = allDocs();",
 "  for (var j = 0; j < docs.length; j++) {",
 "    var hit = findIn(docs[j], sel);",
+"    if (hit && (action === `click` || action === `fill`) && hiddenEl(hit)) { hit = null; }",
 "    if (hit) { return hit; }",
 "  }",
 "  return null;",
@@ -933,8 +971,8 @@ function robinCapture(cands, varName, indent, stepNo, note, cols, extract, key) 
   note = toRobinVar(note, cols).split("'").join("").split("[").join("").split("]").join("");
   key = key || "";
   var bodyArgs = key
-    ? pyJson([[], extract === "digits" ? "afterDigits" : "after", toRobinVar(key, cols)])
-    : pyJson([cands, "text", ""]);
+    ? actJson([], extract === "digits" ? "afterDigits" : "after", toRobinVar(key, cols))
+    : actJson(cands, "text", "");
   var findErr = key
     ? "ステップ" + stepNo + "（" + note + "）で「" +
       toRobinVar(key, cols).split("'").join("") + "」の後に読み取る文字がありません"
@@ -1226,7 +1264,24 @@ function cleanNote(note, cols) {
 }
 
 // 生成中の設定（buildRobin が決める）。idle: 画面が落ち着くまで待つ
-var GEN = { idle: false };
+var GEN = { idle: false, frame: null };
+
+// 録画の "frame"（番号の並び [1, 0] か、フレームの名前）。一番上の画面なら null。
+function frameOf(st) {
+  var f = st.frame;
+  if (Array.isArray(f) && f.length && f.every(function (x) { return typeof x === "number" && Math.floor(x) === x; })) {
+    return f;
+  }
+  if (typeof f === "string" && f.trim()) { return f.trim(); }
+  return null;
+}
+
+// 共通 JS に渡す args。録画にフレームがあれば 4 つ目に付ける。
+function actJson(cands, action, value) {
+  var args = [cands, action, value];
+  if (GEN.frame !== null) { args.push(GEN.frame); }
+  return pyJson(args);
+}
 
 // 画面が落ち着くまで待つ（最大 StepWait 秒）。サイトの設定でオンのときだけ入る。
 // pad_webdriver_ref.py の _robin_wait_idle と同じ行を書く。
@@ -1259,7 +1314,7 @@ function robinAct(cands, action, value, indent, note, stepNo, cols) {
   var cs = robinFilterCandidates(cands).map(function (c) { return toRobinVar(c, cols); });
   var v = toRobinVar(value, cols);
   var nt = cleanNote(note, cols);
-  var bodyArgs = pyJson([cs, action, v]);
+  var bodyArgs = actJson(cs, action, v);
   var why = action === "exists" ? "画面に文字列がありません" : "で要素が見つかりません";
   var reason = "ステップ" + stepNo + "（" + nt + "）" + why;
   // 待ちは「# [番号] …」の行より前に置く（読み解きで、その行と ActBody を続けて見るため）
@@ -1318,7 +1373,7 @@ function robinActBestEffort(cands, action, value, indent, note, cols) {
   var cs = robinFilterCandidates(cands).map(function (c) { return toRobinVar(c, cols); });
   var v = toRobinVar(value, cols);
   var nt = cleanNote(note, cols);
-  var bodyArgs = pyJson([cs, action, v]);
+  var bodyArgs = actJson(cs, action, v);
   return [
     indent + "# " + nt,
     indent + "SET ActBody TO $'''{\"script\": \"%JsAct%\", \"args\": " + bodyArgs + "}'''",
@@ -2129,6 +2184,12 @@ function parseRobin(text) {
     });
   }
   function sels(cands) { return cands.map(function (c) { return [unvar(c)]; }); }
+  // ActBody の 4 つ目（録画のフレーム）があれば、ステップに戻す
+  function framed(st, a) {
+    if (a && a.length > 3 && a[3] !== null && a[3] !== undefined && a[3] !== "" &&
+        !(Array.isArray(a[3]) && !a[3].length)) { st.frame = a[3]; }
+    return st;
+  }
   function actAt(i) {
     var a = actArgs(lines[i]);
     if (a && (a[1] === "click" || a[1] === "fill") && i > 0) {
@@ -2146,8 +2207,8 @@ function parseRobin(text) {
       var ln = lines[i];
       if (startsWith(ln, "# 💬 ")) { out.push({ type: "comment", text: unvar(ln.slice("# 💬 ".length)) }); continue; }
       var a = actAt(i);
-      if (a && a[1] === "fill") { out.push({ type: "change", value: unvar(a[2]), selectors: sels(a[0]) }); }
-      else if (a && a[1] === "click") { out.push({ type: "click", selectors: sels(a[0]) }); }
+      if (a && a[1] === "fill") { out.push(framed({ type: "change", value: unvar(a[2]), selectors: sels(a[0]) }, a)); }
+      else if (a && a[1] === "click") { out.push(framed({ type: "click", selectors: sels(a[0]) }, a)); }
     }
     return out;
   }
@@ -2200,7 +2261,7 @@ function parseRobin(text) {
     if (startsWith(ln, "# ---------- 起点画面まで進む")) { moving = true; continue; }
     a = actAt(i);
     if (a && a[1] === "find") { moving = false; origin = a[0]; }
-    else if (a && moving && a[1] === "click") { setup.push({ type: "click", selectors: sels(a[0]) }); }
+    else if (a && moving && a[1] === "click") { setup.push(framed({ type: "click", selectors: sels(a[0]) }, a)); }
   }
   if (origin !== null) {
     var derived = "";
@@ -2265,19 +2326,19 @@ function parseRobin(text) {
         if (cands.length) { st.selectors = sels(cands); }
         if (act === "after" || act === "afterDigits") { st.key = unvar(val); }
         st.name = has(extra, "name") ? extra.name : "取得値";
-        loop.push(st);
+        loop.push(framed(st, a));
       } else if (pend === "download") {
         st = { type: "download", selectors: sels(cands) };
         if (act === "saveLink") { st.saveLink = true; }
-        loop.push(st);
+        loop.push(framed(st, a));
       } else if (pend === "assertText") {
         st = { type: "assertText", text: unvar(val) };
         if (extra.timeout) { st.timeout = extra.timeout; }
         loop.push(st);
       } else if (act === "fill") {
-        loop.push({ type: "change", value: unvar(val), selectors: sels(cands) });
+        loop.push(framed({ type: "change", value: unvar(val), selectors: sels(cands) }, a));
       } else if (act === "click") {
-        loop.push({ type: "click", selectors: sels(cands) });
+        loop.push(framed({ type: "click", selectors: sels(cands) }, a));
       } else {
         notes.push("読めない操作を飛ばしました: " + act);
       }
@@ -3019,6 +3080,7 @@ function buildRobin(batch, opt) {
   var site = siteSettings(batch, opt.stepWait, opt.preferClickable, opt.blurAfterFill, opt.waitIdle);
   // 画面が落ち着くまで待つ（オンのときだけ、各操作の前に待ちを入れる。既定はオフ）
   GEN.idle = !!site.waitIdle;
+  GEN.frame = null;
   var jsOne = jsActOneline(site.preferClickable, site.blurAfterFill);
   var cols = [idCol];
   var L = [];
@@ -3605,11 +3667,13 @@ function buildRobin(batch, opt) {
   // だけで、それで構わない。着いたかどうかは直後の確認で見る。
   function emitMove(indent) {
     for (var mi = 0; mi < move.length; mi++) {
+      GEN.frame = frameOf(move[mi]);
       var mc = candidates(move[mi]);
       if (!robinFilterCandidates(mc).length) { continue; }
       robinActBestEffort(mc, "click", "", indent, "click " + mc[0], cols)
         .forEach(function (ln) { A(ln); });
     }
+    GEN.frame = null;
   }
   A("");
 
@@ -3775,6 +3839,7 @@ function buildRobin(batch, opt) {
   if (recover.length) {
     for (var ri = 0; ri < recover.length; ri++) {
       var rst = recover[ri], rt = rst.type;
+      GEN.frame = frameOf(rst);
       if (rt === "comment") {
         A(inner + "    # 💬 " + safeComment(rst.text || "", cols));
       } else if (rt === "click" || rt === "doubleClick" || rt === "change") {
@@ -3788,6 +3853,7 @@ function buildRobin(batch, opt) {
         A(inner + "    WAIT 2");
       }
     }
+    GEN.frame = null;
   } else if (startUrl) {
     A(inner + "    # batch に recover が無いので、開始 URL を開き直して復帰する。");
     A(inner + "    # ログインが必要なサイトではセッションが切れる可能性があるため、");
@@ -3827,6 +3893,7 @@ function buildRobin(batch, opt) {
   var m = 0;
   for (var li = 0; li < loopSteps.length; li++) {
     var lst = loopSteps[li], lt = lst.type;
+    GEN.frame = frameOf(lst);
     if (lt === "comment") { A(inner + "# 💬 " + safeComment(lst.text || "", cols)); continue; }
     if (lt === "screenshot") {
       L = L.concat(robinWaitIdle(inner));
@@ -3898,6 +3965,7 @@ function buildRobin(batch, opt) {
     }
   }
 
+  GEN.frame = null;
   A(inner + "# ここまで来たら成功");
   A(inner + "SET PrevFailed TO False");
   A(inner + "SET OkCount TO OkCount + 1");
@@ -3915,6 +3983,7 @@ function buildRobin(batch, opt) {
     A("# ================= 後処理（batch の teardown）=================");
     for (var ti = 0; ti < teardown.length; ti++) {
       var tst = teardown[ti], tt = tst.type;
+      GEN.frame = frameOf(tst);
       if (tt === "comment") {
         A("# 💬 " + safeComment(tst.text || "", cols));
       } else if (tt === "click" || tt === "doubleClick" || tt === "change") {
@@ -3924,6 +3993,7 @@ function buildRobin(batch, opt) {
           "後処理: " + tact + " " + (tc.length ? tc[0] : ""), cols));
       }
     }
+    GEN.frame = null;
     A("");
   }
 
