@@ -7,11 +7,14 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-// Python の呼び名は環境で違う（Windows は python、Linux/macOS は python3 が多い）。
+// Python の呼び名は環境で違う（Windows は py、Linux/macOS は python3 が多い）。
 // 環境変数 PYTHON があればそれを優先し、無ければ動くほうを探す。
+// Windows では py を先に試す。python3 は Microsoft Store の呼び出し口や別のソフトに
+// 入っている Python のことがあり、途中で起動に失敗した（spawnSync python3 EACCES）。
 const PY = (() => {
   if (process.env.PYTHON) { return process.env.PYTHON; }
-  for (const cmd of ["python3", "python", "py"]) {
+  const order = process.platform === "win32" ? ["py", "python", "python3"] : ["python3", "python", "py"];
+  for (const cmd of order) {
     try { execFileSync(cmd, ["--version"], { stdio: "pipe" }); return cmd; } catch (e) { /* 次を試す */ }
   }
   console.error("Python が見つかりません。環境変数 PYTHON で指定してください。");
