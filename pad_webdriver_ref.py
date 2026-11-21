@@ -1968,6 +1968,25 @@ def _robin_read_xlsx(ind: str, csv_read: str) -> list:
     return out
 
 
+_XLSX_EMPTY_END = 20
+
+
+def _robin_xlsx_skip_empty(ind: str) -> list:
+    """Excel では、中身を消しただけの行も読まれる（使ったことのある範囲を全部読む）。
+    ID が空の行は、ほかの列を取り出す前に飛ばす。空の行が続いたら明細は終わりとみなして抜ける。
+    実機では、2 件の明細に、前に消した 7 行が付いて 9 行読まれ、その空回りで終わりが遅れた。"""
+    return [f"{ind}# Excel では、中身を消しただけの行も読まれる。ID が空の行は、ほかの列を取り出す前に飛ばす。",
+            f"{ind}# 空の行が {_XLSX_EMPTY_END} 行続いたら、明細はそこで終わりとみなして繰り返しを抜ける",
+            f"{ind}IF Col1 = {_robin_str('')} THEN",
+            f"{ind}    SET EmptyRun TO EmptyRun + 1",
+            f"{ind}    IF EmptyRun >= {_XLSX_EMPTY_END} THEN",
+            f"{ind}        EXIT LOOP",
+            f"{ind}    END",
+            f"{ind}    NEXT LOOP",
+            f"{ind}END",
+            f"{ind}SET EmptyRun TO 0"]
+
+
 def _robin_xlsx_untime(ncols: int, ind: str) -> list:
     """Excel の日付は「2026/09/01 0:00:00」で来るので、後ろの時刻を落とす。"""
     out = [f"{ind}# Excel の日付は時刻付きで来るので、後ろの「 0:00:00」を落とす"]
@@ -1976,10 +1995,6 @@ def _robin_xlsx_untime(ncols: int, ind: str) -> list:
                    f"TextToFind: {_robin_str(' 0:00:00')} IgnoreCase: False "
                    "ReplaceWith: $\'\'\'%\'\'%\'\'\' ActivateEscapeSequences: False "
                    f"ComparisonType: Text.TextComparisonType.Ordinal Result=> Col{i}")
-    out += [f"{ind}# Excel では、中身を消しただけの行も読まれる。ID が空の行は飛ばす",
-            f"{ind}IF Col1 = $\'\'\'\'\'\' THEN",
-            f"{ind}    NEXT LOOP",
-            f"{ind}END"]
     return out
 
 
@@ -3105,6 +3120,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     A("    SET NgCount TO 0")
     A("    SET SkipCount TO 0")
     A("    SET Attempted TO 0")
+    if xlsx:
+        A("    SET EmptyRun TO 0")
     A("    SET PrevFailed TO False")
     A("")
 
@@ -3356,11 +3373,11 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
 
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     # 収集した参照列を、ループ先頭の変数取り出しに展開する（Col1 = ID 列）
-    colvars = "\n".join(
-        f"        SET Col{i + 1} TO Row['{c}']" for i, c in enumerate(cols)
-    )
+    sets = [f"        SET Col{i + 1} TO Row['{c}']" for i, c in enumerate(cols)]
     if xlsx:
-        colvars += "\n" + "\n".join(_robin_xlsx_untime(len(cols), "        "))
+        sets = (sets[:1] + _robin_xlsx_skip_empty("        ") + sets[1:]
+                + _robin_xlsx_untime(len(cols), "        "))
+    colvars = "\n".join(sets)
     body = "\n".join(L).replace("@@COLVARS@@", colvars) + "\n" + "\n".join(embed)
     warns = _lint_robin(body.split("\n"))
     if warns:

@@ -1546,3 +1546,23 @@ def test_show_driver_info_switch(tmp_path):
             assert lines[i - 1] != "IF ShowDriverInfo THEN"
     # 業務の設定ではない（PC ごとの設定）ので、読み解きの結果は同じ
     assert pad.parse_robin(on)[0] == pad.parse_robin(off)[0]
+
+
+def test_xlsx_empty_rows_skip_early(tmp_path):
+    """Excel の明細は、消しただけの空の行も読まれる。ID が空なら、ほかの列を取り出す前に飛ばし、
+    空の行が続いたら繰り返しを抜ける（実機で 2 件の明細が 9 行読まれ、終わりが遅れた）。"""
+    b = load_recording(_RICH)
+    out = pad.write_robin(b, r"C:\temp\d.xlsx", "番号", str(tmp_path / "x.robin.txt"), out_dir=r"C:\temp")
+    lines = [ln.strip() for ln in open(out, encoding="utf-8").read().split("\n")]
+    i = lines.index("SET Col1 TO Row['番号']")
+    assert lines[i + 3] == "IF Col1 = $'''''' THEN"
+    blk = lines[i + 3:i + 10]
+    assert blk[1] == "SET EmptyRun TO EmptyRun + 1" and "EXIT LOOP" in blk and "NEXT LOOP" in blk
+    assert blk[-1] == "END" and lines[i + 10] == "SET EmptyRun TO 0"
+    assert lines[i + 11].startswith("SET Col2 TO Row[")             # ほかの列はそのあと
+    assert lines.index("SET EmptyRun TO 0") < lines.index("LOOP FOREACH Row IN Rows")
+    first_replace = next(k for k, ln in enumerate(lines) if ln.startswith("Text.Replace.ReplaceText Text: Col1"))
+    assert first_replace > i + 10
+    # CSV の明細には入らない（CSV は空の行を読まない）
+    csv = _robin_no_embed(b, tmp_path)
+    assert "EmptyRun" not in csv

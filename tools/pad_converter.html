@@ -2670,6 +2670,25 @@ function robinReadXlsx(ind, csvRead) {
   return out;
 }
 
+var XLSX_EMPTY_END = 20;
+
+// Excel では、中身を消しただけの行も読まれる。ID が空の行は、ほかの列を取り出す前に飛ばし、
+// 空の行が続いたら明細は終わりとみなして抜ける（pad_webdriver_ref.py の _robin_xlsx_skip_empty と同じ）
+function robinXlsxSkipEmpty(ind) {
+  return [
+    ind + "# Excel では、中身を消しただけの行も読まれる。ID が空の行は、ほかの列を取り出す前に飛ばす。",
+    ind + "# 空の行が " + XLSX_EMPTY_END + " 行続いたら、明細はそこで終わりとみなして繰り返しを抜ける",
+    ind + "IF Col1 = " + robinStr("") + " THEN",
+    ind + "    SET EmptyRun TO EmptyRun + 1",
+    ind + "    IF EmptyRun >= " + XLSX_EMPTY_END + " THEN",
+    ind + "        EXIT LOOP",
+    ind + "    END",
+    ind + "    NEXT LOOP",
+    ind + "END",
+    ind + "SET EmptyRun TO 0"
+  ];
+}
+
 function robinXlsxUntime(ncols, ind) {
   var out = [ind + "# Excel の日付は時刻付きで来るので、後ろの「 0:00:00」を落とす"];
   for (var i = 1; i <= ncols; i++) {
@@ -2678,10 +2697,6 @@ function robinXlsxUntime(ncols, ind) {
       "ReplaceWith: $'''%''%''' ActivateEscapeSequences: False " +
       "ComparisonType: Text.TextComparisonType.Ordinal Result=> Col" + i);
   }
-  out.push(ind + "# Excel では、中身を消しただけの行も読まれる。ID が空の行は飛ばす");
-  out.push(ind + "IF Col1 = $'''''' THEN");
-  out.push(ind + "    NEXT LOOP");
-  out.push(ind + "END");
   return out;
 }
 
@@ -3789,6 +3804,7 @@ function buildRobin(batch, opt) {
   A("    SET NgCount TO 0");
   A("    SET SkipCount TO 0");
   A("    SET Attempted TO 0");
+  if (xlsx) { A("    SET EmptyRun TO 0"); }
   A("    SET PrevFailed TO False");
   A("");
 
@@ -4036,10 +4052,14 @@ function buildRobin(batch, opt) {
     "DefaultButton: Display.DefaultButton.Button1 IsTopMost: True ButtonPressed=> Btn");
   A("END");
 
-  var colvars = cols.map(function (c, i) {
+  var sets = cols.map(function (c, i) {
     return "        SET Col" + (i + 1) + " TO Row['" + c + "']";
-  }).join("\n");
-  if (xlsx) { colvars += "\n" + robinXlsxUntime(cols.length, "        ").join("\n"); }
+  });
+  if (xlsx) {
+    sets = sets.slice(0, 1).concat(robinXlsxSkipEmpty("        "), sets.slice(1),
+                                   robinXlsxUntime(cols.length, "        "));
+  }
+  var colvars = sets.join("\n");
   // 置き換えは関数で渡す（文字列だと中の $' が特別な意味になり、Robin のリテラルが壊れる）
   var body = L.join("\n").replace("@@COLVARS@@", function () { return colvars; }) + "\n" + embed.join("\n");
   var warns = warnUnsupportedSteps(batch).concat(lintRobin(body.split("\n")));
