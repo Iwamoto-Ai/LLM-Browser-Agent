@@ -1566,3 +1566,38 @@ def test_xlsx_empty_rows_skip_early(tmp_path):
     # CSV の明細には入らない（CSV は空の行を読まない）
     csv = _robin_no_embed(b, tmp_path)
     assert "EmptyRun" not in csv
+
+
+def test_download_check_file(tmp_path):
+    """ダウンロードしたファイルを確かめる（Excel のときだけ）。決めたセルを見て、外れたら _NG を付けて失敗にする。
+    書き方は実機の検収状況一覧（.xls）で確かめたもの。読み解きで設定が戻り、作り直すと同じ Robin になる。"""
+    b = load_recording(_RICH)
+    dls = [st for st in b["loop"] if st["type"] == "download"]
+    dls[0]["checkFile"] = {"cells": "l11, N11, x", "rule": "nonempty"}
+    dls[1]["checkFile"] = {"cells": "B3", "rule": "contains", "sheet": "結果", "value": "成%功"}
+    txt = _robin_no_embed(b, tmp_path)
+    lines = [ln.strip() for ln in txt.split("\n")]
+    assert "SET DlCheck TO $'''{\"cells\": \"L11, N11\", \"rule\": \"nonempty\", \"sheet\": \"\", \"value\": \"\"}'''" in lines
+    assert ("Excel.ReadFromExcel.ReadCell Instance: ChkExcel StartColumn: $'''N''' StartRow: 11 "
+            "GetCellContentsMode: Excel.GetCellContentsMode.FormattedTextValues CellValue=> ChkVal") in lines
+    assert "Excel.SetActiveWorksheet.ActivateWorksheetByIndex Instance: ChkExcel Index: 1" in lines
+    assert "Excel.SetActiveWorksheet.ActivateWorksheetByName Instance: ChkExcel Name: $'''結果'''" in lines
+    assert "SET ChkErr TO $'''セル L11 が空'''" in lines
+    assert "SET ChkErr TO $'''セル B3 に「成功」が無い（%ChkVal%）'''" in lines     # % は除く
+    assert lines.count("Excel.CloseExcel.Close Instance: ChkExcel") == 2
+    ng = [ln for ln in lines if "NewName: $'''%DlName%_NG'''" in ln]
+    assert len(ng) == 2
+    # 確かめは、ファイルが落ちて名前を付け替えたあと（その中）にある
+    k = lines.index("SET DlCheck TO $'''{\"cells\": \"L11, N11\", \"rule\": \"nonempty\", \"sheet\": \"\", \"value\": \"\"}'''")
+    assert lines[k - 3].startswith("File.RenameFiles.Rename Files: DlFile NewName: DlName")
+    assert not pad._lint_robin(txt.split("\n"), log=lambda *a: None)
+    got, _ = pad.parse_robin(txt)
+    gdl = [st for st in got["loop"] if st["type"] == "download"]
+    assert gdl[0]["checkFile"] == {"cells": "L11, N11", "rule": "nonempty", "sheet": "", "value": ""}
+    assert gdl[1]["checkFile"]["value"] == "成功" and gdl[1]["saveLink"] is True
+    assert _robin_no_embed(got, tmp_path) == txt
+    # 「次と同じ」で値が空なら「値がある」。セルが書けていなければ確かめない
+    assert pad.check_of({"checkFile": {"cells": "A1", "rule": "equals", "value": ""}})["rule"] == "nonempty"
+    assert pad.check_of({"checkFile": {"cells": "11L", "rule": "nonempty"}}) is None
+    # 確かめを入れていない Robin は今までどおり
+    assert "ChkExcel" not in _robin_no_embed(load_recording(_RICH), tmp_path)

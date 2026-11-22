@@ -40,6 +40,19 @@ const SITE_BATCH = path.join(os.tmpdir(), "parity_site_batch.json");
   fs.writeFileSync(SITE_BATCH, JSON.stringify(b, null, 2), "utf8");
 }
 
+// ダウンロードしたファイルを確かめる（checkFile）を入れたバッチ定義
+const CHECK_BATCH = path.join(os.tmpdir(), "parity_check_batch.json");
+{
+  const b = JSON.parse(fs.readFileSync("tests/fixtures/robin_parse_rich_batch.json", "utf8"));
+  const dls = b.loop.filter((st) => st.type === "download");
+  dls[0].checkFile = { cells: "L11, n11", rule: "nonempty", sheet: "", value: "" };
+  dls[1].checkFile = { cells: "B3", rule: "contains", sheet: "結果", value: "成功" };
+  const extra = JSON.parse(JSON.stringify(dls[0]));
+  extra.checkFile = { cells: "C5", rule: "equals", sheet: "", value: "0" };
+  b.loop.push(extra);
+  fs.writeFileSync(CHECK_BATCH, JSON.stringify(b, null, 2), "utf8");
+}
+
 const cases = [
   { batch: "examples/pad/pad_sample_batch.json", idCol: "ID",
     details: "C:\\temp\\sample_batch.csv", browser: "edge" },
@@ -65,6 +78,8 @@ const cases = [
     details: "C:\\temp\\d.csv", browser: "edge", label: "画面が落ち着くまで待つ",
     py: ["--wait-idle"], js: { waitIdle: true } },
   // サイトの設定がバッチ定義の options に保存されているとき（どちらも指定しない）
+  { batch: CHECK_BATCH, idCol: "番号", details: "C:\\temp\\d.csv", browser: "edge",
+    label: "ダウンロードしたファイルを確かめる" },
   { batch: SITE_BATCH, idCol: "プロジェクト番号",
     details: "C:\\temp\\edi2_batch.csv", browser: "edge", label: "options のサイトの設定" },
   // 明細が Excel のとき（「明細」シートを読み、最後に結果の Excel を作る）。
@@ -124,7 +139,7 @@ for (const c of cases) {
   const robins = [];
   const py = path.join(os.tmpdir(), "py.robin.txt");
   for (const b of ["recordings/edi2_practice_batch.json", "tests/fixtures/robin_parse_rich_batch.json",
-                   SITE_BATCH, "recordings/edi_practice_batch.json"]) {
+                   SITE_BATCH, "recordings/edi_practice_batch.json", CHECK_BATCH]) {
     execFileSync(PY, ["pad_webdriver_ref.py", "--batch", b, "--details", "C:\\temp\\d.csv",
       "--id-column", (PadConvert.loadRecording(fs.readFileSync(b, "utf8")).options || {}).idCol || "ID", "--robin", py,
       "--pad-out-dir", "C:\\temp"], { stdio: "pipe" });

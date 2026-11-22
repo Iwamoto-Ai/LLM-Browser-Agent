@@ -1186,8 +1186,112 @@ def _robin_capture(cands: list, var: str, indent: str, step_no: int,
     return L
 
 
+# ダウンロードしたファイルを確かめる（Excel のときだけ）。ステップの "checkFile" に入れる。
+#   {"cells": "L11, N11", "rule": "nonempty" | "equals" | "contains", "sheet": "", "value": ""}
+# EDI 側の都合で、必要な欄が空のままの Excel が落ちてくることがある。それを「成功」にしないため。
+CHECK_RULES = {"nonempty": "値がある", "equals": "次と同じ", "contains": "次を含む"}
+
+
+def check_cells(text) -> list:
+    """「L11, n11」→ [("L", 11), ("N", 11)]。形の合わないものは除く。"""
+    out = []
+    for part in re.split(r"[,、\s]+", str(text or "")):
+        m = re.match(r"^([A-Za-z]{1,3})([1-9]\d{0,6})$", part)
+        if m and (m.group(1).upper(), int(m.group(2))) not in out:
+            out.append((m.group(1).upper(), int(m.group(2))))
+    return out
+
+
+def check_of(st: dict):
+    """ステップの checkFile を整えて返す。セルが 1 つも無ければ None（確かめない）。
+    値の % は Robin の変数の印になるので除く。「次と同じ」「次を含む」で値が空なら「値がある」にする。"""
+    c = st.get("checkFile") if isinstance(st, dict) else None
+    if not isinstance(c, dict):
+        return None
+    cells = check_cells(c.get("cells", ""))
+    if not cells:
+        return None
+    rule = c.get("rule") if c.get("rule") in CHECK_RULES else "nonempty"
+    value = str(c.get("value", "") or "").replace("%", "")
+    if rule != "nonempty" and value == "":
+        rule = "nonempty"
+    return {"cells": ", ".join(f"{a}{r}" for a, r in cells), "rule": rule,
+            "sheet": str(c.get("sheet", "") or "").replace("%", "").strip(),
+            "value": value if rule != "nonempty" else ""}
+
+
+def _robin_check_file(chk: dict, ind: str, step_no: int) -> list:
+    """落ちてきたファイルを Excel で開き、決めたセルを見る。外れたら _NG を付けて失敗にする。
+
+    実機で確かめた書き方（検収状況一覧の .xls）: 画面に出さず読み取り専用で開き、
+    シートを選び、セルを「書式設定されたテキスト値」（見えているとおりの文字。例 16,600）で読む。
+    保護ビューの確認は出ず、閉じたあと EXCEL.EXE も残らなかった。"""
+    i2, i3, i4 = ind + "    ", ind + "        ", ind + "            "
+    E = _robin_str("")
+    goal = {"nonempty": f"セル {chk['cells']} に値があるか",
+            "equals": f"セル {chk['cells']} が「{chk['value']}」と同じか",
+            "contains": f"セル {chk['cells']} に「{chk['value']}」が含まれるか"}[chk["rule"]]
+    out = [
+        f"{ind}# 保存したファイルを確かめる（{goal}）。",
+        f"{ind}# Excel で開き、見えているとおりの文字（例 16,600）で読む。外れたら名前に _NG を付けて失敗にする",
+        f"{ind}SET DlCheck TO {_robin_str(json.dumps(chk, ensure_ascii=False))}",
+        f"{ind}SET ChkErr TO {E}",
+        f"{ind}SET ChkXlErr TO False",
+        f"{ind}SET DlPath TO DlRenamed[0].FullName",
+        f"{ind}Excel.LaunchExcel.LaunchAndOpenUnderExistingProcess Path: DlPath "
+        "Visible: False ReadOnly: True UseMachineLocale: False Instance=> ChkExcel",
+    ]
+    out += _robin_on_error(ind, "ChkXlErr")
+    out += [f"{ind}IF ChkXlErr THEN",
+            f"{i2}SET ChkErr TO {_robin_str('Excel で開けませんでした')}",
+            f"{ind}ELSE"]
+    if chk["sheet"]:
+        out.append(f"{i2}Excel.SetActiveWorksheet.ActivateWorksheetByName Instance: ChkExcel "
+                   f"Name: {_robin_str(chk['sheet'])}")
+        no_sheet = f"「{chk['sheet']}」シートがありません"
+    else:
+        out.append(f"{i2}Excel.SetActiveWorksheet.ActivateWorksheetByIndex Instance: ChkExcel Index: 1")
+        no_sheet = "最初のシートを選べませんでした"
+    out += _robin_on_error(i2, "ChkXlErr")
+    out += [f"{i2}IF ChkXlErr THEN",
+            f"{i3}SET ChkErr TO {_robin_str(no_sheet)}",
+            f"{i2}ELSE"]
+    for col, row in check_cells(chk["cells"]):
+        cell = f"{col}{row}"
+        out.append(f"{i3}Excel.ReadFromExcel.ReadCell Instance: ChkExcel StartColumn: {_robin_str(col)} "
+                   f"StartRow: {row} GetCellContentsMode: Excel.GetCellContentsMode.FormattedTextValues "
+                   "CellValue=> ChkVal")
+        if chk["rule"] == "nonempty":
+            out += [f"{i3}IF ChkErr = {E} AND ChkVal = {E} THEN",
+                    f"{i4}SET ChkErr TO {_robin_str(f'セル {cell} が空')}"]
+        elif chk["rule"] == "equals":
+            out += [f"{i3}IF ChkErr = {E} AND ChkVal <> {_robin_str(chk['value'])} THEN",
+                    f"{i4}SET ChkErr TO {_robin_str('セル ' + cell + ' が「' + chk['value'] + '」ではない（%ChkVal%）')}"]
+        else:
+            # 含むかどうかは、探す文字を消して変わったかで見る（実機で確かめた置き換えの書き方）
+            out += [f"{i3}Text.Replace.ReplaceText Text: ChkVal TextToFind: {_robin_str(chk['value'])} "
+                    "IgnoreCase: False ReplaceWith: $'''%''%''' ActivateEscapeSequences: False "
+                    "ComparisonType: Text.TextComparisonType.Ordinal Result=> ChkRep",
+                    f"{i3}IF ChkErr = {E} AND ChkRep = ChkVal THEN",
+                    f"{i4}SET ChkErr TO {_robin_str('セル ' + cell + ' に「' + chk['value'] + '」が無い（%ChkVal%）')}"]
+        out.append(f"{i3}END")
+    out += [f"{i2}END",
+            f"{i2}Excel.CloseExcel.Close Instance: ChkExcel",
+            f"{ind}END",
+            f"{ind}IF ChkErr <> {E} THEN",
+            f"{i2}# 外れたファイルも消さずに、名前に _NG を付けて残す（あとで見比べられるように）",
+            f"{i2}File.RenameFiles.Rename Files: DlRenamed NewName: $'''%DlName%_NG''' "
+            "KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> DlRenamed",
+            f"{i2}SET RowError TO "
+            + _robin_str(f"ステップ{step_no}（ダウンロード）の確かめで外れました：%ChkErr%。"
+                         "ファイルは名前に _NG を付けて残しています"),
+            f"{ind}END"]
+    return out
+
+
 def _robin_download(cands: list, name: str, indent: str, step_no: int,
-                    cols: list, timeout: int = 60, save_link: bool = False) -> list:
+                    cols: list, timeout: int = 60, save_link: bool = False,
+                    check=None) -> list:
     """クリックしてファイルが落ちてくるのを待ち、エビデンス名に付け替える。
 
     サーバーが付けるファイル名は事前に分からないので、押す前の数と比べて
@@ -1246,6 +1350,8 @@ def _robin_download(cands: list, name: str, indent: str, step_no: int,
     A(f"{indent}        # 拡張子はそのまま残るので、Excel でも PDF でも同じ 1 行で足りる")
     A(f"{indent}        File.RenameFiles.Rename Files: DlFile NewName: DlName "
       "KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> DlRenamed")
+    if check:
+        L.extend(_robin_check_file(check, indent + "        ", step_no))
     A(f"{indent}    END")
     A(f"{indent}    IF DlAfter.Count = DlCountBefore THEN")
     _dlerr = ("ステップ%d（ダウンロード）でファイルが落ちてきませんでした"
@@ -1814,6 +1920,11 @@ def parse_robin(text: str):
             nm = unvar(_robin_unstr(ln[len("SET DlName TO $" + _Q3):-3]))
             if nm != shot:
                 loop[-1]["name"] = nm
+        elif ln.startswith("SET DlCheck TO $" + _Q3) and loop and loop[-1]["type"] == "download":
+            try:
+                loop[-1]["checkFile"] = json.loads(_robin_unstr(ln[len("SET DlCheck TO $" + _Q3):-3]))
+            except ValueError:
+                pass
         else:
             a = act_at(i)
             if a is None:
@@ -2084,7 +2195,9 @@ def _step_label(st: dict) -> str:
     if t == "scrollFind":
         return f"スクロールして探す「{st.get('text', '')}」"
     if t == "download":
-        return f"ダウンロード {sel}" + ("（リンク先を保存）" if st.get("saveLink") else "")
+        chk = check_of(st)
+        return (f"ダウンロード {sel}" + ("（リンク先を保存）" if st.get("saveLink") else "")
+                + (f"（確かめる {chk['cells']}）" if chk else ""))
     if t == "screenshot":
         return "エビデンス"
     if t == "comment":
@@ -2100,6 +2213,8 @@ def _step_detail(st: dict) -> str:
     for k in ("value", "text", "key", "name", "extract", "timeout", "tries", "url", "saveLink"):
         if k in st:
             parts.append(f"{k}={st[k]}")
+    if check_of(st):
+        parts.append("checkFile=" + json.dumps(check_of(st), ensure_ascii=False))
     return " ".join(parts)
 
 
@@ -3280,7 +3395,8 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
             A(f"{inner}# ダウンロードしたファイルをエビデンスにする。")
             A(f"{inner}# 画面に内容が出ず、Excel や PDF を受け取って初めて分かる業務向け。")
             L.extend(_robin_download(cands, st.get("name", "") or shot_name,
-                                     inner, m, cols, save_link=bool(st.get("saveLink"))))
+                                     inner, m, cols, save_link=bool(st.get("saveLink")),
+                                     check=check_of(st)))
             L.extend(_robin_fail(inner, _cap_vals))
             A("")
             continue
