@@ -268,6 +268,56 @@ for (const key of ["setup", "loop", "recover"]) {
   if (f.value !== "") { errors.push("最初からやり直しで開くページの欄が空にならない"); }
 }
 
+// 保存したファイルを確かめる: 振り分けの表で設定すると、バッチ定義と Robin に入り、読み直しても残る
+{
+  d.getElementById("resetAll").click();
+  const input = d.getElementById("batchFile");
+  const bj = fs.readFileSync("recordings/edi2_fetch_batch.json", "utf8");
+  Object.defineProperty(input, "files", { value: [new dom.window.File([bj], "fetch.json")], configurable: true });
+  input.dispatchEvent(new dom.window.Event("change"));
+  await new Promise((res) => setTimeout(res, 300));
+  const t = d.getElementById("assignTable");
+  const dl = [...t.querySelectorAll(".dlChk")].find((el) => el.checked);
+  if (!dl) {
+    errors.push("ダウンロードの行が振り分けの表に無い");
+  } else {
+    const i = dl.dataset.i;
+    const box = t.querySelector('.dlCheck[data-i="' + i + '"]');
+    if (!box || box.hidden) { errors.push("ダウンロードの行に「保存したファイルを確かめる」が出ない"); }
+    const chk = t.querySelector('.dlChkChk[data-i="' + i + '"]');
+    chk.checked = true; chk.dispatchEvent(new dom.window.Event("change"));
+    if (t.querySelector('.dlChkBox[data-i="' + i + '"]').hidden) { errors.push("確かめる欄が開かない"); }
+    const cells = t.querySelector('.dlChkCells[data-i="' + i + '"]');
+    cells.value = "l11"; cells.dispatchEvent(new dom.window.Event("input"));
+    const rule = t.querySelector('.dlChkRule[data-i="' + i + '"]');
+    const val = t.querySelector('.dlChkValue[data-i="' + i + '"]');
+    if (!val.hidden) { errors.push("「値がある」なのに値の欄が出ている"); }
+    rule.value = "equals"; rule.dispatchEvent(new dom.window.Event("change"));
+    if (val.hidden) { errors.push("「次と同じ」で値の欄が出ない"); }
+    val.value = "16,600"; val.dispatchEvent(new dom.window.Event("input"));
+    d.getElementById("makeBatch").click();
+    d.getElementById("run").click();
+    await new Promise((res) => setTimeout(res, 100));
+    const out = d.getElementById("out").value;
+    const want = 'SET DlCheck TO $\'\'\'{"cells": "L11", "rule": "equals", "sheet": "", "value": "16,600"}\'\'\'';
+    if (out.indexOf(want) < 0) { errors.push("確かめる設定が Robin に入っていない: " + d.getElementById("msg").textContent.slice(0, 200)); }
+    if (out.indexOf("NewName: $'''%DlName%_NG'''") < 0) { errors.push("外れたときの _NG が Robin に無い"); }
+    const back = dom.window.PadConvert.extractBatchFromRobin(out).batch;
+    const bdl = back && back.loop.find((st) => st.type === "download");
+    if (!bdl || !bdl.checkFile || bdl.checkFile.value !== "16,600") { errors.push("確かめる設定が埋め込みのバッチ定義に入っていない"); }
+    // そのバッチ定義を読み直すと、表に設定が戻る
+    Object.defineProperty(input, "files", { value: [new dom.window.File([JSON.stringify(back)], "back.json")], configurable: true });
+    input.dispatchEvent(new dom.window.Event("change"));
+    await new Promise((res) => setTimeout(res, 300));
+    const c2 = [...t.querySelectorAll(".dlChkChk")].find((el) => el.checked);
+    if (!c2 || t.querySelector('.dlChkCells[data-i="' + c2.dataset.i + '"]').value !== "L11" ||
+        t.querySelector('.dlChkRule[data-i="' + c2.dataset.i + '"]').value !== "equals") {
+      errors.push("読み直したバッチ定義の確かめる設定が表に戻らない");
+    }
+  }
+  d.getElementById("resetAll").click();
+}
+
 // 背景色を固定したメッセージ欄に文字色が付いているか（ダークモードで白文字になる事故の防止）
 const css = [...d.querySelectorAll("style")].map((s) => s.textContent).join("\n");
 for (const cls of [".warn", ".err", ".ok"]) {

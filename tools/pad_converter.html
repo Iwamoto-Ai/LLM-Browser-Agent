@@ -1012,7 +1012,106 @@ function robinCapture(cands, varName, indent, stepNo, note, cols, extract, key) 
   return out;
 }
 
-function robinDownload(cands, name, indent, stepNo, cols, timeout, saveLink) {
+// ダウンロードしたファイルを確かめる（Excel のときだけ）。pad_webdriver_ref.py の check_of などと同じ。
+//   ステップの checkFile = {cells: "L11, N11", rule: "nonempty" | "equals" | "contains", sheet: "", value: ""}
+var CHECK_RULES = { nonempty: "値がある", equals: "次と同じ", contains: "次を含む" };
+
+function checkCells(text) {
+  var out = [], seen = {};
+  String(text || "").split(/[,、\s]+/).forEach(function (part) {
+    var m = /^([A-Za-z]{1,3})([1-9]\d{0,6})$/.exec(part);
+    if (!m) { return; }
+    var k = m[1].toUpperCase() + m[2];
+    if (seen[k]) { return; }
+    seen[k] = true;
+    out.push([m[1].toUpperCase(), parseInt(m[2], 10)]);
+  });
+  return out;
+}
+
+function checkOf(st) {
+  var c = st && st.checkFile;
+  if (!c || typeof c !== "object") { return null; }
+  var cells = checkCells(c.cells);
+  if (!cells.length) { return null; }
+  var rule = Object.prototype.hasOwnProperty.call(CHECK_RULES, c.rule) ? c.rule : "nonempty";
+  var value = String(c.value === undefined || c.value === null ? "" : c.value).split("%").join("");
+  if (rule !== "nonempty" && value === "") { rule = "nonempty"; }
+  return { cells: cells.map(function (x) { return x[0] + x[1]; }).join(", "), rule: rule,
+           sheet: String(c.sheet || "").split("%").join("").trim(),
+           value: rule !== "nonempty" ? value : "" };
+}
+
+// Python の json.dumps(chk, ensure_ascii=False) と同じ並び・書き方
+function checkJson(chk) {
+  return "{\"cells\": " + JSON.stringify(chk.cells) + ", \"rule\": " + JSON.stringify(chk.rule) +
+    ", \"sheet\": " + JSON.stringify(chk.sheet) + ", \"value\": " + JSON.stringify(chk.value) + "}";
+}
+
+function robinCheckFile(chk, ind, stepNo) {
+  var i2 = ind + "    ", i3 = ind + "        ", i4 = ind + "            ";
+  var E = robinStr("");
+  var goal = { nonempty: "セル " + chk.cells + " に値があるか",
+               equals: "セル " + chk.cells + " が「" + chk.value + "」と同じか",
+               contains: "セル " + chk.cells + " に「" + chk.value + "」が含まれるか" }[chk.rule];
+  var out = [
+    ind + "# 保存したファイルを確かめる（" + goal + "）。",
+    ind + "# Excel で開き、見えているとおりの文字（例 16,600）で読む。外れたら名前に _NG を付けて失敗にする",
+    ind + "SET DlCheck TO " + robinStr(checkJson(chk)),
+    ind + "SET ChkErr TO " + E,
+    ind + "SET ChkXlErr TO False",
+    ind + "SET DlPath TO DlRenamed[0].FullName",
+    ind + "Excel.LaunchExcel.LaunchAndOpenUnderExistingProcess Path: DlPath " +
+      "Visible: False ReadOnly: True UseMachineLocale: False Instance=> ChkExcel"
+  ];
+  out = out.concat(robinOnError(ind, "ChkXlErr"));
+  out.push(ind + "IF ChkXlErr THEN", i2 + "SET ChkErr TO " + robinStr("Excel で開けませんでした"), ind + "ELSE");
+  var noSheet;
+  if (chk.sheet) {
+    out.push(i2 + "Excel.SetActiveWorksheet.ActivateWorksheetByName Instance: ChkExcel " +
+             "Name: " + robinStr(chk.sheet));
+    noSheet = "「" + chk.sheet + "」シートがありません";
+  } else {
+    out.push(i2 + "Excel.SetActiveWorksheet.ActivateWorksheetByIndex Instance: ChkExcel Index: 1");
+    noSheet = "最初のシートを選べませんでした";
+  }
+  out = out.concat(robinOnError(i2, "ChkXlErr"));
+  out.push(i2 + "IF ChkXlErr THEN", i3 + "SET ChkErr TO " + robinStr(noSheet), i2 + "ELSE");
+  checkCells(chk.cells).forEach(function (cr) {
+    var cell = cr[0] + cr[1];
+    out.push(i3 + "Excel.ReadFromExcel.ReadCell Instance: ChkExcel StartColumn: " + robinStr(cr[0]) +
+             " StartRow: " + cr[1] + " GetCellContentsMode: Excel.GetCellContentsMode.FormattedTextValues " +
+             "CellValue=> ChkVal");
+    if (chk.rule === "nonempty") {
+      out.push(i3 + "IF ChkErr = " + E + " AND ChkVal = " + E + " THEN",
+               i4 + "SET ChkErr TO " + robinStr("セル " + cell + " が空"));
+    } else if (chk.rule === "equals") {
+      out.push(i3 + "IF ChkErr = " + E + " AND ChkVal <> " + robinStr(chk.value) + " THEN",
+               i4 + "SET ChkErr TO " + robinStr("セル " + cell + " が「" + chk.value + "」ではない（%ChkVal%）"));
+    } else {
+      out.push(i3 + "Text.Replace.ReplaceText Text: ChkVal TextToFind: " + robinStr(chk.value) +
+               " IgnoreCase: False ReplaceWith: $'''%''%''' ActivateEscapeSequences: False " +
+               "ComparisonType: Text.TextComparisonType.Ordinal Result=> ChkRep",
+               i3 + "IF ChkErr = " + E + " AND ChkRep = ChkVal THEN",
+               i4 + "SET ChkErr TO " + robinStr("セル " + cell + " に「" + chk.value + "」が無い（%ChkVal%）"));
+    }
+    out.push(i3 + "END");
+  });
+  out.push(i2 + "END",
+           i2 + "Excel.CloseExcel.Close Instance: ChkExcel",
+           ind + "END",
+           ind + "IF ChkErr <> " + E + " THEN",
+           i2 + "# 外れたファイルも消さずに、名前に _NG を付けて残す（あとで見比べられるように）",
+           i2 + "File.RenameFiles.Rename Files: DlRenamed NewName: $'''%DlName%_NG''' " +
+             "KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> DlRenamed",
+           i2 + "SET RowError TO " +
+             robinStr("ステップ" + stepNo + "（ダウンロード）の確かめで外れました：%ChkErr%。" +
+                      "ファイルは名前に _NG を付けて残しています"),
+           ind + "END");
+  return out;
+}
+
+function robinDownload(cands, name, indent, stepNo, cols, timeout, saveLink, check) {
   timeout = timeout || 60;
   var L = [];
   var A = function (s) { L.push(s); };
@@ -1063,6 +1162,7 @@ function robinDownload(cands, name, indent, stepNo, cols, timeout, saveLink) {
   A(indent + "        # 拡張子はそのまま残るので、Excel でも PDF でも同じ 1 行で足りる");
   A(indent + "        File.RenameFiles.Rename Files: DlFile NewName: DlName " +
     "KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> DlRenamed");
+  if (check) { L = L.concat(robinCheckFile(check, indent + "        ", stepNo)); }
   A(indent + "    END");
   A(indent + "    IF DlAfter.Count = DlCountBefore THEN");
   A(indent + "        SET RowError TO " +
@@ -1501,10 +1601,16 @@ function batchToSteps(batch) {
                shotName: "", dl: st.type === "download",
                dlName: st.type === "download" ? (st.name || "") : "",
                dlLink: st.type === "download" && !!st.saveLink,
+               chk: st.type === "download" && !!PadConvert.checkOf(st),
+               chkCells: "", chkRule: "nonempty", chkValue: "", chkSheet: "",
                cap: st.type === "capture",
                capName: st.type === "capture" ? (st.name || "") : "",
                capDigits: st.type === "capture" && st.extract === "digits",
                capKey: st.type === "capture" ? (st.key || "") : "" };
+    if (as.chk) {
+      var ck = PadConvert.checkOf(st);
+      as.chkCells = ck.cells; as.chkRule = ck.rule; as.chkValue = ck.value; as.chkSheet = ck.sheet;
+    }
     if (sec === "loop" && recSigs[sig(st)]) { as.sec = "loop+recover"; }
     var v = String(st.value === undefined ? "" : st.value);
     var m = /\{\{([^}]+)\}\}/.exec(v);
@@ -1842,6 +1948,10 @@ function buildBatch(steps, assigns, title, options) {
         if (as.dlName) { copy.name = as.dlName; }
         // 押すと 2 回取りに行く画面向けに、リンク先を 1 回だけ保存する
         if (as.dlLink) { copy.saveLink = true; } else { delete copy.saveLink; }
+        // 保存したファイルを確かめる（Excel のときだけ）。セルが書けていなければ確かめない
+        var ck = as.chk ? PadConvert.checkOf({ checkFile: { cells: as.chkCells, rule: as.chkRule,
+                                                            value: as.chkValue, sheet: as.chkSheet } }) : null;
+        if (ck) { copy.checkFile = ck; } else { delete copy.checkFile; }
       }
       // 値を記録する行。押さずに文字だけ読むので click ではなくなる。
       if (as.cap) {
@@ -2313,6 +2423,10 @@ function parseRobin(text) {
     } else if (startsWith(ln, "SET DlName TO $" + Q3) && last() && last().type === "download") {
       var nm = unvar(robinUnstr(ln.slice(("SET DlName TO $" + Q3).length, -3)));
       if (nm !== shot) { last().name = nm; }
+    } else if (startsWith(ln, "SET DlCheck TO $" + Q3) && last() && last().type === "download") {
+      try {
+        last().checkFile = JSON.parse(robinUnstr(ln.slice(("SET DlCheck TO $" + Q3).length, -3)));
+      } catch (e) { /* 読めなければ確かめない */ }
     } else {
       a = actAt(i);
       if (a === null) { continue; }
@@ -2429,7 +2543,11 @@ function stepLabel(st) {
   }
   if (t === "capture") { return "読み取り「" + g("name") + "」"; }
   if (t === "scrollFind") { return "スクロールして探す「" + g("text") + "」"; }
-  if (t === "download") { return "ダウンロード " + sel + (st.saveLink ? "（リンク先を保存）" : ""); }
+  if (t === "download") {
+    var chk = checkOf(st);
+    return "ダウンロード " + sel + (st.saveLink ? "（リンク先を保存）" : "") +
+      (chk ? "（確かめる " + chk.cells + "）" : "");
+  }
   if (t === "screenshot") { return "エビデンス"; }
   if (t === "comment") { return "コメント「" + g("text") + "」"; }
   return t;
@@ -2444,6 +2562,7 @@ function stepDetail(st) {
   ["value", "text", "key", "name", "extract", "timeout", "tries", "url", "saveLink"].forEach(function (k) {
     if (Object.prototype.hasOwnProperty.call(st, k)) { parts.push(k + "=" + pyStr(st[k])); }
   });
+  if (checkOf(st)) { parts.push("checkFile=" + checkJson(checkOf(st))); }
   return parts.join(" ");
 }
 
@@ -3959,7 +4078,8 @@ function buildRobin(batch, opt) {
       var dc = robinFilterCandidates(candidates(lst));
       A(inner + "# ダウンロードしたファイルをエビデンスにする。");
       A(inner + "# 画面に内容が出ず、Excel や PDF を受け取って初めて分かる業務向け。");
-      L = L.concat(robinDownload(dc, lst.name || shotName, inner, m, cols, undefined, !!lst.saveLink));
+      L = L.concat(robinDownload(dc, lst.name || shotName, inner, m, cols, undefined, !!lst.saveLink,
+                                     checkOf(lst)));
       L = L.concat(robinFail(inner, capVals));
       A("");
       continue;
@@ -4124,6 +4244,7 @@ function csvHeaders(text) {
 
 root.PadConvert = {
   batchOptions: batchOptions,
+  checkOf: checkOf,
   batchToSteps: batchToSteps,
   hasCredentials: hasCredentials,
   // 共通 JavaScript の本文。練習サイトでの再生テストから使う
@@ -4454,6 +4575,8 @@ root.PadConvert = {
   }
 
   function esc(t) { return String(t).split("&").join("&amp;").split("<").join("&lt;"); }
+  // 入力欄の value に入れる形（" と & を逃がす）
+  function attr(t) { return String(t === undefined || t === null ? "" : t).split("&").join("&amp;").split('"').join("&quot;").split("<").join("&lt;"); }
 
   var SEC_OPTS = [["setup", "setup（最初に1回）"], ["loop", "loop（1件ごと）"],
                   ["loop+recover", "loop+復帰"], ["teardown", "teardown（最後に1回）"],
@@ -4538,7 +4661,27 @@ root.PadConvert = {
              ' style="font-weight:normal" title="押すとファイルが 2 つ落ちる・認証エラーの' +
              'ファイルが落ちる画面では、こちらにする（右クリックの「名前を付けてリンク先を保存」と同じ）">' +
              '<input type="checkbox" class="dlLinkChk" data-i="' + i + '"' + off +
-             (as.dlLink ? " checked" : "") + "> リンク先を保存</label>";
+             (as.dlLink ? " checked" : "") + "> リンク先を保存</label>" +
+             '<div class="dlCheck" data-i="' + i + '"' + (as.dl ? "" : " hidden") + '>' +
+             '<label style="font-weight:normal" title="EDI 側の都合で、必要な欄が空のままの Excel が' +
+             '落ちてくることがある画面向け。外れたら「失敗」にし、ファイルは名前に _NG を付けて残す">' +
+             '<input type="checkbox" class="dlChkChk" data-i="' + i + '"' + off +
+             (as.chk ? " checked" : "") + "> 保存したファイルを確かめる（Excel のときだけ）</label>" +
+             '<span class="dlChkBox" data-i="' + i + '"' + (as.chk ? "" : " hidden") + '>' +
+             ' シート <input type="text" class="dlChkSheet" data-i="' + i + '" size="8"' +
+             ' placeholder="空なら最初" value="' + attr(as.chkSheet) + '"' + off + '>' +
+             ' セル <input type="text" class="dlChkCells" data-i="' + i + '" size="10"' +
+             ' placeholder="例: L11, N11" title="いくつか書くと、全部が条件に合えば成功"' +
+             ' value="' + attr(as.chkCells) + '"' + off + '>' +
+             ' が <select class="dlChkRule" data-i="' + i + '"' + off + '>' +
+             ["nonempty", "equals", "contains"].map(function (r) {
+               return '<option value="' + r + '"' + (as.chkRule === r ? " selected" : "") + ">" +
+                      { nonempty: "値がある", equals: "次と同じ", contains: "次を含む" }[r] + "</option>";
+             }).join("") + "</select>" +
+             ' <input type="text" class="dlChkValue" data-i="' + i + '" size="8"' +
+             ' placeholder="例: 成功" title="Excel の見た目どおりに書く（例: 16,600）。% は使えません"' +
+             ' value="' + attr(as.chkValue) + '"' + off + (as.chkRule === "nonempty" ? " hidden" : "") + '>' +
+             "</span></div>";
       }
       var mark = i === origin
         ? '<td class="mark">▶ 起点</td>'
@@ -4615,6 +4758,34 @@ root.PadConvert = {
         if (txt) { txt.hidden = !el.checked; }
         var lk = $("assignTable").querySelector('.dlLink[data-i="' + i + '"]');
         if (lk) { lk.hidden = !el.checked; }
+        var dc = $("assignTable").querySelector('.dlCheck[data-i="' + i + '"]');
+        if (dc) { dc.hidden = !el.checked; }
+        batchReady = false;
+      });
+    });
+    Array.prototype.forEach.call(q(".dlChkChk"), function (el) {
+      el.addEventListener("change", function () {
+        var i = +el.dataset.i;
+        recAssign[i].chk = el.checked;
+        var box = $("assignTable").querySelector('.dlChkBox[data-i="' + i + '"]');
+        if (box) { box.hidden = !el.checked; }
+        batchReady = false;
+      });
+    });
+    [["dlChkSheet", "chkSheet"], ["dlChkCells", "chkCells"], ["dlChkValue", "chkValue"]].forEach(function (pr) {
+      Array.prototype.forEach.call(q("." + pr[0]), function (el) {
+        el.addEventListener("input", function () {
+          recAssign[+el.dataset.i][pr[1]] = el.value;
+          batchReady = false;
+        });
+      });
+    });
+    Array.prototype.forEach.call(q(".dlChkRule"), function (el) {
+      el.addEventListener("change", function () {
+        var i = +el.dataset.i;
+        recAssign[i].chkRule = el.value;
+        var v = $("assignTable").querySelector('.dlChkValue[data-i="' + i + '"]');
+        if (v) { v.hidden = el.value === "nonempty"; }
         batchReady = false;
       });
     });
