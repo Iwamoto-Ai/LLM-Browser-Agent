@@ -68,9 +68,12 @@ from details_io import load_details
 # 要素の特定と操作をまとめて行う JavaScript。
 # 引数: arguments[0]=セレクタ候補の配列, arguments[1]=操作, arguments[2]=値,
 #       arguments[3]=フレーム（録画の "frame"。番号の並び [1] か名前。無ければ全部のフレームを探す）
-# 押す・入れる相手は、見えない要素（type=hidden や display:none）にはしない。フレーム型の
-# 画面で、位置で決めた目印（form > input:nth-of-type(1)）が先に見た別のフレームの隠れた
-# 入力欄に当たり、押せたことになって何も起きなかった（実 EDI1 の「検索」）。
+# 押す・入れる相手は、まず見える要素から探す。type=hidden の入力欄は決して相手にしない。
+#   フレーム型の画面で、位置で決めた目印（form > input:nth-of-type(1)）が先に見た別のフレームの
+#   隠れた入力欄に当たり、押せたことになって何も起きなかった（実 EDI1 の「検索」）。
+# どの候補でも見える要素が無いときだけ、display:none などで隠れた要素も相手にする。
+#   実 EDI2 の開きメニュー（div.textdivresp）は、ウィンドウの幅によって隠れている側の要素が
+#   録画される。隠れていても押せば親のリンクに届いて開くので、全部断るとメニューが開かなくなった。
 # 戻り値: {"ok": true/false, "used": 実際に一致したセレクタ}
 # PAD へはこの文字列を 1 行にして貼り付ける（--trace の出力にそのまま含まれる）。
 # ---------------------------------------------------------------------------
@@ -133,8 +136,12 @@ function allDocs() {
   if (fd) { return docsOf(fd, []); }
   try { return docsOf(document, []); } catch (e) { return [document]; }
 }
+var LOOSE = false;
+function deadEl(el) {
+  return String(el.tagName || ``).toLowerCase() === `input` && String(el.type || ``).toLowerCase() === `hidden`;
+}
 function hiddenEl(el) {
-  if (String(el.tagName || ``).toLowerCase() === `input` && String(el.type || ``).toLowerCase() === `hidden`) { return true; }
+  if (deadEl(el)) { return true; }
   try {
     var v = el.ownerDocument.defaultView;
     for (var p = el; p && p.nodeType === 1; p = p.parentElement) {
@@ -184,7 +191,7 @@ function pickEl(list) {
   if (!list || !list.length) { return null; }
   if (action === `click` || action === `fill`) {
     var vis = [];
-    for (var h = 0; h < list.length; h++) { if (!hiddenEl(list[h])) { vis.push(list[h]); } }
+    for (var h = 0; h < list.length; h++) { if (LOOSE ? !deadEl(list[h]) : !hiddenEl(list[h])) { vis.push(list[h]); } }
     if (!vis.length) { return null; }
     list = vis;
   }
@@ -238,7 +245,7 @@ function find(sel) {
   var docs = allDocs();
   for (var j = 0; j < docs.length; j++) {
     var hit = findIn(docs[j], sel);
-    if (hit && (action === `click` || action === `fill`) && hiddenEl(hit)) { hit = null; }
+    if (hit && (action === `click` || action === `fill`) && (LOOSE ? deadEl(hit) : hiddenEl(hit))) { hit = null; }
     if (hit) { return hit; }
   }
   return null;
@@ -361,7 +368,10 @@ if (action === `exists`) {
   }
   return { ok: txt.indexOf(value) >= 0, used: null };
 }
-for (var i = 0; i < cands.length; i++) {
+var passes = (action === `click` || action === `fill`) ? 2 : 1;
+for (var n = 0; n < cands.length * passes; n++) {
+  var i = n < cands.length ? n : n - cands.length;
+  LOOSE = n >= cands.length;
   var el = find(cands[i]);
   if (!el) { continue; }
   if (action === `click`) {

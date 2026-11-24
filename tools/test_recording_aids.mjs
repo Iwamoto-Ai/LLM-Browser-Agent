@@ -209,6 +209,28 @@ const dup = '<div id="PosCreateAsnLink"><table><tr><td>' +
   check(!r.ok && hit.length === 0, "見えない要素しか無いのに押せたことになった: " + JSON.stringify(r));
 }
 {
+  // 見える要素が無いときだけ、隠れた要素も押す。実 EDI2 の開きメニュー（div.textdivresp）は、
+  // ウィンドウの幅で隠れている側が録画される。隠れていても押せば親のリンクに届いて開く
+  const dom = new JSDOM('<!doctype html><body>' +
+    '<a id="menu" href="#"><div class="textdivresp" style="display:none">仕入先</div><div class="textdiv">仕入先</div></a>' +
+    '<a id="only" href="#"><div class="resp2" style="display:none">取引</div></a>' +
+    '<input type="hidden" class="pg" value="1"></body>', { runScripts: "outside-only" });
+  const w = dom.window, d = w.document;
+  let hit = [];
+  d.getElementById("menu").addEventListener("click", (e) => { hit.push(e.target.className); e.preventDefault(); });
+  d.getElementById("only").addEventListener("click", (e) => { hit.push("only"); e.preventDefault(); });
+  const fn = w.eval("(function () { return function () { " + P.jsActOneline(true, true) + " }; })()");
+  let r = fn(["div.textdivresp", "div.textdiv"], "click", "");
+  check(r.ok && r.used === "div.textdiv" && hit.join() === "textdiv",
+        "見える候補より先に隠れた候補を押した: " + JSON.stringify(r) + " " + hit.join());
+  hit = [];
+  r = fn(["div.resp2"], "click", "");
+  check(r.ok && hit.join() === "only", "隠れた要素しか無いときに押さなかった（メニューが開かない）: " + JSON.stringify(r));
+  hit = [];
+  r = fn(["input.pg"], "click", "");
+  check(!r.ok, "type=hidden の入力欄を押せたことにした: " + JSON.stringify(r));
+}
+{
   // 入力のあとフォーカスを外す
   const body = '<input id="f"><input id="g">';
   const on = runAct(body, ["#f"], "fill", "abc");
@@ -336,4 +358,4 @@ if (errors.length) {
   console.log("NG  録画の下ごしらえ\n  " + errors.join("\n  "));
   process.exit(1);
 }
-console.log("OK  録画の下ごしらえ: 押せる要素の優先 / フォーカス外し / Win+Shift+S / 列の自動割り当て / バッチ定義の埋め込み / Robin の読み解き / Excel の明細 / リンク先を保存 / 合図の出ない入力欄 / 画面が落ち着くまで待つ / フレームと見えない要素");
+console.log("OK  録画の下ごしらえ: 押せる要素の優先 / フォーカス外し / Win+Shift+S / 列の自動割り当て / バッチ定義の埋め込み / Robin の読み解き / Excel の明細 / リンク先を保存 / 合図の出ない入力欄 / 画面が落ち着くまで待つ / フレームと見えない要素 / 隠れたメニュー");
