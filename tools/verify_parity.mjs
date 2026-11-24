@@ -80,7 +80,9 @@ const cases = [
   // サイトの設定がバッチ定義の options に保存されているとき（どちらも指定しない）
   { batch: CHECK_BATCH, idCol: "番号", details: "C:\\temp\\d.csv", browser: "edge",
     label: "ダウンロードしたファイルを確かめる" },
-  { batch: CHECK_BATCH, idCol: "番号", details: "C:\\temp\\pad_result.csv", browser: "edge",
+  // 明細は、どの PC にも無い場所にする（Windows では C:\temp\pad_result.csv が実在して列名を見られ、
+  // 練習用の ID 列が無いと止まった）
+  { batch: CHECK_BATCH, idCol: "番号", details: "C:\\parity_no_such_dir\\pad_result.csv", browser: "edge",
     py: ["--details-from-result"], js: { detailsFromResult: true }, label: "明細が前のフローの結果 CSV" },
   { batch: SITE_BATCH, idCol: "プロジェクト番号",
     details: "C:\\temp\\edi2_batch.csv", browser: "edge", label: "options のサイトの設定" },
