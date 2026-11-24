@@ -234,6 +234,7 @@ Apache License 2.0　Copyright 2026 岩本 剛 (Iwamoto-Ai).<br>
 
 // ---------------------------------------------------------------- 共通 JS
 var JS_ACT = [
+"",
 "var PREFER = true, BLUR = true;",
 "var cands = arguments[0], action = arguments[1], value = arguments[2], frame = arguments[3];",
 "var Q = String.fromCharCode(39), DQ = String.fromCharCode(34);",
@@ -272,8 +273,12 @@ var JS_ACT = [
 "  if (fd) { return docsOf(fd, []); }",
 "  try { return docsOf(document, []); } catch (e) { return [document]; }",
 "}",
+"var LOOSE = false;",
+"function deadEl(el) {",
+"  return String(el.tagName || ``).toLowerCase() === `input` && String(el.type || ``).toLowerCase() === `hidden`;",
+"}",
 "function hiddenEl(el) {",
-"  if (String(el.tagName || ``).toLowerCase() === `input` && String(el.type || ``).toLowerCase() === `hidden`) { return true; }",
+"  if (deadEl(el)) { return true; }",
 "  try {",
 "    var v = el.ownerDocument.defaultView;",
 "    for (var p = el; p && p.nodeType === 1; p = p.parentElement) {",
@@ -323,7 +328,7 @@ var JS_ACT = [
 "  if (!list || !list.length) { return null; }",
 "  if (action === `click` || action === `fill`) {",
 "    var vis = [];",
-"    for (var h = 0; h < list.length; h++) { if (!hiddenEl(list[h])) { vis.push(list[h]); } }",
+"    for (var h = 0; h < list.length; h++) { if (LOOSE ? !deadEl(list[h]) : !hiddenEl(list[h])) { vis.push(list[h]); } }",
 "    if (!vis.length) { return null; }",
 "    list = vis;",
 "  }",
@@ -377,7 +382,7 @@ var JS_ACT = [
 "  var docs = allDocs();",
 "  for (var j = 0; j < docs.length; j++) {",
 "    var hit = findIn(docs[j], sel);",
-"    if (hit && (action === `click` || action === `fill`) && hiddenEl(hit)) { hit = null; }",
+"    if (hit && (action === `click` || action === `fill`) && (LOOSE ? deadEl(hit) : hiddenEl(hit))) { hit = null; }",
 "    if (hit) { return hit; }",
 "  }",
 "  return null;",
@@ -500,7 +505,10 @@ var JS_ACT = [
 "  }",
 "  return { ok: txt.indexOf(value) >= 0, used: null };",
 "}",
-"for (var i = 0; i < cands.length; i++) {",
+"var passes = (action === `click` || action === `fill`) ? 2 : 1;",
+"for (var n = 0; n < cands.length * passes; n++) {",
+"  var i = n < cands.length ? n : n - cands.length;",
+"  LOOSE = n >= cands.length;",
 "  var el = find(cands[i]);",
 "  if (!el) { continue; }",
 "  if (action === `click`) {",
@@ -570,7 +578,8 @@ var JS_ACT = [
 "  }",
 "  return { ok: true, used: cands[i] };",
 "}",
-"return { ok: false, used: null };"
+"return { ok: false, used: null };",
+""
 ];
 
 var JS_ACT_FLAGS = "var PREFER = true, BLUR = true;";
