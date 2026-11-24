@@ -229,6 +229,10 @@ const dup = '<div id="PosCreateAsnLink"><table><tr><td>' +
   hit = [];
   r = fn(["input.pg"], "click", "");
   check(!r.ok, "type=hidden の入力欄を押せたことにした: " + JSON.stringify(r));
+  // row/ で探す値が空なら、どの行にも当たらない（空の文字はどの行にも含まれるとみなされていた）
+  hit = [];
+  r = fn(["row/"], "click", "");
+  check(!r.ok && hit.length === 0, "row/ の値が空なのに行を拾った: " + JSON.stringify(r));
 }
 {
   // 入力のあとフォーカスを外す

@@ -227,6 +227,7 @@ function findIn(doc, sel) {
     }
     if (sel.indexOf(`row/`) === 0) {
       var key = sel.slice(4).trim();
+      if (!key) { return null; }
       var rows = doc.querySelectorAll(`tr`);
       for (var r = 0; r < rows.length; r++) {
         var txt = (rows[r].innerText || ``) + (rows[r].textContent || ``);
@@ -1230,6 +1231,32 @@ def check_of(st: dict):
             "value": value if rule != "nonempty" else ""}
 
 
+DL_RENAME_TRIES = 5
+
+
+def _robin_rename_retry(files: str, new_name: str, ind: str) -> list:
+    """落ちてきたファイルの名前を付け替える。うまくいけば DlRnOk = True。
+
+    落ちた直後は、ブラウザーがまだファイルをつかんでいることがある（実機の Edge で
+    「ファイル名を変更できません」と出て、PAD ごと止まった。同じ名前があっても上書きはできる）。
+    1 秒おきに数回試し、それでもだめなら DlRnOk = False のまま先へ進む（止めない）。"""
+    i2, i3 = ind + "    ", ind + "        "
+    return ([f"{ind}SET DlRnOk TO False",
+             f"{ind}SET DlRnTry TO 0",
+             f"{ind}LOOP WHILE DlRnOk = False AND DlRnTry < {DL_RENAME_TRIES}",
+             f"{i2}SET DlRnErr TO False",
+             f"{i2}File.RenameFiles.Rename Files: {files} NewName: {new_name} "
+             "KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> DlRenamed"]
+            + _robin_on_error(i2, "DlRnErr")
+            + [f"{i2}IF DlRnErr THEN",
+               f"{i3}SET DlRnTry TO DlRnTry + 1",
+               f"{i3}WAIT 1",
+               f"{i2}ELSE",
+               f"{i3}SET DlRnOk TO True",
+               f"{i2}END",
+               f"{ind}END"])
+
+
 def _robin_check_file(chk: dict, ind: str, step_no: int) -> list:
     """落ちてきたファイルを Excel で開き、決めたセルを見る。外れたら _NG を付けて失敗にする。
 
@@ -1289,12 +1316,16 @@ def _robin_check_file(chk: dict, ind: str, step_no: int) -> list:
             f"{i2}Excel.CloseExcel.Close Instance: ChkExcel",
             f"{ind}END",
             f"{ind}IF ChkErr <> {E} THEN",
-            f"{i2}# 外れたファイルも消さずに、名前に _NG を付けて残す（あとで見比べられるように）",
-            f"{i2}File.RenameFiles.Rename Files: DlRenamed NewName: $'''%DlName%_NG''' "
-            "KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> DlRenamed",
-            f"{i2}SET RowError TO "
+            f"{i2}# 外れたファイルも消さずに、名前に _NG を付けて残す（あとで見比べられるように）"]
+    out += _robin_rename_retry("DlRenamed", "$'''%DlName%_NG'''", i2)
+    out += [f"{i2}SET RowError TO "
             + _robin_str(f"ステップ{step_no}（ダウンロード）の確かめで外れました：%ChkErr%。"
                          "ファイルは名前に _NG を付けて残しています"),
+            f"{i2}IF DlRnOk = False THEN",
+            f"{i2}    SET RowError TO "
+            + _robin_str(f"ステップ{step_no}（ダウンロード）の確かめで外れました：%ChkErr%。"
+                         "_NG の名前に変えられなかったので、%DlName% のまま残っています"),
+            f"{i2}END",
             f"{ind}END"]
     return out
 
@@ -1357,11 +1388,17 @@ def _robin_download(cands: list, name: str, indent: str, step_no: int,
     A(f"{indent}        SET DlName TO {_robin_str(_to_robin_var(name, cols))}")
     for _ln in _name_expand(name, "DlName", indent + "        "):
         L.append(_ln)
-    A(f"{indent}        # 拡張子はそのまま残るので、Excel でも PDF でも同じ 1 行で足りる")
-    A(f"{indent}        File.RenameFiles.Rename Files: DlFile NewName: DlName "
-      "KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> DlRenamed")
+    A(f"{indent}        # 拡張子はそのまま残るので、Excel でも PDF でも同じ書き方で足りる。")
+    A(f"{indent}        # 落ちた直後はブラウザーがつかんでいることがあるので、1 秒おきに数回試す")
+    L.extend(_robin_rename_retry("DlFile", "DlName", indent + "        "))
+    A(f"{indent}        IF DlRnOk = False THEN")
+    A(f"{indent}            SET RowError TO " + _robin_str(
+        f"ステップ{step_no}（ダウンロード）で、落ちてきたファイル（%DlFile.Name%）の名前を"
+        "%DlName% に変えられませんでした。同じ名前のファイルを開いていないか確かめてください"))
     if check:
-        L.extend(_robin_check_file(check, indent + "        ", step_no))
+        A(f"{indent}        ELSE")
+        L.extend(_robin_check_file(check, indent + "            ", step_no))
+    A(f"{indent}        END")
     A(f"{indent}    END")
     A(f"{indent}    IF DlAfter.Count = DlCountBefore THEN")
     _dlerr = ("ステップ%d（ダウンロード）でファイルが落ちてきませんでした"
@@ -3282,7 +3319,18 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     # 結果 CSV を明細にする場合も skip 列が無い。判定ごと出さない。
     # 「列が見つかりません」で止まり、原因が分かりにくいため。
     if details_from_result:
-        A(f"{inner}# 明細が結果 CSV なので skip 列は無い。判定は出していない。")
+        A(f"{inner}# 明細が結果 CSV なので skip 列は無い。代わりに、前のフローで「成功」していない行は飛ばす。")
+        A(f"{inner}# 前のフローでスキップ・失敗した行は、そこで取るはずだった値（要求ID など）が空のため。")
+        A(f"{inner}# 空のまま進めると、関係ない行のリンクを拾っていた（実機の検収状況）。再実行のときは見ない")
+        A(f"{inner}IF RetryMode = False THEN")
+        A(f"{inner}    IF Row['結果'] <> $'''成功''' THEN")
+        A(f"{inner}        SET SkipCount TO SkipCount + 1")
+        A(f"{inner}        File.WriteText File: ResultFile "
+          f"TextToWrite: $'''%RowId%,%RowKey%,スキップ,\"前のフローで成功していない\",,{_cap_blank}''' "
+          "AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8")
+        A(f"{inner}        NEXT LOOP")
+        A(f"{inner}    END")
+        A(f"{inner}END")
     else:
         A(f"{inner}# skip 列に値がある行は飛ばす（再実行 CSV には skip 列が無いので除外）")
         A(f"{inner}IF RetryMode = False THEN")

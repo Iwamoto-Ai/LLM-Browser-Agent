@@ -1272,7 +1272,7 @@ def test_xlsx_details_reads_sheet_and_makes_result_excel(tmp_path):
     assert len(writes) == 9 and "Value: $'''\\'%ResRow[0]%'''" in writes[0]
     assert "%XlsNote%" in txt
     # 開けない・シートが無いときは止める。Excel を開いたままにしない
-    assert txt.count("ON ERROR") == 3
+    assert txt.count("ON ERROR") - txt.count("SET DlRnErr TO True") == 3
     assert "明細ファイルに「明細」シートがありません" in txt
     assert "明細を1件も処理せずに中止しました。理由：%HaltReason%。" in txt
     # 生成時の点検で警告が出ない（%''% は PAD の空の文字の式）
@@ -1589,7 +1589,9 @@ def test_download_check_file(tmp_path):
     assert len(ng) == 2
     # 確かめは、ファイルが落ちて名前を付け替えたあと（その中）にある
     k = lines.index("SET DlCheck TO $'''{\"cells\": \"L11, N11\", \"rule\": \"nonempty\", \"sheet\": \"\", \"value\": \"\"}'''")
-    assert lines[k - 3].startswith("File.RenameFiles.Rename Files: DlFile NewName: DlName")
+    assert lines[k - 5] == "IF DlRnOk = False THEN" and lines[k - 4].startswith("SET RowError TO")
+    assert lines[k - 3] == "ELSE"
+    assert any(ln.startswith("File.RenameFiles.Rename Files: DlFile NewName: DlName") for ln in lines[k - 20:k])
     assert not pad._lint_robin(txt.split("\n"), log=lambda *a: None)
     got, _ = pad.parse_robin(txt)
     gdl = [st for st in got["loop"] if st["type"] == "download"]
@@ -1601,3 +1603,25 @@ def test_download_check_file(tmp_path):
     assert pad.check_of({"checkFile": {"cells": "11L", "rule": "nonempty"}}) is None
     # 確かめを入れていない Robin は今までどおり
     assert "ChkExcel" not in _robin_no_embed(load_recording(_RICH), tmp_path)
+
+
+def test_result_csv_skips_unsuccessful_and_rename_retries(tmp_path):
+    """明細が前のフローの結果 CSV のときは、「成功」していない行を飛ばす（要求ID が空のまま進めて、
+    関係ない行のリンクを拾っていた）。ダウンロードの名前の付け替えは、失敗しても止めずに数回試す
+    （実機の Edge で「ファイル名を変更できません」と出て PAD ごと止まった）。"""
+    b = load_recording(_RICH)
+    out = pad.write_robin(b, r"C:\temp\pad_result.csv", "番号", str(tmp_path / "r.robin.txt"),
+                          out_dir=r"C:\temp", details_from_result=True)
+    lines = [ln.strip() for ln in open(out, encoding="utf-8").read().split("\n")]
+    k = lines.index("IF Row['結果'] <> $'''成功''' THEN")
+    assert lines[k - 1] == "IF RetryMode = False THEN"
+    assert "スキップ,\"前のフローで成功していない\"" in lines[k + 2] and lines[k + 3] == "NEXT LOOP"
+    # 普段の明細には入らない
+    assert "IF Row['結果'] <> $'''成功''' THEN" not in _robin_no_embed(b, tmp_path)
+    # 付け替えは ON ERROR 付きで数回試し、だめなら止めずに失敗の理由を残す
+    r = [i for i, ln in enumerate(lines) if ln.startswith("File.RenameFiles.Rename Files: DlFile NewName: DlName")]
+    assert r
+    i = r[0]
+    assert lines[i - 2] == f"LOOP WHILE DlRnOk = False AND DlRnTry < {pad.DL_RENAME_TRIES}"
+    assert lines[i + 1:i + 4] == ["ON ERROR", "SET DlRnErr TO True", "END"]
+    assert any("に変えられませんでした" in ln for ln in lines[i:i + 20])

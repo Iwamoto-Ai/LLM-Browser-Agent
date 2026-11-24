@@ -364,6 +364,7 @@ var JS_ACT = [
 "    }",
 "    if (sel.indexOf(`row/`) === 0) {",
 "      var key = sel.slice(4).trim();",
+"      if (!key) { return null; }",
 "      var rows = doc.querySelectorAll(`tr`);",
 "      for (var r = 0; r < rows.length; r++) {",
 "        var txt = (rows[r].innerText || ``) + (rows[r].textContent || ``);",
@@ -1057,6 +1058,28 @@ function checkJson(chk) {
     ", \"sheet\": " + JSON.stringify(chk.sheet) + ", \"value\": " + JSON.stringify(chk.value) + "}";
 }
 
+var DL_RENAME_TRIES = 5;
+
+// 落ちてきたファイルの名前を付け替える。うまくいけば DlRnOk = True（pad_webdriver_ref.py の
+// _robin_rename_retry と同じ）。落ちた直後はブラウザーがつかんでいることがあるので、1 秒おきに数回試す
+function robinRenameRetry(files, newName, ind) {
+  var i2 = ind + "    ", i3 = ind + "        ";
+  return [ind + "SET DlRnOk TO False",
+          ind + "SET DlRnTry TO 0",
+          ind + "LOOP WHILE DlRnOk = False AND DlRnTry < " + DL_RENAME_TRIES,
+          i2 + "SET DlRnErr TO False",
+          i2 + "File.RenameFiles.Rename Files: " + files + " NewName: " + newName +
+            " KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> DlRenamed"]
+    .concat(robinOnError(i2, "DlRnErr"))
+    .concat([i2 + "IF DlRnErr THEN",
+             i3 + "SET DlRnTry TO DlRnTry + 1",
+             i3 + "WAIT 1",
+             i2 + "ELSE",
+             i3 + "SET DlRnOk TO True",
+             i2 + "END",
+             ind + "END"]);
+}
+
 function robinCheckFile(chk, ind, stepNo) {
   var i2 = ind + "    ", i3 = ind + "        ", i4 = ind + "            ";
   var E = robinStr("");
@@ -1110,12 +1133,16 @@ function robinCheckFile(chk, ind, stepNo) {
            i2 + "Excel.CloseExcel.Close Instance: ChkExcel",
            ind + "END",
            ind + "IF ChkErr <> " + E + " THEN",
-           i2 + "# 外れたファイルも消さずに、名前に _NG を付けて残す（あとで見比べられるように）",
-           i2 + "File.RenameFiles.Rename Files: DlRenamed NewName: $'''%DlName%_NG''' " +
-             "KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> DlRenamed",
-           i2 + "SET RowError TO " +
+           i2 + "# 外れたファイルも消さずに、名前に _NG を付けて残す（あとで見比べられるように）");
+  out = out.concat(robinRenameRetry("DlRenamed", "$'''%DlName%_NG'''", i2));
+  out.push(i2 + "SET RowError TO " +
              robinStr("ステップ" + stepNo + "（ダウンロード）の確かめで外れました：%ChkErr%。" +
                       "ファイルは名前に _NG を付けて残しています"),
+           i2 + "IF DlRnOk = False THEN",
+           i2 + "    SET RowError TO " +
+             robinStr("ステップ" + stepNo + "（ダウンロード）の確かめで外れました：%ChkErr%。" +
+                      "_NG の名前に変えられなかったので、%DlName% のまま残っています"),
+           i2 + "END",
            ind + "END");
   return out;
 }
@@ -1168,10 +1195,18 @@ function robinDownload(cands, name, indent, stepNo, cols, timeout, saveLink, che
   A(indent + "        SET DlFile TO DlSorted[0]");
   A(indent + "        SET DlName TO " + robinStr(toRobinVar(name, cols)));
   nameExpand(name, "DlName", indent + "        ").forEach(function (ln) { L.push(ln); });
-  A(indent + "        # 拡張子はそのまま残るので、Excel でも PDF でも同じ 1 行で足りる");
-  A(indent + "        File.RenameFiles.Rename Files: DlFile NewName: DlName " +
-    "KeepExtension: True IfFileExists: File.IfExists.Overwrite RenamedFiles=> DlRenamed");
-  if (check) { L = L.concat(robinCheckFile(check, indent + "        ", stepNo)); }
+  A(indent + "        # 拡張子はそのまま残るので、Excel でも PDF でも同じ書き方で足りる。");
+  A(indent + "        # 落ちた直後はブラウザーがつかんでいることがあるので、1 秒おきに数回試す");
+  L = L.concat(robinRenameRetry("DlFile", "DlName", indent + "        "));
+  A(indent + "        IF DlRnOk = False THEN");
+  A(indent + "            SET RowError TO " + robinStr(
+    "ステップ" + stepNo + "（ダウンロード）で、落ちてきたファイル（%DlFile.Name%）の名前を" +
+    "%DlName% に変えられませんでした。同じ名前のファイルを開いていないか確かめてください"));
+  if (check) {
+    A(indent + "        ELSE");
+    L = L.concat(robinCheckFile(check, indent + "            ", stepNo));
+  }
+  A(indent + "        END");
   A(indent + "    END");
   A(indent + "    IF DlAfter.Count = DlCountBefore THEN");
   A(indent + "        SET RowError TO " +
@@ -3965,7 +4000,18 @@ function buildRobin(batch, opt) {
   // 結果 CSV を明細にする場合も skip 列が無い。判定ごと出さない。
   // 「列が見つかりません」で止まり、原因が分かりにくいため。
   if (opt.detailsFromResult) {
-    A(inner + "# 明細が結果 CSV なので skip 列は無い。判定は出していない。");
+    A(inner + "# 明細が結果 CSV なので skip 列は無い。代わりに、前のフローで「成功」していない行は飛ばす。");
+    A(inner + "# 前のフローでスキップ・失敗した行は、そこで取るはずだった値（要求ID など）が空のため。");
+    A(inner + "# 空のまま進めると、関係ない行のリンクを拾っていた（実機の検収状況）。再実行のときは見ない");
+    A(inner + "IF RetryMode = False THEN");
+    A(inner + "    IF Row['結果'] <> $'''成功''' THEN");
+    A(inner + "        SET SkipCount TO SkipCount + 1");
+    A(inner + "        File.WriteText File: ResultFile " +
+      "TextToWrite: $'''%RowId%,%RowKey%,スキップ,\"前のフローで成功していない\",," + capBlank + "''' " +
+      "AppendNewLine: True IfFileExists: File.IfFileExists.Append Encoding: File.FileEncoding.UTF8");
+    A(inner + "        NEXT LOOP");
+    A(inner + "    END");
+    A(inner + "END");
   } else {
     A(inner + "# skip 列に値がある行は飛ばす（再実行 CSV には skip 列が無いので除外）");
     A(inner + "IF RetryMode = False THEN");
