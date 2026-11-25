@@ -228,7 +228,8 @@ def test_robin_is_literal_safe(tmp_path):
     import re as _re
     txt = _robin_text(tmp_path)
     for m in _re.finditer(r"\$'''(.*?)'''", txt):
-        assert "'" not in m.group(1), m.group(1)[:60]
+        # %''% は PAD の空の文字の式（置換の「置き換え先」は空欄にできないため。実機で確かめた）
+        assert "'" not in m.group(1).replace("%''%", ""), m.group(1)[:60]
     for ch in ("'", '"', "\\", "%"):
         assert ch not in pad.JS_ACT, ch         # JS 側も安全な書き方（バッククォート）に統一
 
@@ -236,7 +237,7 @@ def test_robin_is_literal_safe(tmp_path):
 def test_robin_blocks_balanced(tmp_path):
     import re as _re
     txt = _robin_text(tmp_path)
-    opens = len(_re.findall(r"^\s*(IF |LOOP )", txt, _re.M))
+    opens = len(_re.findall(r"^\s*(IF |LOOP |ON ERROR\s*$)", txt, _re.M))
     ends = len(_re.findall(r"^\s*END\s*$", txt, _re.M))
     assert opens == ends
 
@@ -1272,7 +1273,8 @@ def test_xlsx_details_reads_sheet_and_makes_result_excel(tmp_path):
     assert len(writes) == 9 and "Value: $'''\\'%ResRow[0]%'''" in writes[0]
     assert "%XlsNote%" in txt
     # 開けない・シートが無いときは止める。Excel を開いたままにしない
-    assert txt.count("ON ERROR") - txt.count("SET DlRnErr TO True") == 3
+    assert (txt.count("ON ERROR") - txt.count("SET DlRnErr TO True")
+            - txt.count("SET ColMiss TO True")) == 3
     assert "明細ファイルに「明細」シートがありません" in txt
     assert "明細を1件も処理せずに中止しました。理由：%HaltReason%。" in txt
     # 生成時の点検で警告が出ない（%''% は PAD の空の文字の式）
@@ -1625,3 +1627,34 @@ def test_result_csv_skips_unsuccessful_and_rename_retries(tmp_path):
     assert lines[i - 2] == f"LOOP WHILE DlRnOk = False AND DlRnTry < {pad.DL_RENAME_TRIES}"
     assert lines[i + 1:i + 4] == ["ON ERROR", "SET DlRnErr TO True", "END"]
     assert any("に変えられませんでした" in ln for ln in lines[i:i + 20])
+
+
+def test_details_columns_checked_before_loop(tmp_path):
+    """明細（CSV）に使う列が無いときは、繰り返しの前に分かりやすい理由で止める。
+    実機では、前のフローの結果 CSV が別のフローで上書きされ、要求ID の列が無いまま始めて
+    「列またはプロパティ '要求ID' が見つかりません」で PAD ごと止まった。
+    SET には「エラー発生時」が付けられない（貼り付けが弾かれた）ので、1 行目を文字で読んで見る。"""
+    b = load_recording(_RICH)
+    out = pad.write_robin(b, r"C:\temp\pad_result.csv", "番号", str(tmp_path / "r.robin.txt"),
+                          out_dir=r"C:\temp", details_from_result=True)
+    txt = open(out, encoding="utf-8").read()
+    lines = [ln.strip() for ln in txt.split("\n")]
+    assert "ON ERROR" not in "\n".join(lines[lines.index("SET MissCols TO $''''''"):])[:2000]
+    assert "ColProbe" not in txt and "RowsCount" not in txt
+    i = lines.index("File.ReadTextFromFile.ReadTextAsList File: DetailsFile "
+                    "Encoding: File.TextFileEncoding.UTF8 Contents=> DetLines")
+    assert lines[i - 1] == "IF RetryMode = False THEN"
+    assert lines[i + 1] == "SET DetHead TO $''',%DetLines[0]%,'''"
+    finds = [ln for ln in lines if ln.startswith("Text.Replace.ReplaceText Text: DetHead TextToFind: ")]
+    assert any("$''',結果,'''" in f for f in finds) and any("$''',番号,'''" in f for f in finds)
+    assert not any(",skip," in f for f in finds) and len(finds) == len(set(finds))
+    k = lines.index("IF MissCols <> $'''''' THEN")
+    assert lines[k + 1] == "SET Halt TO True" and "上書きされていないか" in lines[k + 2]
+    head = next(j for j, ln in enumerate(lines) if ln.startswith("File.WriteText File: ResultFile")
+                and "結果,理由,エビデンス" in ln)
+    assert k < head and lines[k + 4:k + 6] == ["END", "IF Halt = False THEN"]   # 前の結果を空で上書きしない
+    # 普段の CSV の明細では skip 列も確かめる。Excel の明細は文字で読めないので確かめない
+    csv = _robin_no_embed(b, tmp_path)
+    assert "$''',skip,'''" in csv and "列名を確かめてください" in csv
+    x = pad.write_robin(b, r"C:\temp\d.xlsx", "番号", str(tmp_path / "x.robin.txt"), out_dir=r"C:\temp")
+    assert "DetHead" not in open(x, encoding="utf-8").read()

@@ -2085,6 +2085,48 @@ def _robin_on_error(ind: str, var: str) -> list:
     return [f"{ind}ON ERROR", f"{ind}    SET {var} TO True", f"{ind}END"]
 
 
+def _robin_check_columns(cols: list, from_result: bool, ind: str) -> list:
+    """明細（CSV）に使う列がそろっているか、繰り返しを始める前に確かめる。足りなければ Halt。
+
+    無いまま始めると、1 件目の SET Col2 TO Row['要求ID'] で PAD ごと止まり、
+    「列またはプロパティ '要求ID' が見つかりません」としか出ない。実機では、前のフローの結果 CSV
+    （pad_result.csv）が別のフローを流したときに上書きされ、要求ID の列が消えていた。
+    1 行目（列名）を文字として読み、「,列名,」が含まれるかを見る（含まれていれば、その文字を
+    消すと変わる）。SET には「エラー発生時」が付けられず、列を取り出すアクションも無いため。
+    実機で、1 行目は「プロジェクト番号,発注番号,結果,…」のまま読めることを確かめた。
+    Excel の明細は文字で読めないので確かめない。再実行のときは結果 CSV を読むので見ない。"""
+    need = []
+    for c in list(cols) + (["結果"] if from_result else ["skip"]):
+        if c not in need:
+            need.append(c)
+    i2, i3 = ind + "    ", ind + "        "
+    out = [f"{ind}# 使う列がそろっているか、始める前に確かめる（無いと途中で PAD ごと止まり、原因が分かりにくい）。",
+           f"{ind}# 1 行目（列名）を文字で読み、「,列名,」を消して変わらなければ、その列は無い",
+           f"{ind}SET MissCols TO {_robin_str('')}",
+           f"{ind}IF RetryMode = False THEN",
+           f"{i2}File.ReadTextFromFile.ReadTextAsList File: DetailsFile "
+           "Encoding: File.TextFileEncoding.UTF8 Contents=> DetLines",
+           f"{i2}SET DetHead TO $\'\'\',%DetLines[0]%,\'\'\'"]
+    for c in need:
+        out += [f"{i2}Text.Replace.ReplaceText Text: DetHead TextToFind: {_robin_str(',' + c + ',')} "
+                "IgnoreCase: False ReplaceWith: $\'\'\'%\'\'%\'\'\' ActivateEscapeSequences: False "
+                "ComparisonType: Text.TextComparisonType.Ordinal Result=> HeadRep",
+                f"{i2}IF HeadRep = DetHead THEN",
+                f"{i3}SET MissCols TO {_robin_str('%MissCols%「' + c + '」')}",
+                f"{i2}END"]
+    if from_result:
+        why = ("前のフローの結果（%DetailsFile%）に、使う列 %MissCols% がありません。"
+               "別のフローを流して結果 CSV が上書きされていないか確かめ、前のフローから流し直してください")
+    else:
+        why = "明細（%DetailsFile%）に、使う列 %MissCols% がありません。列名を確かめてください"
+    out += [f"{ind}END",
+            f"{ind}IF MissCols <> {_robin_str('')} THEN",
+            f"{i2}SET Halt TO True",
+            f"{i2}SET HaltReason TO {_robin_str(why)}",
+            f"{ind}END"]
+    return out
+
+
 def _robin_read_xlsx(ind: str, csv_read: str) -> list:
     """明細を Excel から読む（再実行のときは結果 CSV なので CSV のまま）。"""
     i2, i3 = ind + "    ", ind + "        "
@@ -3270,6 +3312,11 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
         A("IF Halt = False THEN")
     else:
         A("    " + _csv_read)
+    if not xlsx:
+        L.extend(_robin_check_columns(cols, details_from_result, "    "))
+        # 足りなければ Halt。結果 CSV を書き始める前に閉じる（前の結果を空で上書きしない）
+        A("END")
+        A("IF Halt = False THEN")
     A("    # 結果 CSV は、そのまま明細として読み直せる列構成にする。")
     A("    # ID だけでなく業務キーも入れないと、再実行で対象を特定できない。")
     key_head = cols[1] if len(cols) > 1 else "業務キー"

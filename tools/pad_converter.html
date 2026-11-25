@@ -1062,6 +1062,42 @@ var DL_RENAME_TRIES = 5;
 
 // 落ちてきたファイルの名前を付け替える。うまくいけば DlRnOk = True（pad_webdriver_ref.py の
 // _robin_rename_retry と同じ）。落ちた直後はブラウザーがつかんでいることがあるので、1 秒おきに数回試す
+// 明細（CSV）に使う列がそろっているか、繰り返しを始める前に確かめる（pad_webdriver_ref.py の
+// _robin_check_columns と同じ）。1 行目を文字で読み、「,列名,」を消して変わらなければ無い。足りなければ Halt
+function robinCheckColumns(cols, fromResult, ind) {
+  var need = [];
+  cols.concat(fromResult ? ["結果"] : ["skip"]).forEach(function (c) {
+    if (need.indexOf(c) < 0) { need.push(c); }
+  });
+  var i2 = ind + "    ", i3 = ind + "        ";
+  var Q = "\'\'\'";
+  var out = [ind + "# 使う列がそろっているか、始める前に確かめる（無いと途中で PAD ごと止まり、原因が分かりにくい）。",
+             ind + "# 1 行目（列名）を文字で読み、「,列名,」を消して変わらなければ、その列は無い",
+             ind + "SET MissCols TO " + robinStr(""),
+             ind + "IF RetryMode = False THEN",
+             i2 + "File.ReadTextFromFile.ReadTextAsList File: DetailsFile " +
+               "Encoding: File.TextFileEncoding.UTF8 Contents=> DetLines",
+             i2 + "SET DetHead TO $" + Q + ",%DetLines[0]%," + Q];
+  need.forEach(function (c) {
+    out.push(i2 + "Text.Replace.ReplaceText Text: DetHead TextToFind: " + robinStr("," + c + ",") +
+               " IgnoreCase: False ReplaceWith: $" + Q + "%\'\'%" + Q + " ActivateEscapeSequences: False " +
+               "ComparisonType: Text.TextComparisonType.Ordinal Result=> HeadRep",
+             i2 + "IF HeadRep = DetHead THEN",
+             i3 + "SET MissCols TO " + robinStr("%MissCols%「" + c + "」"),
+             i2 + "END");
+  });
+  var why = fromResult
+    ? "前のフローの結果（%DetailsFile%）に、使う列 %MissCols% がありません。" +
+      "別のフローを流して結果 CSV が上書きされていないか確かめ、前のフローから流し直してください"
+    : "明細（%DetailsFile%）に、使う列 %MissCols% がありません。列名を確かめてください";
+  out.push(ind + "END",
+           ind + "IF MissCols <> " + robinStr("") + " THEN",
+           i2 + "SET Halt TO True",
+           i2 + "SET HaltReason TO " + robinStr(why),
+           ind + "END");
+  return out;
+}
+
 function robinRenameRetry(files, newName, ind) {
   var i2 = ind + "    ", i3 = ind + "        ";
   return [ind + "SET DlRnOk TO False",
@@ -3955,6 +3991,12 @@ function buildRobin(batch, opt) {
     A("IF Halt = False THEN");
   } else {
     A("    " + csvRead);
+  }
+  if (!xlsx) {
+    L = L.concat(robinCheckColumns(cols, !!opt.detailsFromResult, "    "));
+    // 足りなければ Halt。結果 CSV を書き始める前に閉じる（前の結果を空で上書きしない）
+    A("END");
+    A("IF Halt = False THEN");
   }
   A("    # 結果 CSV は、そのまま明細として読み直せる列構成にする。");
   A("    # ID だけでなく業務キーも入れないと、再実行で対象を特定できない。");
