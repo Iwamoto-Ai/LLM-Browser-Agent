@@ -24,6 +24,7 @@ import base64
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -1197,7 +1198,11 @@ def test_parse_old_robin_without_embed(tmp_path):
     assert [s for s in got["loop"] if s["type"] == "assertText"][0]["timeout"] == 60
     assert any("運用の設定" in n for n in notes)
     # 組み立て直したものから作った Robin は、読み解くと同じものに戻る
-    assert pad.parse_robin(_robin_no_embed(got, tmp_path))[0] == got
+    # 古い Robin の明細は BaseDir の下なので、名前だけがバッチ定義に入る
+    assert got["options"]["detailsName"] == "edi2_batch.csv"
+    again = pad.parse_robin(_robin_no_embed(got, tmp_path))[0]
+    again["options"]["detailsName"] = "edi2_batch.csv"       # 作り直しは明細を指定している
+    assert again == got
 
 
 def test_robin_to_batch_prefers_embed_then_parses(tmp_path):
@@ -1293,7 +1298,11 @@ def test_parse_robin_reads_xlsx_robin(tmp_path):
     x1 = re.sub(r"# 備考：\d{4}/\d\d/\d\d", "# 備考：X",
                 _xlsx_robin(tmp_path).split("\n# ---------- 元のバッチ定義")[0])
     got, _ = pad.parse_robin(x1)
-    assert got == pad.parse_robin(r1)[0]
+    want = pad.parse_robin(r1)[0]
+    # 明細ファイル名だけは違う（Excel と CSV）
+    assert got["options"].pop("detailsName") == "edi2_batch.xlsx"
+    assert want["options"].pop("detailsName") == "d.csv"
+    assert got == want
 
 
 def test_load_details_prefers_details_sheet():
@@ -1658,3 +1667,45 @@ def test_details_columns_checked_before_loop(tmp_path):
     assert "$''',skip,'''" in csv and "列名を確かめてください" in csv
     x = pad.write_robin(b, r"C:\temp\d.xlsx", "番号", str(tmp_path / "x.robin.txt"), out_dir=r"C:\temp")
     assert "DetHead" not in open(x, encoding="utf-8").read()
+
+
+def test_flow_files_from_batch_options(tmp_path):
+    """明細ファイル名・ダウンロードのフォルダ名・ID 列・ウィンドウは、バッチ定義の options から決まる。
+    名前は BaseDir からのもので、PC のフルパスは使わない（配った先でフォルダが違うと動かない）。"""
+    assert pad.base_rel("明細_EDI_A.xlsx") == "明細_EDI_A.xlsx"
+    assert pad.base_rel("明細/明細_EDI_A.xlsx") == "明細\\明細_EDI_A.xlsx"
+    for bad in ("C:\\temp\\a.csv", "\\\\srv\\a.csv", "..\\a.csv", ""):
+        assert pad.base_rel(bad) == ""
+    b = load_recording(_RICH)
+    b["options"].update({"detailsName": "明細_EDI_A.xlsx", "downloadFolder": "download_EDI_A",
+                         "idCol": "番号", "winW": 1111, "winH": 777})
+    assert pad.flow_files(b, "C:\\PAD\\") == ("C:\\PAD\\明細_EDI_A.xlsx", "C:\\PAD\\download_EDI_A", "番号")
+    # 指定があればそちらが先
+    assert pad.flow_files(b, "C:\\PAD", "D:\\x.csv", "D:\\dl", "ID") == ("D:\\x.csv", "D:\\dl", "ID")
+    b["options"]["detailsName"] = "C:\\other\\明細.xlsx"          # フルパスは使わない
+    assert pad.flow_files(b, "C:\\PAD")[0] == ""
+    assert pad._window_size([], 0, 0, b["options"]) == (1111, 777)
+    assert pad._window_size([], 900, 0, b["options"]) == (900, 777)
+    # CLI: --details / --id-column / --pad-browser が無くても、バッチ定義から作れる
+    b["options"]["detailsName"] = "明細_EDI_A.xlsx"
+    bp = tmp_path / "b.json"
+    bp.write_text(json.dumps(b, ensure_ascii=False), encoding="utf-8")
+    out = tmp_path / "o.robin.txt"
+    subprocess.run([sys.executable, os.path.join(_HERE, "pad_webdriver_ref.py"), "--batch", str(bp),
+                    "--robin", str(out), "--pad-out-dir", "C:\\PAD"], check=True, capture_output=True,
+                   env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+    txt = out.read_text(encoding="utf-8")
+    assert "SET DetailsFile TO $'''%BaseDir%\\\\明細_EDI_A.xlsx'''" in txt
+    assert "SET DlDir TO $'''C:\\\\PAD\\\\download_EDI_A'''" in txt
+    assert "SET Browser TO $'''chrome'''" in txt and "SET Col1 TO Row['番号']" in txt
+    # 読み解くと、名前だけがバッチ定義に戻る
+    got, _ = pad.parse_robin(txt.split("\n# ---------- 元のバッチ定義")[0])
+    assert got["options"]["detailsName"] == "明細_EDI_A.xlsx" and got["options"]["downloadFolder"] == "download_EDI_A"
+    # 明細ファイル名も --details も無ければ止める
+    del b["options"]["detailsName"]
+    bp.write_text(json.dumps(b, ensure_ascii=False), encoding="utf-8")
+    # Windows では、そのままだと標準エラーを cp932 で読もうとして読めない。UTF-8 にそろえる
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    r = subprocess.run([sys.executable, os.path.join(_HERE, "pad_webdriver_ref.py"), "--batch", str(bp),
+                        "--robin", str(out)], capture_output=True, env=env)
+    assert r.returncode != 0 and "detailsName" in r.stderr.decode("utf-8", errors="replace")

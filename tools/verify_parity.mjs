@@ -53,6 +53,15 @@ const CHECK_BATCH = path.join(os.tmpdir(), "parity_check_batch.json");
   fs.writeFileSync(CHECK_BATCH, JSON.stringify(b, null, 2), "utf8");
 }
 
+// フローの設定（明細ファイル名・ダウンロードのフォルダ名・ID 列・ウィンドウ）をバッチ定義に持たせたもの
+const FLOW_BATCH = path.join(os.tmpdir(), "parity_flow_batch.json");
+{
+  const b = JSON.parse(fs.readFileSync("tests/fixtures/robin_parse_rich_batch.json", "utf8"));
+  b.options = Object.assign({}, b.options || {}, { idCol: "番号", detailsName: "明細\\明細_EDI_A.xlsx",
+                                                   downloadFolder: "download_EDI_A", winW: 1111, winH: 777 });
+  fs.writeFileSync(FLOW_BATCH, JSON.stringify(b, null, 2), "utf8");
+}
+
 const cases = [
   { batch: "examples/pad/pad_sample_batch.json", idCol: "ID",
     details: "C:\\temp\\sample_batch.csv", browser: "edge" },
@@ -84,6 +93,8 @@ const cases = [
   // 練習用の ID 列が無いと止まった）
   { batch: CHECK_BATCH, idCol: "番号", details: "C:\\parity_no_such_dir\\pad_result.csv", browser: "edge",
     py: ["--details-from-result"], js: { detailsFromResult: true }, label: "明細が前のフローの結果 CSV" },
+  { batch: FLOW_BATCH, idCol: null, details: null, browser: "chrome",
+    label: "フローの設定をバッチ定義から（明細ファイル名・ダウンロードのフォルダ名・ID 列）" },
   { batch: SITE_BATCH, idCol: "プロジェクト番号",
     details: "C:\\temp\\edi2_batch.csv", browser: "edge", label: "options のサイトの設定" },
   // 明細が Excel のとき（「明細」シートを読み、最後に結果の Excel を作る）。
@@ -95,17 +106,19 @@ const cases = [
 let ng = 0;
 for (const c of cases) {
   const py = path.join(os.tmpdir(), "py.robin.txt");
-  execFileSync(PY, ["pad_webdriver_ref.py",
-    "--batch", c.batch, "--details", c.details, "--id-column", c.idCol,
-    "--robin", py, "--driver-exe", "C:\\temp\\msedgedriver.exe",
-    "--pad-out-dir", "C:\\temp", "--pad-browser", c.browser, "--auto-driver"]
+  // details / idCol が null のケースは、バッチ定義の options（明細ファイル名・ID 列）から決めさせる
+  execFileSync(PY, ["pad_webdriver_ref.py", "--batch", c.batch]
+    .concat(c.details === null ? [] : ["--details", c.details])
+    .concat(c.idCol === null ? [] : ["--id-column", c.idCol])
+    .concat(["--robin", py, "--driver-exe", "C:\\temp\\msedgedriver.exe",
+    "--pad-out-dir", "C:\\temp", "--pad-browser", c.browser, "--auto-driver"])
     .concat(c.py || []),
     { stdio: "pipe" });
 
   const t = new Date();
   const out = PadConvert.buildRobin(
     PadConvert.loadRecording(fs.readFileSync(c.batch, "utf8")),
-    { detailsPath: c.details, idCol: c.idCol,
+    { detailsPath: c.details || "", idCol: c.idCol || "",
       driverExe: "C:\\temp\\msedgedriver.exe", outDir: "C:\\temp",
       proxy: "", autoDriver: true, browser: c.browser,
       today: { y: t.getFullYear(), m: t.getMonth() + 1, d: t.getDate() },
@@ -143,7 +156,7 @@ for (const c of cases) {
   const robins = [];
   const py = path.join(os.tmpdir(), "py.robin.txt");
   for (const b of ["recordings/edi2_practice_batch.json", "tests/fixtures/robin_parse_rich_batch.json",
-                   SITE_BATCH, "recordings/edi_practice_batch.json", CHECK_BATCH]) {
+                   SITE_BATCH, "recordings/edi_practice_batch.json", CHECK_BATCH, FLOW_BATCH]) {
     execFileSync(PY, ["pad_webdriver_ref.py", "--batch", b, "--details", "C:\\temp\\d.csv",
       "--id-column", (PadConvert.loadRecording(fs.readFileSync(b, "utf8")).options || {}).idCol || "ID", "--robin", py,
       "--pad-out-dir", "C:\\temp"], { stdio: "pipe" });

@@ -15,12 +15,21 @@ dom.window.addEventListener("error", (e) => errors.push(String(e.error || e.mess
 await new Promise((r) => setTimeout(r, 300));
 
 const d = dom.window.document;
+// 明細ファイル名はフローごとに入れる欄（空だと変換できない）。ここでは空のときだけ入れて試す。
+// 名前そのものを確かめる箇所は、自分で値を入れてから押す
+d.addEventListener("click", (e) => {
+  if (e.target && e.target.id === "run") {
+    const n = d.getElementById("detailsName");
+    if (n && !n.value && !d.getElementById("detailsFromResult").checked) { n.value = "edi2_batch.csv"; }
+  }
+}, true);
 for (const id of ["run", "copy", "save", "copyJs", "saveTemplate", "batchFile", "drop", "ver",
                   "idcol", "idcolHint", "detailsFile"]) {
   if (!d.getElementById(id)) { errors.push("要素が無い: #" + id); }
 }
 // 3. オプションの欄（ドライバーはフォルダで受け取る。exe のパス欄は残さない）
 for (const id of ["driverDir", "proxyAuto", "autodrv", "showDrvInfo", "maxItems", "winW", "winH",
+                  "detailsName", "downloadFolder", "idcol", "outdir",
                   "stepWait", "preferClickable", "blurAfterFill", "shotFromKeys", "autoColumns"]) {
   if (!d.getElementById(id)) { errors.push("要素が無い: #" + id); }
 }
@@ -316,6 +325,71 @@ for (const key of ["setup", "loop", "recover"]) {
     }
   }
   d.getElementById("resetAll").click();
+}
+
+// フローの設定: 明細ファイル名・ダウンロードのフォルダ名・ID 列はバッチ定義に入り、読み込むと切り替わる
+{
+  const load = async (obj, name) => {
+    const input = d.getElementById("batchFile");
+    Object.defineProperty(input, "files", { value: [new dom.window.File([JSON.stringify(obj)], name)], configurable: true });
+    input.dispatchEvent(new dom.window.Event("change"));
+    await new Promise((res) => setTimeout(res, 300));
+  };
+  d.getElementById("resetAll").click();
+  d.getElementById("outdir").value = "C:\\temp";
+  const base = dom.window.PadConvert.loadRecording(fs.readFileSync("recordings/edi2_practice_batch.json", "utf8"));
+  const a = JSON.parse(JSON.stringify(base));
+  a.options = Object.assign({}, a.options || {}, { idCol: "プロジェクト番号", detailsName: "明細_EDI_A.xlsx",
+                                                   downloadFolder: "download_EDI_A", winW: 1111, winH: 777 });
+  await load(a, "a.json");
+  const nm = d.getElementById("detailsName"), df = d.getElementById("downloadFolder");
+  if (nm.value !== "明細_EDI_A.xlsx" || df.value !== "download_EDI_A") {
+    errors.push("バッチ定義の明細ファイル名・ダウンロードのフォルダ名が欄に戻らない: " + nm.value + " / " + df.value);
+  }
+  if (d.getElementById("winW").value !== "1111") { errors.push("バッチ定義のウィンドウサイズが欄に戻らない"); }
+  d.getElementById("run").click();
+  await new Promise((res) => setTimeout(res, 100));
+  let out = d.getElementById("out").value;
+  if (out.indexOf("SET DetailsFile TO $'''%BaseDir%\\\\明細_EDI_A.xlsx'''") < 0) {
+    errors.push("明細ファイル名が BaseDir とつながって Robin に入らない");
+  }
+  if (out.indexOf("SET DlDir TO $'''C:\\\\temp\\\\download_EDI_A'''") < 0) {
+    errors.push("ダウンロードのフォルダ名が Robin に入らない");
+  }
+  // 読み込んだあとに欄を直して変換すると、埋め込みのバッチ定義にも入る
+  nm.value = "明細_EDI_A2.xlsx";
+  d.getElementById("run").click();
+  await new Promise((res) => setTimeout(res, 100));
+  out = d.getElementById("out").value;
+  let back = dom.window.PadConvert.extractBatchFromRobin(out).batch;
+  if (!back || back.options.detailsName !== "明細_EDI_A2.xlsx" || back.options.downloadFolder !== "download_EDI_A") {
+    errors.push("直した明細ファイル名が埋め込みに入らない: " + JSON.stringify(back && back.options));
+  }
+  // 名前の入っていない古いバッチ定義を読み込むと、前のフローの名前を引き継がず、注意を出す
+  const old = JSON.parse(JSON.stringify(base));
+  if (old.options) { delete old.options.detailsName; }
+  await load(old, "old.json");
+  if (nm.value === "明細_EDI_A2.xlsx") { errors.push("前に読み込んだフローの明細ファイル名が残っている"); }
+  if (d.getElementById("detailsNameWarn").hidden) { errors.push("明細ファイル名の無いバッチ定義に注意が出ない"); }
+  // BaseDir の外のフルパスは使わない。BaseDir の下のフルパスは名前に直す
+  nm.value = "D:\\work\\明細.xlsx";
+  d.getElementById("run").click();
+  await new Promise((res) => setTimeout(res, 100));
+  if (!d.getElementById("msg").querySelector(".err") || d.getElementById("detailsNameWarn").hidden) {
+    errors.push("BaseDir の外のフルパスで変換できてしまう");
+  }
+  nm.value = "C:\\temp\\明細\\明細_EDI_B.csv";
+  d.getElementById("run").click();
+  await new Promise((res) => setTimeout(res, 100));
+  if (nm.value !== "明細\\明細_EDI_B.csv") { errors.push("BaseDir の下のフルパスが名前に直らない: " + nm.value); }
+  // この PC のブラウザーには、明細・ダウンロードの名前を覚えない
+  let saved = {};
+  try { saved = JSON.parse(dom.window.localStorage.getItem("pad_converter_paths") || "{}"); } catch (e) { saved = {}; }
+  if ("details" in saved || "downloadDir" in saved || "detailsName" in saved) {
+    errors.push("明細・ダウンロードの名前を PC 側に覚えている: " + Object.keys(saved).join(","));
+  }
+  d.getElementById("resetAll").click();
+  if (nm.value !== "" || df.value !== "") { errors.push("最初からやり直しで明細ファイル名が空にならない"); }
 }
 
 // 背景色を固定したメッセージ欄に文字色が付いているか（ダークモードで白文字になる事故の防止）

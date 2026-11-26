@@ -928,12 +928,44 @@ def _clamp_max_items(n) -> int:
     return v if v >= 1 else 1
 
 
-def _window_size(setup: list, win_w=0, win_h=0) -> tuple:
-    """ウィンドウサイズ。指定 → 録画の setViewport → 既定 1250×900 の順。"""
-    vw = next((s for s in setup if s.get("type") == "setViewport"), {})
+def base_rel(v) -> str:
+    """BaseDir からの名前（明細_EDI_A.xlsx、明細\\明細_EDI_A.xlsx など）に整える。
 
-    def pick(given, rec, default):
-        for v in (given, rec):
+    バッチ定義には PC ごとのパスを入れない（配った先でフォルダが違うと動かない）。
+    C:\\… や \\\\サーバ\\… のような絶対パス、.. を含むものは "" を返す（使わない）。"""
+    t = str(v or "").strip().replace("/", "\\").strip("\\")
+    if not t or re.match(r"^[A-Za-z]:", t) or str(v).strip().startswith(("\\", "/")):
+        return ""
+    if ".." in t.split("\\"):
+        return ""
+    return t
+
+
+def flow_files(batch: dict, out_dir: str, details: str = "", download_dir: str = "",
+               id_col: str = "") -> tuple:
+    """明細・ダウンロード先・ID 列を決める。指定 → バッチ定義の options → 既定 の順。
+
+    バッチ定義の明細ファイル名（detailsName）とダウンロードのフォルダ名（downloadFolder）は
+    BaseDir からの名前なので、ここで BaseDir とつなぐ。サイトごとのフローを読み込んだとき、
+    明細の名前もそのフローのものになるように、PC ではなくバッチ定義に持たせる。"""
+    opts = (batch or {}).get("options") or {}
+    base = str(out_dir or "").rstrip("\\/")
+    if not details and base_rel(opts.get("detailsName")):
+        details = base + "\\" + base_rel(opts.get("detailsName"))
+    if not download_dir and base_rel(opts.get("downloadFolder")):
+        download_dir = base + "\\" + base_rel(opts.get("downloadFolder"))
+    if not id_col:
+        id_col = str(opts.get("idCol") or "").strip()
+    return details, download_dir, id_col
+
+
+def _window_size(setup: list, win_w=0, win_h=0, opts=None) -> tuple:
+    """ウィンドウサイズ。指定 → バッチ定義の options → 録画の setViewport → 既定 1250×900 の順。"""
+    vw = next((s for s in setup if s.get("type") == "setViewport"), {})
+    opts = opts or {}
+
+    def pick(given, saved, rec, default):
+        for v in (given, saved, rec):
             try:
                 n = int(str(v).strip())
             except (TypeError, ValueError):
@@ -941,8 +973,8 @@ def _window_size(setup: list, win_w=0, win_h=0) -> tuple:
             if n > 0:
                 return n
         return default
-    return (pick(win_w, vw.get("width"), DEFAULT_WIN_W),
-            pick(win_h, vw.get("height"), DEFAULT_WIN_H))
+    return (pick(win_w, opts.get("winW"), vw.get("width"), DEFAULT_WIN_W),
+            pick(win_h, opts.get("winH"), vw.get("height"), DEFAULT_WIN_H))
 
 
 def _robin_under_base(path_str: str, out_dir: str) -> str:
@@ -1883,6 +1915,17 @@ def parse_robin(text: str):
         opts["shotName"] = shot
     if _robin_unstr(sets.get("DetailsFile", "")).endswith("\\pad_result.csv"):
         opts["detailsFromResult"] = True
+    else:
+        # BaseDir の下の明細は名前だけを残す（バッチ定義に PC のパスを入れない）
+        _df = _robin_unstr(sets.get("DetailsFile", ""))
+        if _df.startswith("%BaseDir%\\") and base_rel(_df[len("%BaseDir%\\"):]):
+            opts["detailsName"] = base_rel(_df[len("%BaseDir%\\"):])
+    _bd = _robin_unstr(sets.get("BaseDir", "")).rstrip("\\")
+    _dd = _robin_unstr(sets.get("DlDir", "")).rstrip("\\")
+    if _bd and _dd.lower().startswith((_bd + "\\").lower()):
+        _rest = base_rel(_dd[len(_bd) + 1:])
+        if _rest and _rest.lower() != "download":
+            opts["downloadFolder"] = _rest
     if sets.get("StepWait", "").isdigit() and int(sets["StepWait"]) != STEP_WAIT:
         opts["stepWait"] = int(sets["StepWait"])
     js_head = next((ln for ln in lines if ln.startswith("SET JsAct TO $" + _Q3)), "")
@@ -2595,7 +2638,9 @@ def write_robin(batch: dict, details_path: str, id_col: str, path: str,
     js_one = js_act_oneline(site["preferClickable"], site["blurAfterFill"])
     drv_dir = _driver_dir(driver_dir, driver_exe)
     max_items = _clamp_max_items(max_items)
-    win_w, win_h = _window_size(batch.get("setup", []), win_w, win_h)
+    win_w, win_h = _window_size(batch.get("setup", []), win_w, win_h, (batch or {}).get("options"))
+    details_path, download_dir, id_col = flow_files(batch, out_dir, details_path, download_dir, id_col)
+    id_col = id_col or "ID"
     # ID 列を必ず Col1 にそろえる（明細 CSV の先頭列 = ID という運用に合わせる）
     cols: list = [id_col]
     L: list = []
@@ -3849,7 +3894,7 @@ def main() -> None:
                         "--driver-dir があればそちらを優先")
     p.add_argument("--pad-out-dir", default=r"C:\PAD\output",
                    help="Robin 生成時に埋め込む出力フォルダ")
-    p.add_argument("--pad-browser", choices=["edge", "chrome"], default="edge",
+    p.add_argument("--pad-browser", choices=["edge", "chrome"], default=None,
                    help="生成する Robin が使うブラウザー（既定 edge）。"
                         "生成後も Robin 冒頭の Browser を書き換えれば切り替えられる")
     p.add_argument("--shot-name", default="@ID@__@KEY@__@STAMP@",
@@ -3921,10 +3966,19 @@ def main() -> None:
             for n in notes:
                 print(f"  ・{n}")
         return
-    if not args.batch or not args.details:
-        p.error("--batch と --details が必要です（Robin から取り出すときは --from-robin）")
+    if not args.batch:
+        p.error("--batch が必要です（Robin から取り出すときは --from-robin）")
 
     batch = set_target_url(load_recording(args.batch), args.target_url)
+    # 明細・ダウンロード先・ID 列・ブラウザーは、指定が無ければバッチ定義の options から
+    # （明細ファイル名・ダウンロードのフォルダ名は BaseDir からの名前）
+    args.details, args.download_dir, _idc = flow_files(
+        batch, args.pad_out_dir, args.details or "", args.download_dir or "", args.id_column or "")
+    args.id_column = _idc or None
+    _ob = (batch.get("options") or {}).get("browser")
+    args.pad_browser = args.pad_browser or (_ob if _ob in ("edge", "chrome") else "edge")
+    if not args.details:
+        p.error("--details が必要です（バッチ定義に明細ファイル名 detailsName が無いため）")
     _warn_session_url(get_target_url(batch))
     common = load_recording(args.values) if args.values else {}
     # Robin 生成のみの場合、--details は「会社 PC 側のパス」でよく、手元に実体が無くてよい
