@@ -1692,7 +1692,8 @@ def test_flow_files_from_batch_options(tmp_path):
     bp.write_text(json.dumps(b, ensure_ascii=False), encoding="utf-8")
     out = tmp_path / "o.robin.txt"
     subprocess.run([sys.executable, os.path.join(_HERE, "pad_webdriver_ref.py"), "--batch", str(bp),
-                    "--robin", str(out), "--pad-out-dir", "C:\\PAD"], check=True, capture_output=True)
+                    "--robin", str(out), "--pad-out-dir", "C:\\PAD"], check=True, capture_output=True,
+                   env=dict(os.environ, PYTHONIOENCODING="utf-8"))
     txt = out.read_text(encoding="utf-8")
     assert "SET DetailsFile TO $'''%BaseDir%\\\\明細_EDI_A.xlsx'''" in txt
     assert "SET DlDir TO $'''C:\\\\PAD\\\\download_EDI_A'''" in txt
@@ -1703,6 +1704,8 @@ def test_flow_files_from_batch_options(tmp_path):
     # 明細ファイル名も --details も無ければ止める
     del b["options"]["detailsName"]
     bp.write_text(json.dumps(b, ensure_ascii=False), encoding="utf-8")
+    # Windows では、そのままだと標準エラーを cp932 で読もうとして読めない。UTF-8 にそろえる
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
     r = subprocess.run([sys.executable, os.path.join(_HERE, "pad_webdriver_ref.py"), "--batch", str(bp),
-                        "--robin", str(out)], capture_output=True, text=True)
-    assert r.returncode != 0 and "detailsName" in r.stderr
+                        "--robin", str(out)], capture_output=True, env=env)
+    assert r.returncode != 0 and "detailsName" in r.stderr.decode("utf-8", errors="replace")
