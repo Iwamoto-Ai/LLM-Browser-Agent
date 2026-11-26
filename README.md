@@ -607,7 +607,7 @@ Python も実行ファイルも要らない。ファイルを 1 つ持ってい�
 
 1. `tools/pad_converter.html` をダウンロードしてブラウザーで開く
 2. 録画 JSON をドラッグ＆ドロップ
-3. **実行環境（PAD を動かす PC）のパス**を入力（明細ファイル / ドライバー / BaseDir）
+3. **PAD 実行 PC の設定**（BaseDir / ドライバー）と、**フローの設定**の明細ファイル名（例 `明細_EDI_A.xlsx`）を入力
 4. 「変換する」→「Robin をコピー」→ PAD の**空の新規フロー**に `Ctrl+V`
 
 <div align="center">
