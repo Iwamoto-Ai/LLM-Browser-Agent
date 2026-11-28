@@ -219,6 +219,11 @@ function viewIspHome() {
   bindHome();
   document.getElementById('POS_ORDERS').addEventListener('click', viewHattyuTab);
   document.getElementById('POS_SHIPMENTS').addEventListener('click', viewNounyuTab);
+  // 右側の「注文」の「発注」からも発注一覧へ入れる（実サイトと同じく、上のタブからでも右側からでも入れる）
+  var sideLinks = document.querySelectorAll('.side a');
+  for (var i = 0; i < sideLinks.length; i++) {
+    if (sideLinks[i].textContent === '発注') { sideLinks[i].addEventListener('click', viewPoList); }
+  }
 }
 
 function viewHattyuTab() {
