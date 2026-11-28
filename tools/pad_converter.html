@@ -152,6 +152,11 @@
   <div class="hint">※ 複数の PC に配布する場合は、一番小さい画面に収まる値にそろえる。
      エビデンスはページ全体を撮るので、縦を小さめにしても写る範囲は切れない。</div>
   <div class="subhead">明細</div>
+  <div><label for="detailsFile">明細ファイルを選ぶ（任意）</label>
+    <input type="file" id="detailsFile" accept=".csv,.txt,.xlsx,.xlsm"></div>
+  <div class="hint">選ぶと、下の明細ファイル名と ID 列が入り、列名を確かめられます。変換器は PAD を動かす PC の
+     明細を読めないので、<strong>変換するこの PC にある</strong>同じ明細を選びます。</div>
+  <div class="hint" id="detailsInfo"></div>
   <div><label for="detailsName">明細ファイル名</label>
     <input type="text" id="detailsName" value="" placeholder="例: 明細_EDI_A.xlsx">
     <span class="hint">BaseDir に置く明細の名前。.csv か .xlsx。BaseDir の下のフォルダなら 明細\明細_EDI_A.xlsx</span>
@@ -159,12 +164,7 @@
   <div class="hint">.xlsx は「明細」シートの 1 行目を列名として読み、最後に結果を見る用の Excel
      （pad_result_日時.xlsx）も作ります。明細の入れ物は、変換したあと「明細テンプレート（Excel）を保存」で作れます。</div>
   <div><label for="idcol">ID 列 (--id-column)</label>
-    <input type="text" id="idcol" value=""> <span class="hint" id="idcolHint">下の「明細ファイル（列名の確認用）」を選べば先頭列が自動で入ります</span></div>
-  <div><label for="detailsFile">明細ファイル（列名の確認用・任意）</label>
-    <input type="file" id="detailsFile" accept=".csv,.txt,.xlsx,.xlsm"></div>
-  <div class="hint">変換器は PAD を動かす PC の明細を読めません。列名を確かめたい場合は、
-     <strong>変換するこの PC にある</strong>同じ明細をここで選びます。</div>
-  <div class="hint" id="detailsInfo"></div>
+    <input type="text" id="idcol" value=""> <span class="hint" id="idcolHint">上の「明細ファイルを選ぶ」で選べば先頭列が自動で入ります</span></div>
   <div><label for="detailsFromResult">明細の読み込み元</label>
     <label style="font-weight:normal">
       <input type="checkbox" id="detailsFromResult">
@@ -201,7 +201,7 @@
   <div><label for="autoColumns">録画の値</label>
     <label class="inline"><input type="checkbox" id="autoColumns" checked>
       明細の 1 行目と同じ値を {{列名}} に置き換える</label>
-    <span class="hint">上の「明細ファイル（列名の確認用）」を選んだときに働く</span></div>
+    <span class="hint">「明細ファイルを選ぶ」で選んだときに働く</span></div>
 </fieldset>
 <fieldset>
   <legend>運用設定（保存しない）</legend>
@@ -5097,7 +5097,14 @@ root.PadConvert = {
     function took(headers, row, info) {
       detailHeaders = headers;
       detailRow = row;
-      $("detailsInfo").textContent = info + "列: " + detailHeaders.join(" / ");
+      // 選んだファイルの名前を明細ファイル名に入れる。BaseDir の下のフォルダ（明細\ など）は残す
+      var cur = $("detailsName").value.trim();
+      var folder = cur.lastIndexOf("\\") >= 0 ? cur.slice(0, cur.lastIndexOf("\\") + 1) : "";
+      if (/^[A-Za-z]:|^\\/.test(folder)) { folder = ""; }
+      $("detailsName").value = folder + f.name;
+      $("detailsNameWarn").hidden = true;
+      var named = cur && cur !== folder + f.name ? "（明細ファイル名を「" + cur + "」から変えました）" : "";
+      $("detailsInfo").textContent = info + "列: " + detailHeaders.join(" / ") + named;
       // 録画を先に読み込んでいたら、ここで列の割り当てをやり直す
       if (lastRec && recSteps) {
         var note = applyRecordingAids();
@@ -5107,7 +5114,8 @@ root.PadConvert = {
       }
       if (detailHeaders.length) {
         $("idcolHint").textContent = "空なら先頭列（" + detailHeaders[0] + "）を使います";
-        if (!$("idcol").value) { $("idcol").value = detailHeaders[0]; }
+        // 空か、選んだ明細に無い列名（前のフローのものなど）なら先頭列にする
+        if (detailHeaders.indexOf($("idcol").value.trim()) < 0) { $("idcol").value = detailHeaders[0]; }
       }
     }
     if (PadConvert.detailsIsXlsx(f.name)) {
@@ -5180,7 +5188,7 @@ root.PadConvert = {
     if (!idCol) {
       show("err", "ID 列名を入れてください。<br>" +
         "ブラウザ版は実行環境にある CSV を読めないため、空欄のままにはできません。" +
-        "「明細ファイル（列名の確認用・任意）」で同じ CSV を選ぶと、先頭列が自動で入ります。");
+        "「明細ファイルを選ぶ」で同じ明細を選ぶと、明細ファイル名と先頭列が自動で入ります。");
       return;
     }
     if (detailHeaders && detailHeaders.indexOf(idCol) < 0) {
@@ -5277,7 +5285,7 @@ root.PadConvert = {
     ["copy", "save", "copyJs", "copyBatch", "saveBatch"].forEach(function (id) {
       $(id).disabled = true;
     });
-    $("idcolHint").textContent = "下の「明細ファイル（列名の確認用）」を選べば先頭列が自動で入ります";
+    $("idcolHint").textContent = "上の「明細ファイルを選ぶ」で選べば先頭列が自動で入ります";
     // フローの設定（明細・ダウンロードの名前）も業務ごとのもの
     $("detailsName").value = ""; $("downloadFolder").value = "";
     $("detailsNameWarn").hidden = true; $("downloadFolderWarn").hidden = true;

@@ -392,6 +392,28 @@ for (const key of ["setup", "loop", "recover"]) {
   if (nm.value !== "" || df.value !== "") { errors.push("最初からやり直しで明細ファイル名が空にならない"); }
 }
 
+// 明細ファイルを選ぶと、明細ファイル名と ID 列が入る（BaseDir の下のフォルダは残す）
+{
+  const pick = async (text, name) => {
+    const input = d.getElementById("detailsFile");
+    Object.defineProperty(input, "files", { value: [new dom.window.File([text], name)], configurable: true });
+    input.dispatchEvent(new dom.window.Event("change"));
+    await new Promise((res) => setTimeout(res, 200));
+  };
+  d.getElementById("resetAll").click();
+  const nm = d.getElementById("detailsName"), idc = d.getElementById("idcol");
+  idc.value = "要求ID";                                  // 前のフローの ID 列が残っている
+  await pick("プロジェクト番号,発注番号,skip\nPM1,1001,\n", "明細_EDI_A.csv");
+  if (nm.value !== "明細_EDI_A.csv") { errors.push("選んだ明細の名前が明細ファイル名に入らない: " + nm.value); }
+  if (idc.value !== "プロジェクト番号") { errors.push("選んだ明細に無い ID 列が先頭列に変わらない: " + idc.value); }
+  idc.value = "発注番号";                                 // 明細にある列なら、そのまま
+  nm.value = "明細\\古い.csv";
+  await pick("プロジェクト番号,発注番号,skip\nPM1,1001,\n", "明細_EDI_B.csv");
+  if (nm.value !== "明細\\明細_EDI_B.csv") { errors.push("明細ファイル名の BaseDir の下のフォルダが残らない: " + nm.value); }
+  if (idc.value !== "発注番号") { errors.push("明細にある ID 列まで先頭列に変わった: " + idc.value); }
+  d.getElementById("resetAll").click();
+}
+
 // 背景色を固定したメッセージ欄に文字色が付いているか（ダークモードで白文字になる事故の防止）
 const css = [...d.querySelectorAll("style")].map((s) => s.textContent).join("\n");
 for (const cls of [".warn", ".err", ".ok"]) {
